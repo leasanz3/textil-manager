@@ -44,7 +44,7 @@ export function Telas({ onMenuClick }) {
     setEditing(null)
     setForm({
       tipo: '', codigo: '', color: '', proveedor_id: '', compra_id: '',
-      unidad: 'm', metros: '', disponible: '', precio: '', moneda: 'UYU',
+      unidad: 'm', metros: '', disponible: '', unidad_stock: 'm', precio: '', moneda: 'UYU',
       tc: '', fecha: new Date().toISOString().split('T')[0], notas: ''
     })
     setWarnings([])
@@ -58,6 +58,7 @@ export function Telas({ onMenuClick }) {
       proveedor_id: t.proveedor_id || '', compra_id: t.compra_id || '',
       unidad: t.unidad || 'm', metros: t.metros || '',
       disponible: t.usados !== undefined ? (t.metros - t.usados) : t.metros || '',
+      unidad_stock: t.unidad_stock || t.unidad || 'm',
       precio: t.precio || '', moneda: t.moneda || 'UYU',
       tc: t.tc || '', fecha: t.fecha || '', notas: t.notas || ''
     })
@@ -70,7 +71,7 @@ export function Telas({ onMenuClick }) {
     e.stopPropagation()
     setEditingStock(t)
     const disp = Math.max(0, (t.metros || 0) - (t.usados || 0))
-    setStockForm({ disponible: disp, notas: '' })
+    setStockForm({ disponible: disp, unidad_stock: t.unidad_stock || t.unidad || 'm', notas: '' })
     setModalStock(true)
   }
 
@@ -79,7 +80,7 @@ export function Telas({ onMenuClick }) {
     setSaving(true)
     const disp = parseFloat(stockForm.disponible) || 0
     const usados = Math.max(0, (editingStock.metros || 0) - disp)
-    await supabase.from('telas').update({ usados }).eq('id', editingStock.id)
+    await supabase.from('telas').update({ usados, unidad_stock: stockForm.unidad_stock }).eq('id', editingStock.id)
     setSaving(false)
     setModalStock(false)
     fetchAll()
@@ -128,6 +129,7 @@ export function Telas({ onMenuClick }) {
       moneda: form.moneda,
       tc: parseFloat(form.tc) || null,
       fecha: form.fecha || null,
+      unidad_stock: form.unidad_stock || form.unidad,
       notas: form.notas || null
     }
 
@@ -262,7 +264,7 @@ export function Telas({ onMenuClick }) {
                         <td>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                             <span style={{ fontWeight: 700, color: low ? 'var(--danger)' : 'var(--success)' }}>
-                              {disp.toFixed(2)} {u}{low && ' ⚠'}
+                              {disp.toFixed(2)} {t.unidad_stock || u}{low && ' ⚠'}
                             </span>
                             <button
                               className="btn btn-secondary btn-sm"
@@ -397,17 +399,31 @@ export function Telas({ onMenuClick }) {
               <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: 1, margin: '12px 0 8px' }}>
                 📊 Stock disponible actual
               </div>
-              <div className="form-group">
-                <label>¿Cuánto tenés disponible ahora? ({form.unidad || 'm'})</label>
-                <input
-                  type="number"
-                  value={form.disponible}
-                  onChange={e => setF('disponible', e.target.value)}
-                  placeholder={`Si compraste ${form.metros || '0'} y no usaste nada, ponés lo mismo`}
-                />
-                <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4 }}>
-                  Dejalo vacío si todavía no cortaste nada — el stock queda igual a lo comprado
+              <div className="form-grid">
+                <div className="form-group">
+                  <label>¿Cuánto tenés disponible ahora?</label>
+                  <input
+                    type="number"
+                    value={form.disponible}
+                    onChange={e => setF('disponible', e.target.value)}
+                    placeholder={form.metros ? `Compraste ${form.metros} ${form.unidad}` : '0.0'}
+                  />
                 </div>
+                <div className="form-group">
+                  <label>Unidad del stock disponible</label>
+                  <select value={form.unidad_stock} onChange={e => setF('unidad_stock', e.target.value)}>
+                    <option value="m">Metros (m)</option>
+                    <option value="kg">Kilogramos (kg)</option>
+                  </select>
+                  {form.unidad !== form.unidad_stock && (
+                    <div style={{ fontSize: 11, color: 'var(--warning)', marginTop: 4 }}>
+                      ⚠ Compraste en {form.unidad}, controlás el stock en {form.unidad_stock}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 8 }}>
+                Dejalo vacío si todavía no cortaste nada — el stock queda igual a lo comprado
               </div>
 
               <div className="form-group">
@@ -440,14 +456,23 @@ export function Telas({ onMenuClick }) {
                   Comprado: {editingStock.metros} {editingStock.unidad || 'm'}
                 </div>
               </div>
-              <div className="form-group">
-                <label>¿Cuánto te queda disponible ahora? ({editingStock.unidad || 'm'})</label>
-                <input
-                  type="number"
-                  value={stockForm.disponible}
-                  onChange={e => setStockForm(f => ({ ...f, disponible: e.target.value }))}
-                  autoFocus
-                />
+              <div className="form-grid">
+                <div className="form-group">
+                  <label>¿Cuánto te queda disponible?</label>
+                  <input
+                    type="number"
+                    value={stockForm.disponible}
+                    onChange={e => setStockForm(f => ({ ...f, disponible: e.target.value }))}
+                    autoFocus
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Unidad</label>
+                  <select value={stockForm.unidad_stock} onChange={e => setStockForm(f => ({ ...f, unidad_stock: e.target.value }))}>
+                    <option value="m">Metros (m)</option>
+                    <option value="kg">Kilogramos (kg)</option>
+                  </select>
+                </div>
               </div>
             </div>
             <div className="modal-footer">
