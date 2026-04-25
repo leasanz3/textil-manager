@@ -8,6 +8,7 @@ const fmtFecha = (f) => { if (!f) return '—'; const [y, m, d] = f.split('-'); 
 export default function Compras({ onMenuClick }) {
   const [compras, setCompras] = useState([])
   const [proveedores, setProveedores] = useState([])
+  const [tcHistorial, setTcHistorial] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filterProv, setFilterProv] = useState('')
@@ -15,6 +16,7 @@ export default function Compras({ onMenuClick }) {
   const [editing, setEditing] = useState(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [showTcHistorial, setShowTcHistorial] = useState(false)
 
   const [form, setForm] = useState({
     proveedor_id: '', factura: '', fecha: new Date().toISOString().split('T')[0],
@@ -26,16 +28,24 @@ export default function Compras({ onMenuClick }) {
 
   async function fetchAll() {
     setLoading(true)
-    const [{ data: c }, { data: p }] = await Promise.all([
+    const [{ data: c }, { data: p }, { data: tc }] = await Promise.all([
       supabase.from('compras').select('*').order('fecha', { ascending: false }),
-      supabase.from('proveedores').select('id, nombre').order('nombre')
+      supabase.from('proveedores').select('id, nombre').order('nombre'),
+      supabase.from('tipos_cambio').select('*').order('fecha', { ascending: false }).limit(10)
     ])
     setCompras(c || [])
     setProveedores(p || [])
+    setTcHistorial(tc || [])
     setLoading(false)
   }
 
-  // Calculos
+  async function guardarTC() {
+    if (!form.dolar_fiscal) return
+    await supabase.from('tipos_cambio').insert({ valor: parseFloat(form.dolar_fiscal), fecha: form.fecha })
+    const { data } = await supabase.from('tipos_cambio').select('*').order('fecha', { ascending: false }).limit(10)
+    setTcHistorial(data || [])
+  }
+
   const calcular = (f) => {
     let totalUYU = 0, totalFinal = 0
     if (f.moneda === 'UYU') {
@@ -63,6 +73,7 @@ export default function Compras({ onMenuClick }) {
       dolar_costeo: '', acredita_iva: true, notas: ''
     })
     setError('')
+    setShowTcHistorial(false)
     setModal(true)
   }
 
@@ -81,6 +92,7 @@ export default function Compras({ onMenuClick }) {
       notas: c.notas || ''
     })
     setError('')
+    setShowTcHistorial(false)
     setModal(true)
   }
 
@@ -151,24 +163,10 @@ export default function Compras({ onMenuClick }) {
 
       <div className="content">
         <div className="stat-grid">
-          <div className="stat-card">
-            <div className="stat-value">{filtered.length}</div>
-            <div className="stat-label">Facturas</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-value" style={{ color: 'var(--accent)', fontSize: 18 }}>{fmtUYU(totalCompras)}</div>
-            <div className="stat-label">Total compras</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-value" style={{ color: 'var(--success)', fontSize: 18 }}>{fmtUYU(totalIVA)}</div>
-            <div className="stat-label">IVA a favor (CF)</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-value" style={{ color: 'var(--warning)' }}>
-              {filtered.filter(x => !x.tiene_items).length}
-            </div>
-            <div className="stat-label">⚠ Sin items</div>
-          </div>
+          <div className="stat-card"><div className="stat-value">{filtered.length}</div><div className="stat-label">Facturas</div></div>
+          <div className="stat-card"><div className="stat-value" style={{ color: 'var(--accent)', fontSize: 18 }}>{fmtUYU(totalCompras)}</div><div className="stat-label">Total compras</div></div>
+          <div className="stat-card"><div className="stat-value" style={{ color: 'var(--success)', fontSize: 18 }}>{fmtUYU(totalIVA)}</div><div className="stat-label">IVA a favor (CF)</div></div>
+          <div className="stat-card"><div className="stat-value" style={{ color: 'var(--warning)' }}>{filtered.filter(x => !x.tiene_items).length}</div><div className="stat-label">⚠ Sin items</div></div>
         </div>
 
         <div className="table-wrap">
@@ -195,17 +193,9 @@ export default function Compras({ onMenuClick }) {
               <table>
                 <thead>
                   <tr>
-                    <th>#</th>
-                    <th>Proveedor</th>
-                    <th>Fecha</th>
-                    <th>Factura</th>
-                    <th>Total USD</th>
-                    <th>$ Fiscal</th>
-                    <th>Total $UY</th>
-                    <th>Total Final</th>
-                    <th>IVA 22%</th>
-                    <th>IVA</th>
-                    <th></th>
+                    <th>#</th><th>Proveedor</th><th>Fecha</th><th>Factura</th>
+                    <th>Total USD</th><th>$ Fiscal</th><th>Total $UY</th>
+                    <th>Total Final</th><th>IVA 22%</th><th>IVA</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -220,11 +210,7 @@ export default function Compras({ onMenuClick }) {
                       <td style={{ fontSize: 12 }}>{x.total_uyu ? fmtUYU(x.total_uyu) : '—'}</td>
                       <td><strong>{fmtUYU(x.total_final || x.total_uyu)}</strong></td>
                       <td style={{ color: 'var(--danger)' }}>{fmtUYU(x.iva)}</td>
-                      <td>
-                        {x.acredita_iva !== false
-                          ? <span className="badge badge-green">✓ CF</span>
-                          : <span className="badge badge-red">sin IVA</span>}
-                      </td>
+                      <td>{x.acredita_iva !== false ? <span className="badge badge-green">✓ CF</span> : <span className="badge badge-red">sin IVA</span>}</td>
                       <td onClick={e => { e.stopPropagation(); handleDelete(x.id) }}>
                         <button className="btn btn-danger btn-sm">🗑</button>
                       </td>
@@ -283,16 +269,39 @@ export default function Compras({ onMenuClick }) {
                   </div>
                   <div className="form-group">
                     <label>Dólar fiscal (cotización del día)</label>
-                    <input type="number" value={form.dolar_fiscal} onChange={e => setF('dolar_fiscal', e.target.value)} placeholder="ej: 39.90" />
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <input
+                        type="number"
+                        value={form.dolar_fiscal}
+                        onChange={e => setF('dolar_fiscal', e.target.value)}
+                        placeholder="ej: 42.50"
+                        style={{ flex: 1 }}
+                      />
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={guardarTC} title="Guardar TC en historial">💾</button>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowTcHistorial(!showTcHistorial)} title="Ver historial TC">📋</button>
+                    </div>
+                    {showTcHistorial && tcHistorial.length > 0 && (
+                      <div style={{ marginTop: 6, border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
+                        {tcHistorial.map(tc => (
+                          <div key={tc.id}
+                            onClick={() => { setF('dolar_fiscal', tc.valor); setShowTcHistorial(false) }}
+                            style={{ padding: '6px 10px', cursor: 'pointer', fontSize: 12, borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between' }}
+                            onMouseEnter={e => e.currentTarget.style.background = 'var(--bg3)'}
+                            onMouseLeave={e => e.currentTarget.style.background = ''}>
+                            <strong>${tc.valor}</strong>
+                            <span style={{ color: 'var(--text2)' }}>{fmtFecha(tc.fecha)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className="form-group">
                     <label>Dólar costeo (opcional)</label>
-                    <input type="number" value={form.dolar_costeo} onChange={e => setF('dolar_costeo', e.target.value)} placeholder="ej: 42.00" />
+                    <input type="number" value={form.dolar_costeo} onChange={e => setF('dolar_costeo', e.target.value)} placeholder="ej: 44.00" />
                   </div>
                 </div>
               )}
 
-              {/* Resumen calculado */}
               {(calc.totalFinal > 0 || calc.totalUYU > 0) && (
                 <div style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12, marginBottom: 12 }}>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, textAlign: 'center' }}>
@@ -312,19 +321,11 @@ export default function Compras({ onMenuClick }) {
               )}
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderTop: '1px solid var(--border)', marginBottom: 12 }}>
-                <input
-                  type="checkbox"
-                  id="acredita"
-                  checked={form.acredita_iva}
-                  onChange={e => setF('acredita_iva', e.target.checked)}
-                  style={{ width: 16, height: 16 }}
-                />
+                <input type="checkbox" id="acredita" checked={form.acredita_iva} onChange={e => setF('acredita_iva', e.target.checked)} style={{ width: 16, height: 16 }} />
                 <label htmlFor="acredita" style={{ fontSize: 13, fontWeight: 600, textTransform: 'none', letterSpacing: 0, cursor: 'pointer', color: 'var(--text)' }}>
                   Esta factura acredita IVA a favor (CF)
                 </label>
-                <span style={{ fontSize: 11, color: 'var(--text2)' }}>
-                  Destildá para Mercado Libre, tickets, importaciones
-                </span>
+                <span style={{ fontSize: 11, color: 'var(--text2)' }}>Destildá para Mercado Libre, tickets, importaciones</span>
               </div>
 
               <div className="form-group">
