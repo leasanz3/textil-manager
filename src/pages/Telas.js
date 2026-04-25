@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 
 const fmtFecha = (f) => { if (!f) return '—'; const [y, m, d] = f.split('-'); return `${d}/${m}/${y}` }
-const fmtNum = (n) => n ? Number(n).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
+const fmtNum = (n) => n != null ? Number(n).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
 const fmtUYU = (n) => n ? '$' + fmtNum(n) : '—'
 
 export function Telas({ onMenuClick }) {
@@ -17,13 +17,15 @@ export function Telas({ onMenuClick }) {
   const [editingStock, setEditingStock] = useState(null)
   const [saving, setSaving] = useState(false)
   const [warnings, setWarnings] = useState([])
-  const [stockForm, setStockForm] = useState({ disponible: '', notas: '' })
+  const [stockForm, setStockForm] = useState({ stock_disponible: '', unidad_stock: 'm' })
 
-  const [form, setForm] = useState({
+  const emptyForm = {
     tipo: '', codigo: '', color: '', proveedor_id: '', compra_id: '',
-    unidad: 'm', metros: '', disponible: '', precio: '', moneda: 'UYU',
-    tc: '', fecha: '', notas: ''
-  })
+    unidad: 'm', metros: '', stock_disponible: '', unidad_stock: 'm',
+    precio: '', moneda: 'UYU', tc: '',
+    fecha: new Date().toISOString().split('T')[0], notas: ''
+  }
+  const [form, setForm] = useState(emptyForm)
 
   useEffect(() => { fetchAll() }, [])
 
@@ -42,11 +44,7 @@ export function Telas({ onMenuClick }) {
 
   function openNew() {
     setEditing(null)
-    setForm({
-      tipo: '', codigo: '', color: '', proveedor_id: '', compra_id: '',
-      unidad: 'm', metros: '', disponible: '', unidad_stock: 'm', precio: '', moneda: 'UYU',
-      tc: '', fecha: new Date().toISOString().split('T')[0], notas: ''
-    })
+    setForm({ ...emptyForm, fecha: new Date().toISOString().split('T')[0] })
     setWarnings([])
     setModal(true)
   }
@@ -54,33 +52,42 @@ export function Telas({ onMenuClick }) {
   function openEdit(t) {
     setEditing(t.id)
     setForm({
-      tipo: t.tipo || '', codigo: t.codigo || '', color: t.color || '',
-      proveedor_id: t.proveedor_id || '', compra_id: t.compra_id || '',
-      unidad: t.unidad || 'm', metros: t.metros || '',
-      disponible: t.usados !== undefined ? (t.metros - t.usados) : t.metros || '',
+      tipo: t.tipo || '',
+      codigo: t.codigo || '',
+      color: t.color || '',
+      proveedor_id: t.proveedor_id || '',
+      compra_id: t.compra_id || '',
+      unidad: t.unidad || 'm',
+      metros: t.metros || '',
+      stock_disponible: t.stock_disponible != null ? t.stock_disponible : '',
       unidad_stock: t.unidad_stock || t.unidad || 'm',
-      precio: t.precio || '', moneda: t.moneda || 'UYU',
-      tc: t.tc || '', fecha: t.fecha || '', notas: t.notas || ''
+      precio: t.precio || '',
+      moneda: t.moneda || 'UYU',
+      tc: t.tc || '',
+      fecha: t.fecha || '',
+      notas: t.notas || ''
     })
     setWarnings([])
     setModal(true)
   }
 
-  // Modal rápido solo para actualizar stock
   function openStock(t, e) {
     e.stopPropagation()
     setEditingStock(t)
-    const disp = Math.max(0, (t.metros || 0) - (t.usados || 0))
-    setStockForm({ disponible: disp, unidad_stock: t.unidad_stock || t.unidad || 'm', notas: '' })
+    setStockForm({
+      stock_disponible: t.stock_disponible != null ? t.stock_disponible : t.metros || '',
+      unidad_stock: t.unidad_stock || t.unidad || 'm'
+    })
     setModalStock(true)
   }
 
   async function handleSaveStock() {
     if (!editingStock) return
     setSaving(true)
-    const disp = parseFloat(stockForm.disponible) || 0
-    const usados = Math.max(0, (editingStock.metros || 0) - disp)
-    await supabase.from('telas').update({ usados, unidad_stock: stockForm.unidad_stock }).eq('id', editingStock.id)
+    await supabase.from('telas').update({
+      stock_disponible: parseFloat(stockForm.stock_disponible) ?? null,
+      unidad_stock: stockForm.unidad_stock
+    }).eq('id', editingStock.id)
     setSaving(false)
     setModalStock(false)
     fetchAll()
@@ -111,9 +118,8 @@ export function Telas({ onMenuClick }) {
     setSaving(true)
     const prov = proveedores.find(p => p.id === parseInt(form.proveedor_id))
     const metros = parseFloat(form.metros) || 0
-    // disponible: si lo ingresó usarlo, sino igual a lo comprado (nada usado aún)
-    const disponible = form.disponible !== '' ? parseFloat(form.disponible) : metros
-    const usados = Math.max(0, metros - disponible)
+    // stock_disponible: si no lo pusieron, queda null (sin dato)
+    const stock_disponible = form.stock_disponible !== '' ? parseFloat(form.stock_disponible) : null
 
     const datos = {
       tipo: form.tipo || null,
@@ -124,12 +130,13 @@ export function Telas({ onMenuClick }) {
       compra_id: parseInt(form.compra_id) || null,
       unidad: form.unidad,
       metros,
-      usados,
+      usados: 0,
+      stock_disponible,
+      unidad_stock: form.unidad_stock || form.unidad,
       precio: parseFloat(form.precio) || 0,
       moneda: form.moneda,
       tc: parseFloat(form.tc) || null,
       fecha: form.fecha || null,
-      unidad_stock: form.unidad_stock || form.unidad,
       notas: form.notas || null
     }
 
@@ -164,8 +171,8 @@ export function Telas({ onMenuClick }) {
   )
 
   const stockBajo = telas.filter(t => {
-    const d = Math.max(0, (t.metros || 0) - (t.usados || 0))
-    return t.metros > 0 && (d / t.metros) < 0.2
+    const disp = t.stock_disponible != null ? t.stock_disponible : t.metros
+    return disp != null && t.metros > 0 && (disp / t.metros) < 0.2
   }).length
 
   return (
@@ -228,7 +235,7 @@ export function Telas({ onMenuClick }) {
                     <th>Factura</th>
                     <th>Fecha</th>
                     <th>Comprado</th>
-                    <th>Disponible</th>
+                    <th>Stock disponible</th>
                     <th>Precio unit.</th>
                     <th>Total compra</th>
                     <th></th>
@@ -236,16 +243,17 @@ export function Telas({ onMenuClick }) {
                 </thead>
                 <tbody>
                   {filtered.map(t => {
-                    const u = t.unidad || 'm'
-                    const disp = Math.max(0, (t.metros || 0) - (t.usados || 0))
-                    const pct = t.metros ? Math.min(100, Math.round(disp / t.metros * 100)) : 0
-                    const low = pct < 20 && t.metros > 0
-                    // Precio total en pesos
-                    const precioARS = t.moneda === 'USD' && t.tc ? t.precio * t.tc : t.precio
-                    const totalCompra = (t.metros || 0) * (precioARS || 0)
+                    const uCompra = t.unidad || 'm'
+                    const uStock = t.unidad_stock || uCompra
+                    const disp = t.stock_disponible != null ? t.stock_disponible : t.metros
+                    const low = t.metros > 0 && disp != null && (disp / t.metros) < 0.2
+                    const precioBase = t.moneda === 'USD' && t.tc ? t.precio * t.tc : t.precio
+                    const totalCompra = (t.metros || 0) * (precioBase || 0)
                     const facturaStr = t.compras
                       ? (t.compras.factura ? `#${t.compras.factura}` : fmtFecha(t.compras.fecha))
                       : '—'
+                    const unidadesDif = uCompra !== uStock
+
                     return (
                       <tr key={t.id} onClick={() => openEdit(t)}>
                         <td>
@@ -260,20 +268,26 @@ export function Telas({ onMenuClick }) {
                             : <span style={{ color: 'var(--text2)' }}>—</span>}
                         </td>
                         <td>{fmtFecha(t.fecha)}</td>
-                        <td>{t.metros} {u}</td>
+                        <td style={{ fontSize: 12 }}>
+                          {t.metros} {uCompra}
+                        </td>
                         <td>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <span style={{ fontWeight: 700, color: low ? 'var(--danger)' : 'var(--success)' }}>
-                              {disp.toFixed(2)} {t.unidad_stock || u}{low && ' ⚠'}
+                            <span style={{ fontWeight: 700, color: disp == null ? 'var(--text2)' : low ? 'var(--danger)' : 'var(--success)' }}>
+                              {disp != null ? `${fmtNum(disp)} ${uStock}` : '—'}
+                              {low && ' ⚠'}
+                              {unidadesDif && disp != null && (
+                                <span style={{ fontSize: 9, color: 'var(--warning)', marginLeft: 3 }}>
+                                  (comprado en {uCompra})
+                                </span>
+                              )}
                             </span>
                             <button
                               className="btn btn-secondary btn-sm"
                               style={{ padding: '2px 6px', fontSize: 10 }}
                               onClick={(e) => openStock(t, e)}
                               title="Actualizar stock disponible"
-                            >
-                              ✏
-                            </button>
+                            >✏</button>
                           </div>
                         </td>
                         <td style={{ fontSize: 12 }}>
@@ -315,7 +329,6 @@ export function Telas({ onMenuClick }) {
                 </div>
               )}
 
-              {/* Sección compra */}
               <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
                 📦 Datos de la compra
               </div>
@@ -355,7 +368,7 @@ export function Telas({ onMenuClick }) {
                   <input type="date" value={form.fecha} onChange={e => setF('fecha', e.target.value)} />
                 </div>
                 <div className="form-group">
-                  <label>Unidad</label>
+                  <label>Unidad de compra</label>
                   <select value={form.unidad} onChange={e => setF('unidad', e.target.value)}>
                     <option value="m">Metros (m)</option>
                     <option value="kg">Kilogramos (kg)</option>
@@ -384,7 +397,6 @@ export function Telas({ onMenuClick }) {
                 )}
               </div>
 
-              {/* Total calculado */}
               {form.metros && form.precio && (
                 <div style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 10, marginBottom: 12, fontSize: 12 }}>
                   <strong>Total compra: </strong>
@@ -395,7 +407,6 @@ export function Telas({ onMenuClick }) {
                 </div>
               )}
 
-              {/* Sección stock */}
               <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: 1, margin: '12px 0 8px' }}>
                 📊 Stock disponible actual
               </div>
@@ -404,26 +415,26 @@ export function Telas({ onMenuClick }) {
                   <label>¿Cuánto tenés disponible ahora?</label>
                   <input
                     type="number"
-                    value={form.disponible}
-                    onChange={e => setF('disponible', e.target.value)}
-                    placeholder={form.metros ? `Compraste ${form.metros} ${form.unidad}` : '0.0'}
+                    value={form.stock_disponible}
+                    onChange={e => setF('stock_disponible', e.target.value)}
+                    placeholder={form.metros ? `Compraste ${form.metros} ${form.unidad} — ponés lo que queda` : '0.0'}
                   />
+                  <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4 }}>
+                    Dejalo vacío si no cortaste nada todavía
+                  </div>
                 </div>
                 <div className="form-group">
-                  <label>Unidad del stock disponible</label>
+                  <label>Unidad del stock</label>
                   <select value={form.unidad_stock} onChange={e => setF('unidad_stock', e.target.value)}>
                     <option value="m">Metros (m)</option>
                     <option value="kg">Kilogramos (kg)</option>
                   </select>
                   {form.unidad !== form.unidad_stock && (
                     <div style={{ fontSize: 11, color: 'var(--warning)', marginTop: 4 }}>
-                      ⚠ Compraste en {form.unidad}, controlás el stock en {form.unidad_stock}
+                      ⚠ Compraste en {form.unidad}, stock en {form.unidad_stock}
                     </div>
                   )}
                 </div>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 8 }}>
-                Dejalo vacío si todavía no cortaste nada — el stock queda igual a lo comprado
               </div>
 
               <div className="form-group">
@@ -444,13 +455,13 @@ export function Telas({ onMenuClick }) {
       {/* MODAL RÁPIDO STOCK */}
       {modalStock && editingStock && (
         <div className="modal-overlay" onClick={() => setModalStock(false)}>
-          <div className="modal" style={{ maxWidth: 360 }} onClick={e => e.stopPropagation()}>
+          <div className="modal" style={{ maxWidth: 380 }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>📊 Actualizar stock</h3>
+              <h3>📊 Actualizar stock disponible</h3>
               <button className="close-btn" onClick={() => setModalStock(false)}>✕</button>
             </div>
             <div className="modal-body">
-              <div style={{ marginBottom: 12, fontSize: 13 }}>
+              <div style={{ marginBottom: 12, padding: 10, background: 'var(--bg3)', borderRadius: 'var(--radius)', fontSize: 13 }}>
                 <strong>{editingStock.tipo}</strong>
                 <div style={{ color: 'var(--text2)', fontSize: 12, marginTop: 2 }}>
                   Comprado: {editingStock.metros} {editingStock.unidad || 'm'}
@@ -461,14 +472,18 @@ export function Telas({ onMenuClick }) {
                   <label>¿Cuánto te queda disponible?</label>
                   <input
                     type="number"
-                    value={stockForm.disponible}
-                    onChange={e => setStockForm(f => ({ ...f, disponible: e.target.value }))}
+                    value={stockForm.stock_disponible}
+                    onChange={e => setStockForm(f => ({ ...f, stock_disponible: e.target.value }))}
                     autoFocus
+                    placeholder="0.0"
                   />
                 </div>
                 <div className="form-group">
                   <label>Unidad</label>
-                  <select value={stockForm.unidad_stock} onChange={e => setStockForm(f => ({ ...f, unidad_stock: e.target.value }))}>
+                  <select
+                    value={stockForm.unidad_stock}
+                    onChange={e => setStockForm(f => ({ ...f, unidad_stock: e.target.value }))}
+                  >
                     <option value="m">Metros (m)</option>
                     <option value="kg">Kilogramos (kg)</option>
                   </select>
