@@ -1,12 +1,14 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 
 const NAV = [
   { section: 'Producción' },
   { path: '/pedidos', icon: '📋', label: 'Pedidos' },
   { path: '/productos', icon: '📦', label: 'Productos' },
-  { section: 'Insumos' },
-  { path: '/telas', icon: '🧶', label: 'Telas' },
+  { section: 'Telas' },
+  { path: '/telas/catalogo', icon: '🧶', label: 'Catálogo' },
+  { path: '/telas/compras', icon: '🛒', label: 'Compras de tela' },
+  { path: '/telas/stock', icon: '📊', label: 'Stock' },
   { section: 'Compras' },
   { path: '/proveedores', icon: '🏢', label: 'Proveedores' },
   { path: '/compras', icon: '🧾', label: 'Facturas' },
@@ -19,12 +21,7 @@ const NAV = [
 export default function Sidebar({ open, onClose }) {
   const navigate = useNavigate()
   const location = useLocation()
-
-  const handleNav = (path) => {
-    navigate(path)
-    onClose()
-  }
-
+  const handleNav = (path) => { navigate(path); onClose() }
   return (
     <div className={`sidebar ${open ? 'open' : ''}`}>
       <div className="sidebar-logo">
