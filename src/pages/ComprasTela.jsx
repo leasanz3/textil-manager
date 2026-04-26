@@ -10,7 +10,7 @@ const emptyItem = () => ({
   _key: Math.random(),
   tela_id: '', cantidad: '', unidad: 'kg',
   precio_lista: '', moneda: 'USD',
-  total_factura: '', descuento_monto: '', descuento_pct: '',
+  total_factura: '', // si se pisa manual
   notas: ''
 })
 
@@ -18,43 +18,36 @@ export default function ComprasTela({ onMenuClick }) {
   const [compras, setCompras] = useState([])
   const [telas, setTelas] = useState([])
   const [facturas, setFacturas] = useState([])
-  const [tcHistorial, setTcHistorial] = useState([])
   const [proveedores, setProveedores] = useState([])
   const [loading, setLoading] = useState(true)
   const [modal, setModal] = useState(false)
   const [modalCatalogo, setModalCatalogo] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [showTcHistorial, setShowTcHistorial] = useState(false)
   const [editingItemKey, setEditingItemKey] = useState(null)
 
   const [form, setForm] = useState({
     compra_id: '', proveedor_id: '', fecha: new Date().toISOString().split('T')[0], tc: '', notas: ''
   })
   const [items, setItems] = useState([emptyItem()])
-
-  // Form nueva tela rápida
-  const [telaForm, setTelaForm] = useState({ tipo: '', color: '', codigo: '', unidad: 'kg', notas: '' })
+  const [telaForm, setTelaForm] = useState({ tipo: '', color: '', codigo: '', unidad: 'kg' })
 
   useEffect(() => { fetchAll() }, [])
 
   async function fetchAll() {
     setLoading(true)
-    const [{ data: c }, { data: t }, { data: f }, { data: tc }, { data: p }] = await Promise.all([
+    const [{ data: c }, { data: t }, { data: f }, { data: p }] = await Promise.all([
       supabase.from('compras_tela').select('*, telas(tipo, color, unidad), compras(factura, fecha, proveedor)').order('created_at', { ascending: false }),
       supabase.from('telas').select('id, tipo, color, unidad, proveedor_id, precio, moneda').order('tipo'),
-      supabase.from('compras').select('id, factura, fecha, proveedor, proveedor_id').order('fecha', { ascending: false }),
-      supabase.from('tipos_cambio').select('*').order('fecha', { ascending: false }).limit(10),
+      supabase.from('compras').select('id, factura, fecha, proveedor, proveedor_id, dolar_costeo, moneda').order('fecha', { ascending: false }),
       supabase.from('proveedores').select('id, nombre').order('nombre')
     ])
     setCompras(c || [])
     setTelas(t || [])
     setFacturas(f || [])
-    setTcHistorial(tc || [])
     setProveedores(p || [])
     setLoading(false)
   }
 
-  // Telas filtradas por proveedor
   const telasFiltradas = form.proveedor_id
     ? telas.filter(t => String(t.proveedor_id) === String(form.proveedor_id))
     : telas
@@ -65,8 +58,16 @@ export default function ComprasTela({ onMenuClick }) {
       ...f,
       compra_id: compraId,
       proveedor_id: factura?.proveedor_id ? String(factura.proveedor_id) : f.proveedor_id,
-      fecha: factura?.fecha || f.fecha
+      fecha: factura?.fecha || f.fecha,
+      // TC se autocompleta desde la factura si tiene dolar de pago
+      tc: factura?.dolar_costeo ? String(factura.dolar_costeo) : f.tc
     }))
+    // Si la factura es en USD, poner moneda USD en los items
+    if (factura?.moneda === 'USD') {
+      setItems(prev => prev.map(i => ({ ...i, moneda: 'USD' })))
+    } else if (factura?.moneda === 'UYU') {
+      setItems(prev => prev.map(i => ({ ...i, moneda: 'UYU' })))
+    }
   }
 
   // Calculos por item
@@ -75,80 +76,36 @@ export default function ComprasTela({ onMenuClick }) {
     const precioLista = parseFloat(item.precio_lista) || 0
     const subtotal = cantidad * precioLista
 
-    let totalFactura = parseFloat(item.total_factura) || 0
-    let descMonto = parseFloat(item.descuento_monto) || 0
-    let descPct = parseFloat(item.descuento_pct) || 0
+    // Si pisaron el total manual, calcular descuento
+    const totalManual = item.total_factura !== '' ? parseFloat(item.total_factura) : null
+    const totalFinal = totalManual !== null ? totalManual : subtotal
+    const descMonto = subtotal > 0 ? subtotal - totalFinal : 0
+    const descPct = subtotal > 0 ? (descMonto / subtotal) * 100 : 0
 
-    // Si pusieron total_factura, calculamos descuento
-    if (item.total_factura !== '' && subtotal > 0) {
-      descMonto = subtotal - totalFactura
-      descPct = subtotal > 0 ? (descMonto / subtotal) * 100 : 0
-    }
-    // Si pusieron descuento_pct, calculamos total
-    else if (item.descuento_pct !== '' && subtotal > 0) {
-      descMonto = subtotal * (descPct / 100)
-      totalFactura = subtotal - descMonto
-    }
-    // Si pusieron descuento_monto, calculamos total
-    else if (item.descuento_monto !== '' && subtotal > 0) {
-      totalFactura = subtotal - descMonto
-      descPct = subtotal > 0 ? (descMonto / subtotal) * 100 : 0
-    }
-
-    return { subtotal, totalFactura, descMonto, descPct }
+    return { subtotal, totalFinal, descMonto, descPct }
   }
 
   function updateItem(key, field, value) {
     setItems(prev => prev.map(item => {
       if (item._key !== key) return item
       const updated = { ...item, [field]: value }
-      // Si cambia precio_lista o cantidad, limpiamos los calculos para recalcular
-      if (field === 'precio_lista' || field === 'cantidad') {
+      // Si cambia cantidad o precio, resetear total manual para recalcular
+      if (field === 'cantidad' || field === 'precio_lista') {
         updated.total_factura = ''
-        updated.descuento_monto = ''
-        updated.descuento_pct = ''
-      }
-      // Si escribe en total_factura, limpiamos descuentos
-      if (field === 'total_factura') {
-        updated.descuento_monto = ''
-        updated.descuento_pct = ''
-      }
-      // Si escribe en descuento_pct, limpiamos los otros
-      if (field === 'descuento_pct') {
-        updated.total_factura = ''
-        updated.descuento_monto = ''
-      }
-      // Si escribe en descuento_monto, limpiamos los otros
-      if (field === 'descuento_monto') {
-        updated.total_factura = ''
-        updated.descuento_pct = ''
       }
       return updated
     }))
   }
 
-  async function guardarTC() {
-    if (!form.tc) return
-    await supabase.from('tipos_cambio').insert({ valor: parseFloat(form.tc), fecha: form.fecha })
-    const { data } = await supabase.from('tipos_cambio').select('*').order('fecha', { ascending: false }).limit(10)
-    setTcHistorial(data || [])
-  }
-
   function openNew() {
     setForm({ compra_id: '', proveedor_id: '', fecha: new Date().toISOString().split('T')[0], tc: '', notas: '' })
     setItems([emptyItem()])
-    setShowTcHistorial(false)
     setModal(true)
   }
 
-  // Abrir modal nueva tela rápida desde un renglón
   function openNuevaTela(itemKey) {
     const factura = facturas.find(f => f.id === parseInt(form.compra_id))
-    setTelaForm({
-      tipo: '', color: '', codigo: '', unidad: 'kg', notas: '',
-      proveedor_id: form.proveedor_id || '',
-      proveedor_nombre: factura?.proveedor || ''
-    })
+    setTelaForm({ tipo: '', color: '', codigo: '', unidad: 'kg', proveedor_id: form.proveedor_id || '', proveedor_nombre: factura?.proveedor || '' })
     setEditingItemKey(itemKey)
     setModalCatalogo(true)
   }
@@ -164,10 +121,8 @@ export default function ComprasTela({ onMenuClick }) {
       proveedor: telaForm.proveedor_nombre || null,
       metros: 0, usados: 0
     }).select().single()
-
     if (nueva) {
       setTelas(prev => [...prev, nueva])
-      // Asignar la tela nueva al renglón que la pidió
       updateItem(editingItemKey, 'tela_id', String(nueva.id))
       updateItem(editingItemKey, 'unidad', nueva.unidad || 'kg')
     }
@@ -191,21 +146,18 @@ export default function ComprasTela({ onMenuClick }) {
         precio_lista: parseFloat(item.precio_lista),
         moneda: item.moneda,
         tc: parseFloat(form.tc) || null,
-        total_factura: calc.totalFactura || null,
+        total_factura: calc.totalFinal || null,
         descuento_monto: calc.descMonto || null,
         descuento_pct: calc.descPct || null,
         fecha: form.fecha,
         notas: item.notas || null
       })
 
-      // Actualizar precio referencia en catálogo si la fecha es más nueva
-      const tela = telas.find(t => t.id === parseInt(item.tela_id))
-      if (tela) {
-        await supabase.from('telas').update({
-          precio: parseFloat(item.precio_lista),
-          moneda: item.moneda
-        }).eq('id', tela.id)
-      }
+      // Actualizar precio referencia en catálogo
+      await supabase.from('telas').update({
+        precio: parseFloat(item.precio_lista),
+        moneda: item.moneda
+      }).eq('id', parseInt(item.tela_id))
     }
 
     setSaving(false)
@@ -220,7 +172,7 @@ export default function ComprasTela({ onMenuClick }) {
     fetchAll()
   }
 
-  const totalKg = compras.reduce((a, x) => a + parseFloat(x.cantidad || 0), 0)
+  const totalCantidad = compras.reduce((a, x) => a + parseFloat(x.cantidad || 0), 0)
 
   return (
     <div>
@@ -235,7 +187,7 @@ export default function ComprasTela({ onMenuClick }) {
       <div className="content">
         <div className="stat-grid">
           <div className="stat-card"><div className="stat-value">{compras.length}</div><div className="stat-label">Ítems comprados</div></div>
-          <div className="stat-card"><div className="stat-value">{fmtNum(totalKg)}</div><div className="stat-label">Total kg/m comprados</div></div>
+          <div className="stat-card"><div className="stat-value">{fmtNum(totalCantidad)}</div><div className="stat-label">Total kg/m comprados</div></div>
           <div className="stat-card"><div className="stat-value">{compras.filter(c => c.compra_id).length}</div><div className="stat-label">Vinculados a factura</div></div>
         </div>
 
@@ -254,7 +206,7 @@ export default function ComprasTela({ onMenuClick }) {
                   <tr>
                     <th>Tela</th><th>Factura</th><th>Fecha</th>
                     <th>Cantidad</th><th>Precio lista</th><th>Descuento</th>
-                    <th>Total factura</th><th>TC</th><th></th>
+                    <th>Total</th><th>TC</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -271,14 +223,13 @@ export default function ComprasTela({ onMenuClick }) {
                       </td>
                       <td>{fmtFecha(c.fecha)}</td>
                       <td>{fmtNum(c.cantidad)} {c.unidad}</td>
-                      <td style={{ fontSize: 12 }}>
-                        {c.moneda === 'USD' ? fmtUSD(c.precio_lista) : fmtUYU(c.precio_lista)}
-                      </td>
+                      <td style={{ fontSize: 12 }}>{c.moneda === 'USD' ? fmtUSD(c.precio_lista) : fmtUYU(c.precio_lista)}</td>
                       <td style={{ fontSize: 12, color: 'var(--success)' }}>
                         {c.descuento_pct ? `${fmtNum(c.descuento_pct)}%` : '—'}
+                        {c.descuento_monto ? <div style={{ fontSize: 11 }}>{c.moneda === 'USD' ? fmtUSD(c.descuento_monto) : fmtUYU(c.descuento_monto)}</div> : null}
                       </td>
                       <td><strong>{c.moneda === 'USD' ? fmtUSD(c.total_factura) : fmtUYU(c.total_factura)}</strong></td>
-                      <td style={{ fontSize: 11 }}>{c.tc || '—'}</td>
+                      <td style={{ fontSize: 11 }}>{c.tc ? '$' + c.tc : '—'}</td>
                       <td onClick={e => handleDelete(c.id, e)}>
                         <button className="btn btn-danger btn-sm">🗑</button>
                       </td>
@@ -294,14 +245,14 @@ export default function ComprasTela({ onMenuClick }) {
       {/* MODAL NUEVA COMPRA */}
       {modal && (
         <div className="modal-overlay" onClick={() => setModal(false)}>
-          <div className="modal" style={{ maxWidth: 900 }} onClick={e => e.stopPropagation()}>
+          <div className="modal" style={{ maxWidth: 960 }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>🛒 Nueva compra de tela</h3>
               <button className="close-btn" onClick={() => setModal(false)}>✕</button>
             </div>
             <div className="modal-body">
 
-              {/* Cabecera: factura y TC */}
+              {/* Cabecera */}
               <div className="form-grid" style={{ marginBottom: 16 }}>
                 <div className="form-group">
                   <label>Factura de compra *</label>
@@ -319,58 +270,48 @@ export default function ComprasTela({ onMenuClick }) {
                   <input type="date" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
                 </div>
                 <div className="form-group">
-                  <label>Tipo de cambio (si aplica)</label>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    <input type="number" value={form.tc} onChange={e => setForm(f => ({ ...f, tc: e.target.value }))} placeholder="ej: 42.50" style={{ flex: 1 }} />
-                    <button type="button" className="btn btn-secondary btn-sm" onClick={guardarTC} title="Guardar en historial">💾</button>
-                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowTcHistorial(!showTcHistorial)} title="Ver historial">📋</button>
-                  </div>
-                  {showTcHistorial && tcHistorial.length > 0 && (
-                    <div style={{ marginTop: 4, border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
-                      {tcHistorial.map(tc => (
-                        <div key={tc.id}
-                          onClick={() => { setForm(f => ({ ...f, tc: tc.valor })); setShowTcHistorial(false) }}
-                          style={{ padding: '5px 10px', cursor: 'pointer', fontSize: 12, borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between' }}
-                          onMouseEnter={e => e.currentTarget.style.background = 'var(--bg3)'}
-                          onMouseLeave={e => e.currentTarget.style.background = ''}>
-                          <strong>${tc.valor}</strong>
-                          <span style={{ color: 'var(--text2)' }}>{fmtFecha(tc.fecha)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <label>
+                    TC de pago
+                    {form.tc && <span style={{ fontSize: 11, color: 'var(--success)', marginLeft: 6 }}>✓ de la factura</span>}
+                  </label>
+                  <input
+                    type="number"
+                    value={form.tc}
+                    onChange={e => setForm(f => ({ ...f, tc: e.target.value }))}
+                    placeholder="se completa solo si la factura tiene TC"
+                  />
                 </div>
               </div>
 
               {form.proveedor_id && (
                 <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 12 }}>
-                  Mostrando telas de: <strong style={{ color: 'var(--accent)' }}>
+                  Telas de: <strong style={{ color: 'var(--accent)' }}>
                     {proveedores.find(p => String(p.id) === String(form.proveedor_id))?.nombre}
                   </strong>
                   <span style={{ marginLeft: 8 }}>({telasFiltradas.length} telas)</span>
                 </div>
               )}
 
-              {/* Renglones de ítems */}
+              {/* Tabla de renglones */}
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ fontSize: 12 }}>
                   <thead>
                     <tr>
-                      <th style={{ minWidth: 200 }}>Tela</th>
+                      <th style={{ minWidth: 220 }}>Tela</th>
                       <th style={{ minWidth: 80 }}>Cantidad</th>
-                      <th style={{ minWidth: 70 }}>Unidad</th>
+                      <th style={{ minWidth: 65 }}>Unidad</th>
                       <th style={{ minWidth: 100 }}>Precio lista</th>
-                      <th style={{ minWidth: 70 }}>Moneda</th>
-                      <th style={{ minWidth: 100 }}>Total factura</th>
-                      <th style={{ minWidth: 90 }}>Dto $</th>
-                      <th style={{ minWidth: 80 }}>Dto %</th>
+                      <th style={{ minWidth: 65 }}>Moneda</th>
+                      <th style={{ minWidth: 110 }}>Total (editable)</th>
+                      <th style={{ minWidth: 90 }}>Descuento $</th>
+                      <th style={{ minWidth: 80 }}>Descuento %</th>
                       <th style={{ minWidth: 30 }}></th>
                     </tr>
                   </thead>
                   <tbody>
                     {items.map(item => {
                       const calc = calcItem(item)
-                      const subtotal = calc.subtotal
+                      const tieneDescuento = calc.descMonto > 0.001
                       return (
                         <tr key={item._key}>
                           <td>
@@ -378,8 +319,8 @@ export default function ComprasTela({ onMenuClick }) {
                               <select
                                 value={item.tela_id}
                                 onChange={e => {
-                                  updateItem(item._key, 'tela_id', e.target.value)
                                   const t = telas.find(t => String(t.id) === e.target.value)
+                                  updateItem(item._key, 'tela_id', e.target.value)
                                   if (t) {
                                     updateItem(item._key, 'unidad', t.unidad || 'kg')
                                     if (t.moneda) updateItem(item._key, 'moneda', t.moneda)
@@ -395,53 +336,74 @@ export default function ComprasTela({ onMenuClick }) {
                               <button
                                 type="button"
                                 className="btn btn-secondary btn-sm"
-                                style={{ padding: '2px 6px', fontSize: 10, whiteSpace: 'nowrap' }}
+                                style={{ padding: '2px 6px', fontSize: 10 }}
                                 onClick={() => openNuevaTela(item._key)}
-                                title="Agregar tela nueva al catálogo"
                               >+ nueva</button>
                             </div>
                           </td>
                           <td>
-                            <input type="number" value={item.cantidad}
+                            <input
+                              type="number"
+                              value={item.cantidad}
                               onChange={e => updateItem(item._key, 'cantidad', e.target.value)}
-                              placeholder="0.000" style={{ width: 75 }} />
+                              placeholder="0.000"
+                              style={{ width: 75 }}
+                            />
                           </td>
                           <td>
-                            <select value={item.unidad} onChange={e => updateItem(item._key, 'unidad', e.target.value)} style={{ width: 65 }}>
+                            <select value={item.unidad} onChange={e => updateItem(item._key, 'unidad', e.target.value)} style={{ width: 60 }}>
                               <option value="kg">kg</option>
                               <option value="m">m</option>
                             </select>
                           </td>
                           <td>
-                            <input type="number" value={item.precio_lista}
+                            <input
+                              type="number"
+                              value={item.precio_lista}
                               onChange={e => updateItem(item._key, 'precio_lista', e.target.value)}
-                              placeholder="0.00" style={{ width: 90 }} />
+                              placeholder="0.00"
+                              style={{ width: 90 }}
+                            />
                           </td>
                           <td>
-                            <select value={item.moneda} onChange={e => updateItem(item._key, 'moneda', e.target.value)} style={{ width: 65 }}>
+                            <select value={item.moneda} onChange={e => updateItem(item._key, 'moneda', e.target.value)} style={{ width: 60 }}>
                               <option value="USD">USD</option>
                               <option value="UYU">$UY</option>
                             </select>
                           </td>
                           <td>
-                            <input type="number" value={item.total_factura}
+                            <input
+                              type="number"
+                              value={item.total_factura !== '' ? item.total_factura : (calc.subtotal > 0 ? calc.subtotal.toFixed(2) : '')}
                               onChange={e => updateItem(item._key, 'total_factura', e.target.value)}
-                              placeholder={subtotal ? fmtNum(subtotal) : '0.00'}
-                              style={{ width: 90 }} />
+                              placeholder={calc.subtotal > 0 ? calc.subtotal.toFixed(2) : '0.00'}
+                              style={{ width: 100, color: tieneDescuento ? 'var(--warning)' : 'inherit' }}
+                            />
                           </td>
                           <td>
-                            <input type="number" value={item.descuento_monto !== '' ? item.descuento_monto : (subtotal && calc.descMonto ? fmtNum(calc.descMonto) : '')}
-                              onChange={e => updateItem(item._key, 'descuento_monto', e.target.value)}
-                              placeholder="0.00" style={{ width: 80, color: 'var(--success)' }} readOnly={item.total_factura !== ''} />
+                            <input
+                              type="number"
+                              value={tieneDescuento ? calc.descMonto.toFixed(2) : ''}
+                              readOnly
+                              placeholder="0.00"
+                              style={{ width: 80, color: 'var(--success)', background: 'transparent' }}
+                            />
                           </td>
                           <td>
-                            <input type="number" value={item.descuento_pct !== '' ? item.descuento_pct : (subtotal && calc.descPct ? fmtNum(calc.descPct) : '')}
-                              onChange={e => updateItem(item._key, 'descuento_pct', e.target.value)}
-                              placeholder="0.00" style={{ width: 70, color: 'var(--success)' }} readOnly={item.total_factura !== ''} />
+                            <input
+                              type="number"
+                              value={tieneDescuento ? calc.descPct.toFixed(2) : ''}
+                              readOnly
+                              placeholder="0.00"
+                              style={{ width: 70, color: 'var(--success)', background: 'transparent' }}
+                            />
                           </td>
                           <td>
-                            <button type="button" className="btn btn-danger btn-sm"
-                              onClick={() => setItems(prev => prev.filter(i => i._key !== item._key))}>✕</button>
+                            <button
+                              type="button"
+                              className="btn btn-danger btn-sm"
+                              onClick={() => setItems(prev => prev.filter(i => i._key !== item._key))}
+                            >✕</button>
                           </td>
                         </tr>
                       )
@@ -459,7 +421,7 @@ export default function ComprasTela({ onMenuClick }) {
               </button>
 
               <div className="form-group" style={{ marginTop: 12 }}>
-                <label>Notas generales</label>
+                <label>Notas</label>
                 <input value={form.notas} onChange={e => setForm(f => ({ ...f, notas: e.target.value }))} placeholder="Observaciones..." />
               </div>
             </div>
@@ -487,7 +449,7 @@ export default function ComprasTela({ onMenuClick }) {
               </div>
               <div className="form-grid">
                 <div className="form-group">
-                  <label>Nombre de la tela *</label>
+                  <label>Nombre *</label>
                   <input value={telaForm.tipo} onChange={e => setTelaForm(f => ({ ...f, tipo: e.target.value }))} placeholder="ej: Deportivo Piquet New" autoFocus />
                 </div>
                 <div className="form-group">
