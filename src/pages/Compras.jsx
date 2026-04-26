@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 
 const fmtUYU = (n) => n ? '$' + Number(n).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
 const fmtUSD = (n) => n ? 'U$D ' + Number(n).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
+const fmtNum = (n) => n ? Number(n).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
 const fmtFecha = (f) => { if (!f) return '—'; const [y, m, d] = f.split('-'); return `${d}/${m}/${y}` }
 
 export default function Compras({ onMenuClick }) {
@@ -21,8 +22,10 @@ export default function Compras({ onMenuClick }) {
   const [form, setForm] = useState({
     proveedor_id: '', factura: '', fecha: new Date().toISOString().split('T')[0],
     moneda: 'UYU', total_uyu: '', total_usd: '', dolar_fiscal: '',
-    dolar_costeo: '', acredita_iva: true, notas: ''
+    total_pagado_uyu: '', acredita_iva: true, notas: ''
   })
+
+  const setF = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
   useEffect(() => { fetchAll() }, [])
 
@@ -39,38 +42,42 @@ export default function Compras({ onMenuClick }) {
     setLoading(false)
   }
 
-  async function guardarTC() {
-    if (!form.dolar_fiscal) return
-    await supabase.from('tipos_cambio').insert({ valor: parseFloat(form.dolar_fiscal), fecha: form.fecha })
-    const { data } = await supabase.from('tipos_cambio').select('*').order('fecha', { ascending: false }).limit(10)
-    setTcHistorial(data || [])
-  }
-
+  // Calculos
   const calcular = (f) => {
-    let totalUYU = 0, totalFinal = 0
     if (f.moneda === 'UYU') {
-      totalUYU = parseFloat(f.total_uyu) || 0
-      totalFinal = totalUYU
+      const total = parseFloat(f.total_uyu) || 0
+      const subtotal = total / 1.22
+      const iva = total - subtotal
+      return { totalUYU: total, totalFinal: total, subtotal, iva, dolarPago: null }
     } else {
       const usd = parseFloat(f.total_usd) || 0
       const fiscal = parseFloat(f.dolar_fiscal) || 0
-      const costeo = parseFloat(f.dolar_costeo) || 0
-      totalUYU = fiscal ? usd * fiscal : 0
-      totalFinal = costeo ? usd * costeo : totalUYU
+      const totalPagado = parseFloat(f.total_pagado_uyu) || 0
+      const dolarPago = usd > 0 && totalPagado > 0 ? totalPagado / usd : null
+      const totalParaIVA = fiscal ? usd * fiscal : 0
+      const subtotal = totalParaIVA / 1.22
+      const iva = totalParaIVA - subtotal
+      return {
+        totalUYU: totalParaIVA,
+        totalFinal: totalPagado || null,
+        subtotal,
+        iva,
+        dolarPago
+      }
     }
-    const subtotal = totalFinal / 1.22
-    const iva = totalFinal - subtotal
-    return { totalUYU, totalFinal, subtotal, iva }
   }
 
   const calc = calcular(form)
+
+  // Advertencia fiscal
+  const advertenciaFiscal = form.moneda === 'USD' && form.acredita_iva && !form.dolar_fiscal
 
   function openNew() {
     setEditing(null)
     setForm({
       proveedor_id: '', factura: '', fecha: new Date().toISOString().split('T')[0],
       moneda: 'UYU', total_uyu: '', total_usd: '', dolar_fiscal: '',
-      dolar_costeo: '', acredita_iva: true, notas: ''
+      total_pagado_uyu: '', acredita_iva: true, notas: ''
     })
     setError('')
     setShowTcHistorial(false)
@@ -87,7 +94,7 @@ export default function Compras({ onMenuClick }) {
       total_uyu: c.moneda === 'UYU' ? (c.total_uyu || '') : '',
       total_usd: c.moneda === 'USD' ? (c.total_usd || '') : '',
       dolar_fiscal: c.dolar_fiscal || '',
-      dolar_costeo: c.dolar_costeo || '',
+      total_pagado_uyu: c.total_final || '',
       acredita_iva: c.acredita_iva !== false,
       notas: c.notas || ''
     })
@@ -105,6 +112,15 @@ export default function Compras({ onMenuClick }) {
     const prov = proveedores.find(p => p.id === parseInt(form.proveedor_id))
     const c = calcular(form)
 
+    // Guardar TC de pago automático si hay dolar calculado
+    if (c.dolarPago && form.moneda === 'USD') {
+      await supabase.from('tipos_cambio').insert({
+        valor: c.dolarPago,
+        fecha: form.fecha,
+        notas: `Factura ${form.factura || ''} - ${prov?.nombre || ''}`
+      })
+    }
+
     const datos = {
       proveedor: prov?.nombre || '',
       proveedor_id: parseInt(form.proveedor_id),
@@ -113,7 +129,7 @@ export default function Compras({ onMenuClick }) {
       moneda: form.moneda,
       total_usd: form.moneda === 'USD' ? parseFloat(form.total_usd) || null : null,
       dolar_fiscal: parseFloat(form.dolar_fiscal) || null,
-      dolar_costeo: parseFloat(form.dolar_costeo) || null,
+      dolar_costeo: c.dolarPago || null,
       total_uyu: c.totalUYU || null,
       total_final: c.totalFinal || null,
       subtotal: c.subtotal || null,
@@ -148,8 +164,7 @@ export default function Compras({ onMenuClick }) {
 
   const totalIVA = filtered.filter(x => x.acredita_iva !== false).reduce((a, x) => a + (x.iva || 0), 0)
   const totalCompras = filtered.reduce((a, x) => a + (x.total_final || x.total_uyu || 0), 0)
-
-  const setF = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  const pendientes = filtered.filter(x => x.moneda === 'USD' && !x.total_final).length
 
   return (
     <div>
@@ -164,9 +179,12 @@ export default function Compras({ onMenuClick }) {
       <div className="content">
         <div className="stat-grid">
           <div className="stat-card"><div className="stat-value">{filtered.length}</div><div className="stat-label">Facturas</div></div>
-          <div className="stat-card"><div className="stat-value" style={{ color: 'var(--accent)', fontSize: 18 }}>{fmtUYU(totalCompras)}</div><div className="stat-label">Total compras</div></div>
+          <div className="stat-card"><div className="stat-value" style={{ color: 'var(--accent)', fontSize: 18 }}>{fmtUYU(totalCompras)}</div><div className="stat-label">Total pagado $UY</div></div>
           <div className="stat-card"><div className="stat-value" style={{ color: 'var(--success)', fontSize: 18 }}>{fmtUYU(totalIVA)}</div><div className="stat-label">IVA a favor (CF)</div></div>
-          <div className="stat-card"><div className="stat-value" style={{ color: 'var(--warning)' }}>{filtered.filter(x => !x.tiene_items).length}</div><div className="stat-label">⚠ Sin items</div></div>
+          <div className="stat-card">
+            <div className="stat-value" style={{ color: pendientes > 0 ? 'var(--warning)' : 'var(--text2)' }}>{pendientes}</div>
+            <div className="stat-label">⚠ Pendientes de pago</div>
+          </div>
         </div>
 
         <div className="table-wrap">
@@ -194,28 +212,41 @@ export default function Compras({ onMenuClick }) {
                 <thead>
                   <tr>
                     <th>#</th><th>Proveedor</th><th>Fecha</th><th>Factura</th>
-                    <th>Total USD</th><th>$ Fiscal</th><th>Total $UY</th>
-                    <th>Total Final</th><th>IVA 22%</th><th>IVA</th><th></th>
+                    <th>Total USD</th><th>$ Fiscal</th><th>IVA $UY</th>
+                    <th>Pagado $UY</th><th>TC pago</th><th>Estado</th><th>IVA</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map(x => (
-                    <tr key={x.id} onClick={() => openEdit(x)}>
-                      <td style={{ color: 'var(--accent)', fontWeight: 700 }}>{x.id}</td>
-                      <td><strong>{x.proveedor}</strong></td>
-                      <td>{fmtFecha(x.fecha)}</td>
-                      <td>{x.factura || '—'}</td>
-                      <td style={{ fontSize: 12 }}>{x.moneda === 'USD' ? fmtUSD(x.total_usd) : '—'}</td>
-                      <td style={{ fontSize: 12 }}>{x.dolar_fiscal ? '$' + x.dolar_fiscal : '—'}</td>
-                      <td style={{ fontSize: 12 }}>{x.total_uyu ? fmtUYU(x.total_uyu) : '—'}</td>
-                      <td><strong>{fmtUYU(x.total_final || x.total_uyu)}</strong></td>
-                      <td style={{ color: 'var(--danger)' }}>{fmtUYU(x.iva)}</td>
-                      <td>{x.acredita_iva !== false ? <span className="badge badge-green">✓ CF</span> : <span className="badge badge-red">sin IVA</span>}</td>
-                      <td onClick={e => { e.stopPropagation(); handleDelete(x.id) }}>
-                        <button className="btn btn-danger btn-sm">🗑</button>
-                      </td>
-                    </tr>
-                  ))}
+                  {filtered.map(x => {
+                    const pendiente = x.moneda === 'USD' && !x.total_final
+                    const sinFiscal = x.moneda === 'USD' && x.acredita_iva && !x.dolar_fiscal
+                    return (
+                      <tr key={x.id} onClick={() => openEdit(x)}>
+                        <td style={{ color: 'var(--accent)', fontWeight: 700 }}>{x.id}</td>
+                        <td><strong>{x.proveedor}</strong></td>
+                        <td>{fmtFecha(x.fecha)}</td>
+                        <td>{x.factura || '—'}</td>
+                        <td style={{ fontSize: 12 }}>{x.moneda === 'USD' ? fmtUSD(x.total_usd) : '—'}</td>
+                        <td style={{ fontSize: 12 }}>{x.dolar_fiscal ? '$' + fmtNum(x.dolar_fiscal) : sinFiscal ? <span style={{ color: 'var(--warning)' }}>⚠ falta</span> : '—'}</td>
+                        <td style={{ fontSize: 12, color: 'var(--danger)' }}>{fmtUYU(x.iva)}</td>
+                        <td><strong>{x.total_final ? fmtUYU(x.total_final) : <span style={{ color: 'var(--warning)' }}>—</span>}</strong></td>
+                        <td style={{ fontSize: 11 }}>{x.dolar_costeo ? '$' + fmtNum(x.dolar_costeo) : '—'}</td>
+                        <td>
+                          {pendiente
+                            ? <span className="badge badge-yellow">⚠ Pendiente</span>
+                            : <span className="badge badge-green">✓ Cerrada</span>}
+                        </td>
+                        <td>
+                          {x.acredita_iva !== false
+                            ? <span className="badge badge-green">✓ CF</span>
+                            : <span className="badge badge-red">sin IVA</span>}
+                        </td>
+                        <td onClick={e => { e.stopPropagation(); handleDelete(x.id) }}>
+                          <button className="btn btn-danger btn-sm">🗑</button>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -241,7 +272,7 @@ export default function Compras({ onMenuClick }) {
                 </div>
                 <div className="form-group">
                   <label>N° Factura</label>
-                  <input value={form.factura} onChange={e => setF('factura', e.target.value)} placeholder="ej: 29958" />
+                  <input value={form.factura} onChange={e => setF('factura', e.target.value)} placeholder="ej: 651576" />
                 </div>
                 <div className="form-group">
                   <label>Fecha *</label>
@@ -262,54 +293,79 @@ export default function Compras({ onMenuClick }) {
                   <input type="number" value={form.total_uyu} onChange={e => setF('total_uyu', e.target.value)} placeholder="0.00" />
                 </div>
               ) : (
-                <div className="form-grid">
-                  <div className="form-group">
-                    <label>Total USD *</label>
-                    <input type="number" value={form.total_usd} onChange={e => setF('total_usd', e.target.value)} placeholder="0.00" />
-                  </div>
-                  <div className="form-group">
-                    <label>Dólar fiscal (cotización del día)</label>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <input
-                        type="number"
-                        value={form.dolar_fiscal}
-                        onChange={e => setF('dolar_fiscal', e.target.value)}
-                        placeholder="ej: 42.50"
-                        style={{ flex: 1 }}
-                      />
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={guardarTC} title="Guardar TC en historial">💾</button>
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowTcHistorial(!showTcHistorial)} title="Ver historial TC">📋</button>
+                <>
+                  <div className="form-grid">
+                    <div className="form-group">
+                      <label>Total USD * (de la factura)</label>
+                      <input type="number" value={form.total_usd} onChange={e => setF('total_usd', e.target.value)} placeholder="0.00" />
                     </div>
-                    {showTcHistorial && tcHistorial.length > 0 && (
-                      <div style={{ marginTop: 6, border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
-                        {tcHistorial.map(tc => (
-                          <div key={tc.id}
-                            onClick={() => { setF('dolar_fiscal', tc.valor); setShowTcHistorial(false) }}
-                            style={{ padding: '6px 10px', cursor: 'pointer', fontSize: 12, borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between' }}
-                            onMouseEnter={e => e.currentTarget.style.background = 'var(--bg3)'}
-                            onMouseLeave={e => e.currentTarget.style.background = ''}>
-                            <strong>${tc.valor}</strong>
-                            <span style={{ color: 'var(--text2)' }}>{fmtFecha(tc.fecha)}</span>
+                    <div className="form-group">
+                      <label>
+                        Dólar fiscal
+                        {advertenciaFiscal && <span style={{ color: 'var(--warning)', marginLeft: 6, fontSize: 11 }}>⚠ necesario para IVA</span>}
+                      </label>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <input type="number" value={form.dolar_fiscal} onChange={e => setF('dolar_fiscal', e.target.value)} placeholder="cotización del día" style={{ flex: 1 }} />
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowTcHistorial(!showTcHistorial)} title="Ver historial TC">📋</button>
+                      </div>
+                      {showTcHistorial && tcHistorial.length > 0 && (
+                        <div style={{ marginTop: 4, border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
+                          {tcHistorial.map(tc => (
+                            <div key={tc.id}
+                              onClick={() => { setF('dolar_fiscal', tc.valor); setShowTcHistorial(false) }}
+                              style={{ padding: '5px 10px', cursor: 'pointer', fontSize: 12, borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between' }}
+                              onMouseEnter={e => e.currentTarget.style.background = 'var(--bg3)'}
+                              onMouseLeave={e => e.currentTarget.style.background = ''}>
+                              <strong>${tc.valor}</strong>
+                              <span style={{ color: 'var(--text2)' }}>{fmtFecha(tc.fecha)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {form.dolar_fiscal && form.total_usd && (
+                        <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4 }}>
+                          IVA base: {fmtUYU(parseFloat(form.total_usd) * parseFloat(form.dolar_fiscal))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="form-group">
+                      <label>Total pagado en pesos <span style={{ fontSize: 11, color: 'var(--text2)' }}>(completar al pagar)</span></label>
+                      <input type="number" value={form.total_pagado_uyu} onChange={e => setF('total_pagado_uyu', e.target.value)} placeholder="dejá vacío si aún no pagaste" />
+                      {calc.dolarPago && (
+                        <div style={{ fontSize: 11, color: 'var(--success)', marginTop: 4 }}>
+                          ✓ TC de pago: ${fmtNum(calc.dolarPago)} — se guardará en historial
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {(calc.totalUYU > 0 || calc.totalFinal > 0) && (
+                    <div style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12, marginBottom: 12 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, textAlign: 'center' }}>
+                        {[
+                          { label: 'Base IVA ($UY fiscal)', value: fmtUYU(calc.totalUYU) },
+                          { label: 'IVA 22% a favor', value: fmtUYU(calc.iva), color: 'var(--danger)' },
+                          { label: 'TC pago', value: calc.dolarPago ? '$' + fmtNum(calc.dolarPago) : '—' },
+                          { label: 'Total pagado $UY', value: calc.totalFinal ? fmtUYU(calc.totalFinal) : <span style={{ color: 'var(--warning)' }}>Pendiente</span>, color: 'var(--accent)' },
+                        ].map(({ label, value, color }) => (
+                          <div key={label}>
+                            <div style={{ fontSize: 10, color: 'var(--text2)', marginBottom: 2 }}>{label}</div>
+                            <div style={{ fontWeight: 700, color: color || 'var(--text)' }}>{value}</div>
                           </div>
                         ))}
                       </div>
-                    )}
-                  </div>
-                  <div className="form-group">
-                    <label>Dólar costeo (opcional)</label>
-                    <input type="number" value={form.dolar_costeo} onChange={e => setF('dolar_costeo', e.target.value)} placeholder="ej: 44.00" />
-                  </div>
-                </div>
+                    </div>
+                  )}
+                </>
               )}
 
-              {(calc.totalFinal > 0 || calc.totalUYU > 0) && (
+              {form.moneda === 'UYU' && calc.totalFinal > 0 && (
                 <div style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12, marginBottom: 12 }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, textAlign: 'center' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, textAlign: 'center' }}>
                     {[
                       { label: 'Subtotal', value: fmtUYU(calc.subtotal) },
                       { label: 'IVA 22%', value: fmtUYU(calc.iva), color: 'var(--danger)' },
-                      { label: 'Total $UY', value: fmtUYU(calc.totalUYU) },
-                      { label: 'Total Final', value: fmtUYU(calc.totalFinal), color: 'var(--accent)' },
+                      { label: 'Total', value: fmtUYU(calc.totalFinal), color: 'var(--accent)' },
                     ].map(({ label, value, color }) => (
                       <div key={label}>
                         <div style={{ fontSize: 10, color: 'var(--text2)', marginBottom: 2 }}>{label}</div>
