@@ -58,9 +58,9 @@ export default function IVA({ onMenuClick }) {
   const sinIVA = filtradas.filter(x => x.acredita_iva === false)
 
   const totalCF = conIVA.reduce((a, x) => a + (x.iva || 0), 0)
-  const totalDB = 0 // ventas pendientes
+  const totalDB = 0
   const posicion = totalCF - totalDB
-  const totalCompras = filtradas.reduce((a, x) => a + (x.total_final || x.total_uyu || 0), 0)
+  const totalCompras = filtradas.reduce((a, x) => a + (x.total_uyu || 0), 0)
 
   let periodoStr = 'Todo el historial'
   if (desde && hasta) periodoStr = `Del ${fmtFecha(desde)} al ${fmtFecha(hasta)}`
@@ -77,7 +77,6 @@ export default function IVA({ onMenuClick }) {
       </div>
 
       <div className="content">
-        {/* Filtros */}
         <div className="card">
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             <select value={mes} onChange={e => onMesChange(e.target.value)} style={{ width: 160 }}>
@@ -97,7 +96,6 @@ export default function IVA({ onMenuClick }) {
           )}
         </div>
 
-        {/* Resumen */}
         <div className="iva-grid">
           <div className="iva-card">
             <div className="value" style={{ color: 'var(--success)' }}>{fmtUYU(totalCF)}</div>
@@ -120,12 +118,11 @@ export default function IVA({ onMenuClick }) {
           </div>
           <div className="iva-card">
             <div className="value">{fmtUYU(totalCompras)}</div>
-            <div className="label">Total compras período</div>
+            <div className="label">Total compras (base fiscal)</div>
             <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4 }}>{filtradas.length} facturas</div>
           </div>
         </div>
 
-        {/* Tabla CF */}
         <div className="table-wrap" style={{ marginBottom: 16 }}>
           <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 13 }}>
             📥 IVA Compras (Crédito Fiscal) — facturas que acreditan IVA
@@ -142,7 +139,7 @@ export default function IVA({ onMenuClick }) {
                 <thead>
                   <tr>
                     <th>#</th><th>Proveedor</th><th>Fecha</th><th>Factura</th>
-                    <th>Total Final</th><th>Subtotal</th><th>IVA 22%</th><th>Moneda</th>
+                    <th>Base fiscal $UY</th><th>Subtotal</th><th>IVA 22%</th><th>Moneda</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -152,7 +149,7 @@ export default function IVA({ onMenuClick }) {
                       <td><strong>{x.proveedor}</strong></td>
                       <td>{fmtFecha(x.fecha)}</td>
                       <td>{x.factura || '—'}</td>
-                      <td><strong>{fmtUYU(x.total_final || x.total_uyu)}</strong></td>
+                      <td><strong>{fmtUYU(x.total_uyu)}</strong></td>
                       <td>{fmtUYU(x.subtotal)}</td>
                       <td style={{ color: 'var(--success)', fontWeight: 700 }}>{fmtUYU(x.iva)}</td>
                       <td><span className="badge badge-blue">{x.moneda}</span></td>
@@ -165,7 +162,7 @@ export default function IVA({ onMenuClick }) {
                       TOTAL ({conIVA.length} facturas)
                     </td>
                     <td style={{ fontWeight: 700, padding: '8px 12px' }}>
-                      {fmtUYU(conIVA.reduce((a, x) => a + (x.total_final || x.total_uyu || 0), 0))}
+                      {fmtUYU(conIVA.reduce((a, x) => a + (x.total_uyu || 0), 0))}
                     </td>
                     <td style={{ fontWeight: 700, padding: '8px 12px' }}>
                       {fmtUYU(conIVA.reduce((a, x) => a + (x.subtotal || 0), 0))}
@@ -181,7 +178,6 @@ export default function IVA({ onMenuClick }) {
           )}
         </div>
 
-        {/* Sin IVA */}
         {sinIVA.length > 0 && (
           <div className="table-wrap">
             <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 13 }}>
@@ -198,7 +194,7 @@ export default function IVA({ onMenuClick }) {
                     <td>{x.proveedor}</td>
                     <td>{fmtFecha(x.fecha)}</td>
                     <td>{x.factura || '—'}</td>
-                    <td>{fmtUYU(x.total_final || x.total_uyu)}</td>
+                    <td>{fmtUYU(x.total_uyu)}</td>
                   </tr>
                 ))}
               </tbody>
