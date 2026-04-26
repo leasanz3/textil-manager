@@ -8,11 +8,15 @@ export default function CatalogoTelas({ onMenuClick }) {
   const [proveedores, setProveedores] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [filterProv, setFilterProv] = useState('')
   const [modal, setModal] = useState(false)
   const [editing, setEditing] = useState(null)
   const [saving, setSaving] = useState(false)
 
-  const emptyForm = { tipo: '', codigo: '', color: '', proveedor_id: '', unidad: 'm', precio_ref: '', moneda: 'UYU', notas: '' }
+  const emptyForm = {
+    tipo: '', codigo: '', color: '', proveedor_id: '',
+    unidad: 'kg', rendimiento: '', precio_ref: '', moneda_ref: 'USD', notas: ''
+  }
   const [form, setForm] = useState(emptyForm)
   const setF = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
@@ -29,10 +33,25 @@ export default function CatalogoTelas({ onMenuClick }) {
     setLoading(false)
   }
 
-  function openNew() { setEditing(null); setForm(emptyForm); setModal(true) }
+  function openNew(provId = '') {
+    setEditing(null)
+    setForm({ ...emptyForm, proveedor_id: provId })
+    setModal(true)
+  }
+
   function openEdit(t) {
     setEditing(t.id)
-    setForm({ tipo: t.tipo || '', codigo: t.codigo || '', color: t.color || '', proveedor_id: t.proveedor_id || '', unidad: t.unidad || 'm', precio_ref: t.precio || '', moneda: t.moneda || 'UYU', notas: t.notas || '' })
+    setForm({
+      tipo: t.tipo || '',
+      codigo: t.codigo || '',
+      color: t.color || '',
+      proveedor_id: t.proveedor_id || '',
+      unidad: t.unidad || 'kg',
+      rendimiento: t.rendimiento || '',
+      precio_ref: t.precio || '',
+      moneda_ref: t.moneda || 'USD',
+      notas: t.notas || ''
+    })
     setModal(true)
   }
 
@@ -40,10 +59,26 @@ export default function CatalogoTelas({ onMenuClick }) {
     if (!form.tipo) return alert('El nombre de la tela es obligatorio')
     setSaving(true)
     const prov = proveedores.find(p => p.id === parseInt(form.proveedor_id))
-    const datos = { tipo: form.tipo, codigo: form.codigo || null, color: form.color || null, proveedor: prov?.nombre || null, proveedor_id: parseInt(form.proveedor_id) || null, unidad: form.unidad, precio: parseFloat(form.precio_ref) || null, moneda: form.moneda, notas: form.notas || null }
-    if (editing) { await supabase.from('telas').update(datos).eq('id', editing) }
-    else { await supabase.from('telas').insert({ ...datos, metros: 0, usados: 0 }) }
-    setSaving(false); setModal(false); fetchAll()
+    const datos = {
+      tipo: form.tipo,
+      codigo: form.codigo || null,
+      color: form.color || null,
+      proveedor: prov?.nombre || null,
+      proveedor_id: parseInt(form.proveedor_id) || null,
+      unidad: form.unidad,
+      rendimiento: parseFloat(form.rendimiento) || null,
+      precio: parseFloat(form.precio_ref) || null,
+      moneda: form.moneda_ref,
+      notas: form.notas || null
+    }
+    if (editing) {
+      await supabase.from('telas').update(datos).eq('id', editing)
+    } else {
+      await supabase.from('telas').insert({ ...datos, metros: 0, usados: 0 })
+    }
+    setSaving(false)
+    setModal(false)
+    fetchAll()
   }
 
   async function handleDelete(id, e) {
@@ -53,7 +88,23 @@ export default function CatalogoTelas({ onMenuClick }) {
     fetchAll()
   }
 
-  const filtered = telas.filter(t => !search || t.tipo?.toLowerCase().includes(search.toLowerCase()) || t.codigo?.toLowerCase().includes(search.toLowerCase()) || t.proveedor?.toLowerCase().includes(search.toLowerCase()))
+  const filtered = telas.filter(t => {
+    const q = search.toLowerCase()
+    const ms = !q || t.tipo?.toLowerCase().includes(q) || t.codigo?.toLowerCase().includes(q) || t.proveedor?.toLowerCase().includes(q)
+    const mp = !filterProv || String(t.proveedor_id) === filterProv
+    return ms && mp
+  })
+
+  // Precio en metros calculado
+  const precioEnMetros = (t) => {
+    if (!t.precio || !t.rendimiento || t.unidad !== 'kg') return null
+    return t.precio / t.rendimiento
+  }
+
+  const precioRefEnMetrosForm = () => {
+    if (!form.precio_ref || !form.rendimiento || form.unidad !== 'kg') return null
+    return parseFloat(form.precio_ref) / parseFloat(form.rendimiento)
+  }
 
   return (
     <div>
@@ -62,37 +113,85 @@ export default function CatalogoTelas({ onMenuClick }) {
           <button className="mobile-menu-btn" onClick={onMenuClick}>☰</button>
           <h2>🧶 Catálogo de Telas</h2>
         </div>
-        <button className="btn btn-primary btn-sm" onClick={openNew}>+ Nueva tela</button>
+        <button className="btn btn-primary btn-sm" onClick={() => openNew()}>+ Nueva tela</button>
       </div>
+
       <div className="content">
         <div className="stat-grid">
           <div className="stat-card"><div className="stat-value">{telas.length}</div><div className="stat-label">Tipos de tela</div></div>
           <div className="stat-card"><div className="stat-value">{telas.filter(t => t.proveedor_id).length}</div><div className="stat-label">Con proveedor</div></div>
+          <div className="stat-card"><div className="stat-value">{telas.filter(t => !t.rendimiento && t.unidad === 'kg').length}</div><div className="stat-label">⚠ Sin rendimiento</div></div>
         </div>
+
         <div className="table-wrap">
           <div className="table-toolbar">
-            <div className="search-input" style={{ flex: 1, maxWidth: 280 }}>
-              <input placeholder="Buscar tela, código o proveedor..." value={search} onChange={e => setSearch(e.target.value)} />
+            <div className="search-input" style={{ flex: 1, maxWidth: 240 }}>
+              <input placeholder="Buscar tela o código..." value={search} onChange={e => setSearch(e.target.value)} />
             </div>
+            <select value={filterProv} onChange={e => setFilterProv(e.target.value)} style={{ width: 180 }}>
+              <option value="">Todos los proveedores</option>
+              {proveedores.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            </select>
           </div>
+
           {loading ? <div className="loading"><div className="spinner" /> Cargando...</div>
-          : filtered.length === 0 ? <div className="empty-state"><div className="icon">🧶</div><h3>No hay telas en el catálogo</h3></div>
-          : (
+          : filtered.length === 0 ? (
+            <div className="empty-state">
+              <div className="icon">🧶</div>
+              <h3>No hay telas en el catálogo</h3>
+              <p>Agregá tu primera tela con el botón de arriba</p>
+            </div>
+          ) : (
             <div style={{ overflowX: 'auto' }}>
               <table>
-                <thead><tr><th>Tipo / nombre</th><th>Código</th><th>Color</th><th>Proveedor</th><th>Unidad</th><th>Precio ref.</th><th></th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>Tipo / nombre</th>
+                    <th>Código</th>
+                    <th>Color</th>
+                    <th>Proveedor</th>
+                    <th>Unidad</th>
+                    <th>Rendimiento</th>
+                    <th>Precio ref. (unitario)</th>
+                    <th>Precio ref. (metro)</th>
+                    <th></th>
+                  </tr>
+                </thead>
                 <tbody>
-                  {filtered.map(t => (
-                    <tr key={t.id} onClick={() => openEdit(t)}>
-                      <td><strong>{t.tipo || '—'}</strong></td>
-                      <td style={{ fontSize: 11, color: 'var(--accent)' }}>{t.codigo || '—'}</td>
-                      <td>{t.color || '—'}</td>
-                      <td>{t.proveedor || '—'}</td>
-                      <td>{t.unidad || 'm'}</td>
-                      <td>{t.precio ? `${t.moneda === 'USD' ? 'U$D' : '$'} ${fmtNum(t.precio)}` : '—'}</td>
-                      <td onClick={e => handleDelete(t.id, e)}><button className="btn btn-danger btn-sm">🗑</button></td>
-                    </tr>
-                  ))}
+                  {filtered.map(t => {
+                    const pm = precioEnMetros(t)
+                    return (
+                      <tr key={t.id} onClick={() => openEdit(t)}>
+                        <td><strong>{t.tipo || '—'}</strong></td>
+                        <td style={{ fontSize: 11, color: 'var(--accent)' }}>{t.codigo || '—'}</td>
+                        <td>{t.color || '—'}</td>
+                        <td>{t.proveedor || '—'}</td>
+                        <td>{t.unidad || 'kg'}</td>
+                        <td>
+                          {t.rendimiento
+                            ? `${t.rendimiento} m/kg`
+                            : t.unidad === 'kg'
+                              ? <span style={{ color: 'var(--warning)', fontSize: 11 }}>⚠ Pendiente</span>
+                              : '—'}
+                        </td>
+                        <td>
+                          {t.precio
+                            ? `${t.moneda === 'USD' ? 'U$D' : '$'} ${fmtNum(t.precio)} / ${t.unidad}`
+                            : '—'}
+                        </td>
+                        <td>
+                          {pm != null
+                            ? <span style={{ color: 'var(--accent)' }}>{t.moneda === 'USD' ? 'U$D' : '$'} {fmtNum(pm)} / m</span>
+                            : t.unidad === 'kg' && t.precio
+                              ? <span style={{ color: 'var(--warning)', fontSize: 11 }}>⚠ Falta rendimiento</span>
+                              : '—'}
+                        </td>
+                        <td onClick={e => handleDelete(t.id, e)}>
+                          <button className="btn btn-danger btn-sm">🗑</button>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -102,41 +201,82 @@ export default function CatalogoTelas({ onMenuClick }) {
 
       {modal && (
         <div className="modal-overlay" onClick={() => setModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+          <div className="modal modal-lg" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>{editing ? '✏ Editar tela' : '🧶 Nueva tela'}</h3>
               <button className="close-btn" onClick={() => setModal(false)}>✕</button>
             </div>
             <div className="modal-body">
               <div className="form-grid">
-                <div className="form-group"><label>Tipo / nombre *</label><input value={form.tipo} onChange={e => setF('tipo', e.target.value)} placeholder="ej: Jersey 24/1 algodón" /></div>
-                <div className="form-group"><label>Código</label><input value={form.codigo} onChange={e => setF('codigo', e.target.value)} placeholder="ej: JRS-241-BL" /></div>
-                <div className="form-group"><label>Color / descripción</label><input value={form.color} onChange={e => setF('color', e.target.value)} placeholder="ej: Blanco, 150cm" /></div>
-                <div className="form-group"><label>Proveedor</label>
+                <div className="form-group">
+                  <label>Tipo / nombre</label>
+                  <input value={form.tipo} onChange={e => setF('tipo', e.target.value)} placeholder="ej: Deportivo Piquet New" />
+                </div>
+                <div className="form-group">
+                  <label>Proveedor</label>
                   <select value={form.proveedor_id} onChange={e => setF('proveedor_id', e.target.value)}>
                     <option value="">— Sin proveedor —</option>
                     {proveedores.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
                   </select>
                 </div>
-                <div className="form-group"><label>Unidad</label>
+                <div className="form-group">
+                  <label>Color / descripción</label>
+                  <input value={form.color} onChange={e => setF('color', e.target.value)} placeholder="ej: Amarillo, Blanco..." />
+                </div>
+                <div className="form-group">
+                  <label>Código del proveedor</label>
+                  <input value={form.codigo} onChange={e => setF('codigo', e.target.value)} placeholder="opcional" />
+                </div>
+                <div className="form-group">
+                  <label>Unidad de compra</label>
                   <select value={form.unidad} onChange={e => setF('unidad', e.target.value)}>
-                    <option value="m">Metros (m)</option>
                     <option value="kg">Kilogramos (kg)</option>
+                    <option value="m">Metros (m)</option>
                   </select>
                 </div>
-                <div className="form-group"><label>Moneda</label>
-                  <select value={form.moneda} onChange={e => setF('moneda', e.target.value)}>
+                {form.unidad === 'kg' && (
+                  <div className="form-group">
+                    <label>Rendimiento (metros por kg)</label>
+                    <input type="number" value={form.rendimiento} onChange={e => setF('rendimiento', e.target.value)} placeholder="ej: 3.5" />
+                    <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4 }}>Podés completarlo después</div>
+                  </div>
+                )}
+                <div className="form-group">
+                  <label>Moneda del precio</label>
+                  <select value={form.moneda_ref} onChange={e => setF('moneda_ref', e.target.value)}>
+                    <option value="USD">USD Dólares</option>
                     <option value="UYU">$ Pesos UY</option>
-                    <option value="USD">USD</option>
                   </select>
                 </div>
-                <div className="form-group"><label>Precio de referencia</label><input type="number" value={form.precio_ref} onChange={e => setF('precio_ref', e.target.value)} placeholder="0.00" /></div>
-                <div className="form-group"><label>Notas</label><input value={form.notas} onChange={e => setF('notas', e.target.value)} placeholder="Observaciones..." /></div>
+                <div className="form-group">
+                  <label>Precio referencia (por {form.unidad})</label>
+                  <input type="number" value={form.precio_ref} onChange={e => setF('precio_ref', e.target.value)} placeholder="último precio unitario pagado" />
+                  <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 4 }}>Sin descuento. Se actualiza con cada compra nueva.</div>
+                </div>
+              </div>
+
+              {precioRefEnMetrosForm() && (
+                <div style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 10, fontSize: 12, marginBottom: 12 }}>
+                  <strong>Precio referencia en metros: </strong>
+                  <span style={{ color: 'var(--accent)' }}>
+                    {form.moneda_ref === 'USD' ? 'U$D' : '$'} {fmtNum(precioRefEnMetrosForm())} / m
+                  </span>
+                  <span style={{ color: 'var(--text2)', marginLeft: 8 }}>
+                    ({form.precio_ref} ÷ {form.rendimiento} m/kg)
+                  </span>
+                </div>
+              )}
+
+              <div className="form-group">
+                <label>Notas</label>
+                <input value={form.notas} onChange={e => setF('notas', e.target.value)} placeholder="Composición, ancho, observaciones..." />
               </div>
             </div>
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setModal(false)}>Cancelar</button>
-              <button className="btn btn-primary" onClick={handleSave} disabled={saving}>{saving ? 'Guardando...' : '✔ Guardar'}</button>
+              <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+                {saving ? 'Guardando...' : '✔ Guardar'}
+              </button>
             </div>
           </div>
         </div>
