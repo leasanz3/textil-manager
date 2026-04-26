@@ -10,7 +10,7 @@ const emptyItem = () => ({
   _key: Math.random(),
   tela_id: '', cantidad: '', unidad: 'kg',
   precio_lista: '', moneda: 'USD',
-  total_factura: '', // si se pisa manual
+  total_factura: '',
   notas: ''
 })
 
@@ -23,6 +23,7 @@ export default function ComprasTela({ onMenuClick }) {
   const [modal, setModal] = useState(false)
   const [modalCatalogo, setModalCatalogo] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [editingId, setEditingId] = useState(null)
   const [editingItemKey, setEditingItemKey] = useState(null)
 
   const [form, setForm] = useState({
@@ -59,10 +60,8 @@ export default function ComprasTela({ onMenuClick }) {
       compra_id: compraId,
       proveedor_id: factura?.proveedor_id ? String(factura.proveedor_id) : f.proveedor_id,
       fecha: factura?.fecha || f.fecha,
-      // TC se autocompleta desde la factura si tiene dolar de pago
       tc: factura?.dolar_costeo ? String(factura.dolar_costeo) : f.tc
     }))
-    // Si la factura es en USD, poner moneda USD en los items
     if (factura?.moneda === 'USD') {
       setItems(prev => prev.map(i => ({ ...i, moneda: 'USD' })))
     } else if (factura?.moneda === 'UYU') {
@@ -70,18 +69,14 @@ export default function ComprasTela({ onMenuClick }) {
     }
   }
 
-  // Calculos por item
   function calcItem(item) {
     const cantidad = parseFloat(item.cantidad) || 0
     const precioLista = parseFloat(item.precio_lista) || 0
     const subtotal = cantidad * precioLista
-
-    // Si pisaron el total manual, calcular descuento
     const totalManual = item.total_factura !== '' ? parseFloat(item.total_factura) : null
     const totalFinal = totalManual !== null ? totalManual : subtotal
     const descMonto = subtotal > 0 ? subtotal - totalFinal : 0
     const descPct = subtotal > 0 ? (descMonto / subtotal) * 100 : 0
-
     return { subtotal, totalFinal, descMonto, descPct }
   }
 
@@ -89,7 +84,6 @@ export default function ComprasTela({ onMenuClick }) {
     setItems(prev => prev.map(item => {
       if (item._key !== key) return item
       const updated = { ...item, [field]: value }
-      // Si cambia cantidad o precio, resetear total manual para recalcular
       if (field === 'cantidad' || field === 'precio_lista') {
         updated.total_factura = ''
       }
@@ -98,8 +92,32 @@ export default function ComprasTela({ onMenuClick }) {
   }
 
   function openNew() {
+    setEditingId(null)
     setForm({ compra_id: '', proveedor_id: '', fecha: new Date().toISOString().split('T')[0], tc: '', notas: '' })
     setItems([emptyItem()])
+    setModal(true)
+  }
+
+  function openEdit(c) {
+    setEditingId(c.id)
+    const factura = facturas.find(f => f.id === c.compra_id)
+    setForm({
+      compra_id: c.compra_id ? String(c.compra_id) : '',
+      proveedor_id: factura?.proveedor_id ? String(factura.proveedor_id) : '',
+      fecha: c.fecha || new Date().toISOString().split('T')[0],
+      tc: c.tc ? String(c.tc) : '',
+      notas: c.notas || ''
+    })
+    setItems([{
+      _key: Math.random(),
+      tela_id: c.tela_id ? String(c.tela_id) : '',
+      cantidad: c.cantidad || '',
+      unidad: c.unidad || 'kg',
+      precio_lista: c.precio_lista || '',
+      moneda: c.moneda || 'USD',
+      total_factura: c.total_factura || '',
+      notas: c.notas || ''
+    }])
     setModal(true)
   }
 
@@ -135,9 +153,12 @@ export default function ComprasTela({ onMenuClick }) {
     if (itemsValidos.length === 0) return alert('Completá al menos un renglón con tela, cantidad y precio')
 
     setSaving(true)
-    for (const item of itemsValidos) {
+
+    if (editingId) {
+      // Modo edición — actualizar el registro existente
+      const item = itemsValidos[0]
       const calc = calcItem(item)
-      await supabase.from('compras_tela').insert({
+      await supabase.from('compras_tela').update({
         tela_id: parseInt(item.tela_id),
         compra_id: parseInt(form.compra_id),
         cantidad: parseFloat(item.cantidad),
@@ -151,13 +172,38 @@ export default function ComprasTela({ onMenuClick }) {
         descuento_pct: calc.descPct || null,
         fecha: form.fecha,
         notas: item.notas || null
-      })
+      }).eq('id', editingId)
 
-      // Actualizar precio referencia en catálogo
       await supabase.from('telas').update({
         precio: parseFloat(item.precio_lista),
         moneda: item.moneda
       }).eq('id', parseInt(item.tela_id))
+
+    } else {
+      // Modo nuevo — insertar todos los renglones
+      for (const item of itemsValidos) {
+        const calc = calcItem(item)
+        await supabase.from('compras_tela').insert({
+          tela_id: parseInt(item.tela_id),
+          compra_id: parseInt(form.compra_id),
+          cantidad: parseFloat(item.cantidad),
+          unidad: item.unidad,
+          precio_unitario: parseFloat(item.precio_lista),
+          precio_lista: parseFloat(item.precio_lista),
+          moneda: item.moneda,
+          tc: parseFloat(form.tc) || null,
+          total_factura: calc.totalFinal || null,
+          descuento_monto: calc.descMonto || null,
+          descuento_pct: calc.descPct || null,
+          fecha: form.fecha,
+          notas: item.notas || null
+        })
+
+        await supabase.from('telas').update({
+          precio: parseFloat(item.precio_lista),
+          moneda: item.moneda
+        }).eq('id', parseInt(item.tela_id))
+      }
     }
 
     setSaving(false)
@@ -211,7 +257,7 @@ export default function ComprasTela({ onMenuClick }) {
                 </thead>
                 <tbody>
                   {compras.map(c => (
-                    <tr key={c.id}>
+                    <tr key={c.id} onClick={() => openEdit(c)} style={{ cursor: 'pointer' }}>
                       <td>
                         <strong>{c.telas?.tipo || '—'}</strong>
                         {c.telas?.color && <div style={{ fontSize: 11, color: 'var(--text2)' }}>{c.telas.color}</div>}
@@ -242,17 +288,14 @@ export default function ComprasTela({ onMenuClick }) {
         </div>
       </div>
 
-      {/* MODAL NUEVA COMPRA */}
       {modal && (
         <div className="modal-overlay" onClick={() => setModal(false)}>
           <div className="modal" style={{ maxWidth: 960 }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>🛒 Nueva compra de tela</h3>
+              <h3>{editingId ? '✏ Editar compra de tela' : '🛒 Nueva compra de tela'}</h3>
               <button className="close-btn" onClick={() => setModal(false)}>✕</button>
             </div>
             <div className="modal-body">
-
-              {/* Cabecera */}
               <div className="form-grid" style={{ marginBottom: 16 }}>
                 <div className="form-group">
                   <label>Factura de compra *</label>
@@ -274,12 +317,7 @@ export default function ComprasTela({ onMenuClick }) {
                     TC de pago
                     {form.tc && <span style={{ fontSize: 11, color: 'var(--success)', marginLeft: 6 }}>✓ de la factura</span>}
                   </label>
-                  <input
-                    type="number"
-                    value={form.tc}
-                    onChange={e => setForm(f => ({ ...f, tc: e.target.value }))}
-                    placeholder="se completa solo si la factura tiene TC"
-                  />
+                  <input type="number" value={form.tc} onChange={e => setForm(f => ({ ...f, tc: e.target.value }))} placeholder="se completa solo si la factura tiene TC" />
                 </div>
               </div>
 
@@ -292,7 +330,6 @@ export default function ComprasTela({ onMenuClick }) {
                 </div>
               )}
 
-              {/* Tabla de renglones */}
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ fontSize: 12 }}>
                   <thead>
@@ -333,22 +370,13 @@ export default function ComprasTela({ onMenuClick }) {
                                   <option key={t.id} value={t.id}>{t.tipo}{t.color ? ` · ${t.color}` : ''}</option>
                                 ))}
                               </select>
-                              <button
-                                type="button"
-                                className="btn btn-secondary btn-sm"
-                                style={{ padding: '2px 6px', fontSize: 10 }}
-                                onClick={() => openNuevaTela(item._key)}
-                              >+ nueva</button>
+                              {!editingId && (
+                                <button type="button" className="btn btn-secondary btn-sm" style={{ padding: '2px 6px', fontSize: 10 }} onClick={() => openNuevaTela(item._key)}>+ nueva</button>
+                              )}
                             </div>
                           </td>
                           <td>
-                            <input
-                              type="number"
-                              value={item.cantidad}
-                              onChange={e => updateItem(item._key, 'cantidad', e.target.value)}
-                              placeholder="0.000"
-                              style={{ width: 75 }}
-                            />
+                            <input type="number" value={item.cantidad} onChange={e => updateItem(item._key, 'cantidad', e.target.value)} placeholder="0.000" style={{ width: 75 }} />
                           </td>
                           <td>
                             <select value={item.unidad} onChange={e => updateItem(item._key, 'unidad', e.target.value)} style={{ width: 60 }}>
@@ -357,13 +385,7 @@ export default function ComprasTela({ onMenuClick }) {
                             </select>
                           </td>
                           <td>
-                            <input
-                              type="number"
-                              value={item.precio_lista}
-                              onChange={e => updateItem(item._key, 'precio_lista', e.target.value)}
-                              placeholder="0.00"
-                              style={{ width: 90 }}
-                            />
+                            <input type="number" value={item.precio_lista} onChange={e => updateItem(item._key, 'precio_lista', e.target.value)} placeholder="0.00" style={{ width: 90 }} />
                           </td>
                           <td>
                             <select value={item.moneda} onChange={e => updateItem(item._key, 'moneda', e.target.value)} style={{ width: 60 }}>
@@ -381,29 +403,15 @@ export default function ComprasTela({ onMenuClick }) {
                             />
                           </td>
                           <td>
-                            <input
-                              type="number"
-                              value={tieneDescuento ? calc.descMonto.toFixed(2) : ''}
-                              readOnly
-                              placeholder="0.00"
-                              style={{ width: 80, color: 'var(--success)', background: 'transparent' }}
-                            />
+                            <input type="number" value={tieneDescuento ? calc.descMonto.toFixed(2) : ''} readOnly placeholder="0.00" style={{ width: 80, color: 'var(--success)', background: 'transparent' }} />
                           </td>
                           <td>
-                            <input
-                              type="number"
-                              value={tieneDescuento ? calc.descPct.toFixed(2) : ''}
-                              readOnly
-                              placeholder="0.00"
-                              style={{ width: 70, color: 'var(--success)', background: 'transparent' }}
-                            />
+                            <input type="number" value={tieneDescuento ? calc.descPct.toFixed(2) : ''} readOnly placeholder="0.00" style={{ width: 70, color: 'var(--success)', background: 'transparent' }} />
                           </td>
                           <td>
-                            <button
-                              type="button"
-                              className="btn btn-danger btn-sm"
-                              onClick={() => setItems(prev => prev.filter(i => i._key !== item._key))}
-                            >✕</button>
+                            {!editingId && (
+                              <button type="button" className="btn btn-danger btn-sm" onClick={() => setItems(prev => prev.filter(i => i._key !== item._key))}>✕</button>
+                            )}
                           </td>
                         </tr>
                       )
@@ -412,13 +420,11 @@ export default function ComprasTela({ onMenuClick }) {
                 </table>
               </div>
 
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                style={{ marginTop: 10 }}
-                onClick={() => setItems(prev => [...prev, emptyItem()])}>
-                + Agregar renglón
-              </button>
+              {!editingId && (
+                <button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: 10 }} onClick={() => setItems(prev => [...prev, emptyItem()])}>
+                  + Agregar renglón
+                </button>
+              )}
 
               <div className="form-group" style={{ marginTop: 12 }}>
                 <label>Notas</label>
@@ -428,14 +434,13 @@ export default function ComprasTela({ onMenuClick }) {
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setModal(false)}>Cancelar</button>
               <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-                {saving ? 'Guardando...' : '✔ Guardar compra'}
+                {saving ? 'Guardando...' : editingId ? '✔ Guardar cambios' : '✔ Guardar compra'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL NUEVA TELA RÁPIDA */}
       {modalCatalogo && (
         <div className="modal-overlay" style={{ zIndex: 1100 }} onClick={() => setModalCatalogo(false)}>
           <div className="modal" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
