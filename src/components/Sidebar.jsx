@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 
 const NAV = [
@@ -7,8 +7,12 @@ const NAV = [
   { path: '/productos', icon: '📦', label: 'Productos' },
   { section: 'Telas' },
   { path: '/telas/catalogo', icon: '🧶', label: 'Catálogo' },
-  { path: '/telas/compras', icon: '🛒', label: 'Compras de tela' },
+  { path: '/telas/compras', icon: '🛒', label: 'Compras' },
   { path: '/telas/stock', icon: '📊', label: 'Stock' },
+  { section: 'Avíos' },
+  { path: '/avios/catalogo', icon: '🧵', label: 'Catálogo' },
+  { path: '/avios/compras', icon: '🛒', label: 'Compras' },
+  { path: '/avios/stock', icon: '📊', label: 'Stock' },
   { section: 'Compras' },
   { path: '/proveedores', icon: '🏢', label: 'Proveedores' },
   { path: '/compras', icon: '🧾', label: 'Facturas' },
