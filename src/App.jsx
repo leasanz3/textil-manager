@@ -6,6 +6,9 @@ import { Productos, Contactos } from './pages/Telas'
 import CatalogoTelas from './pages/CatalogoTelas'
 import ComprasTela from './pages/ComprasTela'
 import StockTela from './pages/StockTela'
+import CatalogoAvios from './pages/CatalogoAvios'
+import ComprasAvios from './pages/ComprasAvios'
+import StockAvios from './pages/StockAvios'
 import Proveedores from './pages/Proveedores'
 import Compras from './pages/Compras'
 import IVA from './pages/IVA'
@@ -27,6 +30,10 @@ export default function App() {
             <Route path="/telas/compras" element={<ComprasTela onMenuClick={menu} />} />
             <Route path="/telas/stock" element={<StockTela onMenuClick={menu} />} />
             <Route path="/telas" element={<Navigate to="/telas/catalogo" replace />} />
+            <Route path="/avios/catalogo" element={<CatalogoAvios onMenuClick={menu} />} />
+            <Route path="/avios/compras" element={<ComprasAvios onMenuClick={menu} />} />
+            <Route path="/avios/stock" element={<StockAvios onMenuClick={menu} />} />
+            <Route path="/avios" element={<Navigate to="/avios/catalogo" replace />} />
             <Route path="/proveedores" element={<Proveedores onMenuClick={menu} />} />
             <Route path="/compras" element={<Compras onMenuClick={menu} />} />
             <Route path="/iva" element={<IVA onMenuClick={menu} />} />
