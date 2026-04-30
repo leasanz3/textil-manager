@@ -1,1 +1,0 @@
-export { Productos } from './Telas'
