@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 
 const TABLAS = {
@@ -8,6 +8,57 @@ const TABLAS = {
   mallaesp: { label: 'Malla Especial', talles: ['54', '56', '58'] }
 }
 
+function PiezaRow({ pieza, index, onEdit, onDelete, onDragStart, onDragOver, onDrop }) {
+  const [editing, setEditing] = useState(false)
+  const [local, setLocal] = useState({ ...pieza })
+
+  function save() {
+    onEdit(index, local)
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4, background: 'var(--bg3)', padding: 6, borderRadius: 'var(--radius)', flexWrap: 'wrap' }}>
+        <input value={local.nombre} onChange={e => setLocal(f => ({ ...f, nombre: e.target.value }))} style={{ flex: 2, minWidth: 100 }} autoFocus />
+        <input
+          value={local.mult}
+          onChange={e => setLocal(f => ({ ...f, mult: e.target.value.replace(/[^0-9]/g, '') }))}
+          style={{ width: 45 }}
+          placeholder="1"
+        />
+        <span style={{ fontSize: 11, color: 'var(--text2)' }}>x prenda</span>
+        <select value={local.tela_rol} onChange={e => setLocal(f => ({ ...f, tela_rol: e.target.value }))} style={{ width: 90 }}>
+          <option value="tela1">Tela 1</option>
+          <option value="tela2">Tela 2</option>
+          <option value="rib">RIB</option>
+        </select>
+        <button className="btn btn-primary btn-sm" onClick={save}>✔</button>
+        <button className="btn btn-secondary btn-sm" onClick={() => setEditing(false)}>✕</button>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      draggable
+      onDragStart={() => onDragStart(index)}
+      onDragOver={e => { e.preventDefault(); onDragOver(index) }}
+      onDrop={() => onDrop(index)}
+      style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4, fontSize: 12, cursor: 'grab', padding: '4px 6px', borderRadius: 'var(--radius)', background: 'var(--bg2)' }}
+    >
+      <span style={{ color: 'var(--text2)', cursor: 'grab', fontSize: 14 }}>⠿</span>
+      <span style={{ flex: 2 }}>{pieza.nombre}</span>
+      <span style={{ color: 'var(--text2)' }}>×{pieza.mult}</span>
+      <span style={{ color: 'var(--accent)', minWidth: 60 }}>
+        {pieza.tela_rol === 'tela1' ? 'Tela 1' : pieza.tela_rol === 'tela2' ? 'Tela 2' : 'RIB'}
+      </span>
+      <button className="btn btn-secondary btn-sm" onClick={() => setEditing(true)}>✏</button>
+      <button className="btn btn-danger btn-sm" onClick={() => onDelete(index)}>✕</button>
+    </div>
+  )
+}
+
 export default function Productos({ onMenuClick }) {
   const [productos, setProductos] = useState([])
   const [telas, setTelas] = useState([])
@@ -15,26 +66,26 @@ export default function Productos({ onMenuClick }) {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [modal, setModal] = useState(false)
-  const [vistaFicha, setVistaFicha] = useState(null) // producto seleccionado para ver ficha
+  const [vistaFicha, setVistaFicha] = useState(null)
   const [editing, setEditing] = useState(null)
   const [saving, setSaving] = useState(false)
   const [filterProvTela, setFilterProvTela] = useState('')
   const [filterProvTela2, setFilterProvTela2] = useState('')
   const [filterProvRib, setFilterProvRib] = useState('')
+  const dragSrc = useRef(null)
 
   const emptyForm = {
     nombre: '', codigo: '', tabla: 'adulto', base_id: '',
     tela1_id: '', tela2_id: '', rib_id: '',
     piezas: [],
-    avios_medidas: [], // [{nombre, unit, medidas: {T4: 18, T6: 19, ...}, todos: ''}]
+    avios_medidas: [],
     terminaciones: { grifaTalle: false, grifa: false, talle: false },
     terminaciones_extra: [],
     notas: ''
   }
   const [form, setForm] = useState(emptyForm)
-
-  const [nuevaPieza, setNuevaPieza] = useState({ nombre: '', mult: 1, tela_rol: 'tela1' })
-  const [nuevoAvio, setNuevoAvio] = useState({ nombre: '', unit: 'cm', todos: '' })
+  const [nuevaPieza, setNuevaPieza] = useState({ nombre: '', mult: '1', tela_rol: 'tela1' })
+  const [nuevoAvio, setNuevoAvio] = useState({ nombre: '', unit: 'cm', todos: '', ancho: '' })
   const [nuevaTerm, setNuevaTerm] = useState('')
 
   useEffect(() => { fetchAll() }, [])
@@ -65,15 +116,12 @@ export default function Productos({ onMenuClick }) {
   function openNew() {
     setEditing(null)
     setForm(emptyForm)
-    setFilterProvTela('')
-    setFilterProvTela2('')
-    setFilterProvRib('')
+    setFilterProvTela(''); setFilterProvTela2(''); setFilterProvRib('')
     setModal(true)
   }
 
   function openEdit(p) {
     setEditing(p.id)
-    // Detectar proveedores de las telas ya cargadas
     const t1 = telas.find(t => t.id === p.tela1_id)
     const t2 = telas.find(t => t.id === p.tela2_id)
     const rib = telas.find(t => t.id === p.rib_id)
@@ -121,10 +169,35 @@ export default function Productos({ onMenuClick }) {
     }))
   }
 
+  // Drag & drop piezas
+  function handleDragStart(index) { dragSrc.current = index }
+  function handleDragOver(index) { }
+  function handleDrop(index) {
+    if (dragSrc.current === null || dragSrc.current === index) return
+    setForm(f => {
+      const piezas = [...f.piezas]
+      const [moved] = piezas.splice(dragSrc.current, 1)
+      piezas.splice(index, 0, moved)
+      dragSrc.current = null
+      return { ...f, piezas }
+    })
+  }
+
+  function editPieza(index, updated) {
+    setForm(f => {
+      const piezas = f.piezas.map((p, i) => i === index ? { ...updated, mult: parseInt(updated.mult) || 1 } : p)
+      return { ...f, piezas }
+    })
+  }
+
+  function deletePieza(index) {
+    setForm(f => ({ ...f, piezas: f.piezas.filter((_, i) => i !== index) }))
+  }
+
   function agregarPieza() {
     if (!nuevaPieza.nombre) return
-    setForm(f => ({ ...f, piezas: [...f.piezas, { ...nuevaPieza }] }))
-    setNuevaPieza({ nombre: '', mult: 1, tela_rol: 'tela1' })
+    setForm(f => ({ ...f, piezas: [...f.piezas, { ...nuevaPieza, mult: parseInt(nuevaPieza.mult) || 1 }] }))
+    setNuevaPieza({ nombre: '', mult: '1', tela_rol: 'tela1' })
   }
 
   function agregarAvio() {
@@ -132,30 +205,47 @@ export default function Productos({ onMenuClick }) {
     const talles = TABLAS[form.tabla]?.talles || []
     const medidas = {}
     talles.forEach(t => { medidas[t] = '' })
-    setForm(f => ({ ...f, avios_medidas: [...f.avios_medidas, { nombre: nuevoAvio.nombre, unit: nuevoAvio.unit, todos: nuevoAvio.todos, medidas }] }))
-    setNuevoAvio({ nombre: '', unit: 'cm', todos: '' })
+    setForm(f => ({
+      ...f,
+      avios_medidas: [...f.avios_medidas, {
+        nombre: nuevoAvio.nombre,
+        unit: nuevoAvio.unit,
+        todos: nuevoAvio.todos,
+        ancho: nuevoAvio.ancho,
+        medidas
+      }]
+    }))
+    setNuevoAvio({ nombre: '', unit: 'cm', todos: '', ancho: '' })
   }
 
   function updateMedidaAvio(avioIdx, talle, valor) {
-    setForm(f => {
-      const avios = f.avios_medidas.map((a, i) => {
-        if (i !== avioIdx) return a
-        return { ...a, medidas: { ...a.medidas, [talle]: valor } }
-      })
-      return { ...f, avios_medidas: avios }
-    })
+    setForm(f => ({
+      ...f,
+      avios_medidas: f.avios_medidas.map((a, i) =>
+        i !== avioIdx ? a : { ...a, medidas: { ...a.medidas, [talle]: valor } }
+      )
+    }))
   }
 
   function updateTodosAvio(avioIdx, valor) {
-    setForm(f => {
-      const avios = f.avios_medidas.map((a, i) => {
+    setForm(f => ({
+      ...f,
+      avios_medidas: f.avios_medidas.map((a, i) => {
         if (i !== avioIdx) return a
         const medidas = {}
         Object.keys(a.medidas).forEach(t => { medidas[t] = valor })
         return { ...a, todos: valor, medidas }
       })
-      return { ...f, avios_medidas: avios }
-    })
+    }))
+  }
+
+  function updateAnchoAvio(avioIdx, valor) {
+    setForm(f => ({
+      ...f,
+      avios_medidas: f.avios_medidas.map((a, i) =>
+        i !== avioIdx ? a : { ...a, ancho: valor }
+      )
+    }))
   }
 
   function agregarTerminacion() {
@@ -177,8 +267,7 @@ export default function Productos({ onMenuClick }) {
     setSaving(true)
     const codigo = form.codigo || generarCodigo(form.nombre)
     const datos = {
-      nombre: form.nombre,
-      codigo,
+      nombre: form.nombre, codigo,
       tabla: form.tabla,
       base_id: parseInt(form.base_id) || null,
       tela1_id: parseInt(form.tela1_id) || null,
@@ -204,6 +293,7 @@ export default function Productos({ onMenuClick }) {
     e.stopPropagation()
     if (!window.confirm('¿Borrar este producto?')) return
     await supabase.from('productos').delete().eq('id', id)
+    if (vistaFicha?.id === id) setVistaFicha(null)
     fetchAll()
   }
 
@@ -226,7 +316,7 @@ export default function Productos({ onMenuClick }) {
       <div className="content">
         <div className="stat-grid">
           <div className="stat-card"><div className="stat-value">{productos.length}</div><div className="stat-label">Productos</div></div>
-          <div className="stat-card"><div className="stat-value">{productos.filter(p => !p.base_id).length}</div><div className="stat-label">Productos base</div></div>
+          <div className="stat-card"><div className="stat-value">{productos.filter(p => !p.base_id).length}</div><div className="stat-label">Base</div></div>
           <div className="stat-card"><div className="stat-value">{productos.filter(p => p.base_id).length}</div><div className="stat-label">Derivados</div></div>
         </div>
 
@@ -261,8 +351,7 @@ export default function Productos({ onMenuClick }) {
                         <td style={{ color: 'var(--accent)', fontWeight: 700 }}>{p.codigo || '—'}</td>
                         <td><strong>{p.nombre}</strong></td>
                         <td style={{ fontSize: 11 }}>
-                          {base
-                            ? <span className="badge badge-blue">hijo · {base.nombre}</span>
+                          {base ? <span className="badge badge-blue">hijo · {base.nombre}</span>
                             : <span className="badge badge-yellow">base</span>}
                         </td>
                         <td style={{ fontSize: 11 }}>{TABLAS[p.tabla]?.label || p.tabla}</td>
@@ -282,38 +371,38 @@ export default function Productos({ onMenuClick }) {
           )}
         </div>
 
-        {/* FICHA TÉCNICA — vista de consulta */}
+        {/* FICHA TÉCNICA */}
         {vistaFicha && (
           <div className="table-wrap" style={{ marginTop: 16 }}>
             <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <strong>📋 Ficha técnica — {vistaFicha.nombre}</strong>
-              <button className="btn btn-secondary btn-sm" onClick={() => setVistaFicha(null)}>✕ Cerrar</button>
+              <strong style={{ fontSize: 15 }}>📋 {vistaFicha.nombre} <span style={{ fontSize: 12, color: 'var(--text2)' }}>{TABLAS[vistaFicha.tabla]?.label}</span></strong>
+              <button className="btn btn-secondary btn-sm" onClick={() => setVistaFicha(null)}>✕</button>
             </div>
             <div style={{ padding: 16 }}>
 
               {/* Telas */}
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--accent)' }}>🧶 Telas</div>
-                {[['Tela 1', vistaFicha.tela1_id], ['Tela 2', vistaFicha.tela2_id], ['RIB', vistaFicha.rib_id]].map(([rol, id]) => (
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1 }}>🧶 Telas</div>
+                {[['Tela 1', vistaFicha.tela1_id], ['Tela 2', vistaFicha.tela2_id], ['RIB', vistaFicha.rib_id]].map(([rol, id]) =>
                   id ? (
-                    <div key={rol} style={{ display: 'flex', gap: 12, padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 14 }}>
-                      <span style={{ fontWeight: 700, minWidth: 70, color: 'var(--text2)' }}>{rol}</span>
-                      <span style={{ fontWeight: 600 }}>{telaLabel(id)}</span>
+                    <div key={rol} style={{ display: 'flex', gap: 16, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                      <span style={{ fontWeight: 700, minWidth: 70, color: 'var(--text2)', fontSize: 14 }}>{rol}</span>
+                      <span style={{ fontWeight: 600, fontSize: 15 }}>{telaLabel(id)}</span>
                     </div>
                   ) : null
-                ))}
+                )}
               </div>
 
               {/* Piezas */}
               {vistaFicha.piezas?.length > 0 && (
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--accent)' }}>✂ Piezas de corte</div>
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1 }}>✂ Piezas de corte</div>
                   {vistaFicha.piezas.map((p, i) => (
-                    <div key={i} style={{ display: 'flex', gap: 12, padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 14 }}>
-                      <span style={{ fontWeight: 700, flex: 2 }}>{p.nombre}</span>
-                      <span style={{ color: 'var(--text2)' }}>×{p.mult}</span>
-                      <span style={{ color: 'var(--accent)', fontSize: 12 }}>
-                        {p.tela_rol === 'tela1' ? 'Tela 1' : p.tela_rol === 'tela2' ? 'Tela 2' : p.tela_rol === 'rib' ? 'RIB' : '—'}
+                    <div key={i} style={{ display: 'flex', gap: 16, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                      <span style={{ fontWeight: 700, flex: 2, fontSize: 14 }}>{p.nombre}</span>
+                      <span style={{ color: 'var(--text2)', fontSize: 13 }}>×{p.mult}</span>
+                      <span style={{ color: 'var(--accent)', fontSize: 13, minWidth: 60 }}>
+                        {p.tela_rol === 'tela1' ? 'Tela 1' : p.tela_rol === 'tela2' ? 'Tela 2' : 'RIB'}
                       </span>
                     </div>
                   ))}
@@ -322,25 +411,30 @@ export default function Productos({ onMenuClick }) {
 
               {/* Avíos con medidas */}
               {vistaFicha.avios_medidas?.length > 0 && (
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--accent)' }}>📐 Medidas por talle</div>
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1 }}>📐 Medidas por talle</div>
                   {vistaFicha.avios_medidas.map((a, i) => (
-                    <div key={i} style={{ marginBottom: 16 }}>
-                      <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>{a.nombre}</div>
+                    <div key={i} style={{ marginBottom: 20 }}>
+                      <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 6 }}>{a.nombre}</div>
+                      {a.ancho && (
+                        <div style={{ fontSize: 14, color: 'var(--text2)', marginBottom: 6, paddingLeft: 12 }}>
+                          Ancho: <strong>{a.ancho} {a.unit}</strong>
+                        </div>
+                      )}
                       {a.todos ? (
                         <div style={{ fontSize: 16, color: 'var(--success)', paddingLeft: 12 }}>
                           Todos los talles → <strong>{a.todos} {a.unit}</strong>
                         </div>
                       ) : (
                         <div style={{ paddingLeft: 12 }}>
-                          {TABLAS[vistaFicha.tabla]?.talles.map(t => (
+                          {TABLAS[vistaFicha.tabla]?.talles.map(t =>
                             a.medidas?.[t] ? (
-                              <div key={t} style={{ fontSize: 16, padding: '4px 0', borderBottom: '1px solid var(--border)' }}>
-                                <span style={{ color: 'var(--text2)', minWidth: 50, display: 'inline-block' }}>T{t}</span>
-                                <strong> → {a.medidas[t]} {a.unit}</strong>
+                              <div key={t} style={{ fontSize: 16, padding: '5px 0', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
+                                <span style={{ color: 'var(--text2)', minWidth: 45, fontWeight: 600 }}>T{t}</span>
+                                <strong style={{ fontSize: 18 }}>{a.medidas[t]} {a.unit}</strong>
                               </div>
                             ) : null
-                          ))}
+                          )}
                         </div>
                       )}
                     </div>
@@ -356,17 +450,17 @@ export default function Productos({ onMenuClick }) {
                 if (vistaFicha.terminaciones?.talle) terms.push('Talle solo')
                 ;(vistaFicha.terminaciones_extra || []).forEach(t => terms.push(t.nombre))
                 return terms.length > 0 ? (
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--accent)' }}>🏷 Terminaciones</div>
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1 }}>🏷 Terminaciones</div>
                     {terms.map((t, i) => (
-                      <div key={i} style={{ fontSize: 14, padding: '4px 0', borderBottom: '1px solid var(--border)' }}>• {t}</div>
+                      <div key={i} style={{ fontSize: 14, padding: '6px 0', borderBottom: '1px solid var(--border)' }}>• {t}</div>
                     ))}
                   </div>
                 ) : null
               })()}
 
               {vistaFicha.notas && (
-                <div style={{ marginTop: 12, fontSize: 13, color: 'var(--text2)' }}>
+                <div style={{ fontSize: 13, color: 'var(--text2)', marginTop: 8 }}>
                   <strong>Notas:</strong> {vistaFicha.notas}
                 </div>
               )}
@@ -375,7 +469,7 @@ export default function Productos({ onMenuClick }) {
         )}
       </div>
 
-      {/* MODAL EDICIÓN */}
+      {/* MODAL */}
       {modal && (
         <div className="modal-overlay" onClick={() => setModal(false)}>
           <div className="modal" style={{ maxWidth: 760 }} onClick={e => e.stopPropagation()}>
@@ -385,7 +479,6 @@ export default function Productos({ onMenuClick }) {
             </div>
             <div className="modal-body">
 
-              {/* Datos básicos */}
               <div className="form-grid">
                 <div className="form-group">
                   <label>Nombre *</label>
@@ -443,20 +536,33 @@ export default function Productos({ onMenuClick }) {
 
               {/* Piezas de corte */}
               <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12, marginBottom: 12 }}>
-                <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8 }}>✂ Piezas de corte</div>
+                <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8 }}>✂ Piezas de corte <span style={{ fontSize: 10, color: 'var(--text2)', fontWeight: 400 }}>arrastrá para reordenar</span></div>
                 {form.piezas.map((p, i) => (
-                  <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4, fontSize: 12 }}>
-                    <span style={{ flex: 2 }}>{p.nombre}</span>
-                    <span style={{ color: 'var(--text2)' }}>×{p.mult}</span>
-                    <span style={{ color: 'var(--accent)', minWidth: 60 }}>
-                      {p.tela_rol === 'tela1' ? 'Tela 1' : p.tela_rol === 'tela2' ? 'Tela 2' : 'RIB'}
-                    </span>
-                    <button className="btn btn-danger btn-sm" onClick={() => setForm(f => ({ ...f, piezas: f.piezas.filter((_, j) => j !== i) }))}>✕</button>
-                  </div>
+                  <PiezaRow
+                    key={i}
+                    pieza={p}
+                    index={i}
+                    onEdit={editPieza}
+                    onDelete={deletePieza}
+                    onDragStart={handleDragStart}
+                    onDragOver={handleDragOver}
+                    onDrop={handleDrop}
+                  />
                 ))}
                 <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                  <input value={nuevaPieza.nombre} onChange={e => setNuevaPieza(f => ({ ...f, nombre: e.target.value }))} placeholder="ej: Delantera" style={{ flex: 2, minWidth: 100 }} onKeyDown={e => e.key === 'Enter' && agregarPieza()} />
-                  <input type="number" min="1" value={nuevaPieza.mult} onChange={e => setNuevaPieza(f => ({ ...f, mult: parseInt(e.target.value) || 1 }))} style={{ width: 50 }} title="x prenda" />
+                  <input
+                    value={nuevaPieza.nombre}
+                    onChange={e => setNuevaPieza(f => ({ ...f, nombre: e.target.value }))}
+                    placeholder="ej: Delantera"
+                    style={{ flex: 2, minWidth: 100 }}
+                    onKeyDown={e => e.key === 'Enter' && agregarPieza()}
+                  />
+                  <input
+                    value={nuevaPieza.mult}
+                    onChange={e => setNuevaPieza(f => ({ ...f, mult: e.target.value.replace(/[^0-9]/g, '') }))}
+                    style={{ width: 45 }}
+                    placeholder="1"
+                  />
                   <span style={{ fontSize: 11, color: 'var(--text2)', alignSelf: 'center' }}>x prenda</span>
                   <select value={nuevaPieza.tela_rol} onChange={e => setNuevaPieza(f => ({ ...f, tela_rol: e.target.value }))} style={{ width: 90 }}>
                     <option value="tela1">Tela 1</option>
@@ -467,18 +573,33 @@ export default function Productos({ onMenuClick }) {
                 </div>
               </div>
 
-              {/* Avíos con medidas por talle */}
+              {/* Avíos con medidas */}
               <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12, marginBottom: 12 }}>
                 <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8 }}>📐 Avíos y medidas por talle</div>
                 {form.avios_medidas.map((a, ai) => (
                   <div key={ai} style={{ marginBottom: 14, paddingBottom: 14, borderBottom: '1px solid var(--border)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                       <strong style={{ fontSize: 13 }}>{a.nombre} ({a.unit})</strong>
                       <button className="btn btn-danger btn-sm" onClick={() => setForm(f => ({ ...f, avios_medidas: f.avios_medidas.filter((_, j) => j !== ai) }))}>✕</button>
                     </div>
-                    <div style={{ marginBottom: 6 }}>
-                      <label style={{ fontSize: 11, color: 'var(--text2)' }}>Mismo valor para todos los talles (opcional):</label>
-                      <input type="number" value={a.todos} onChange={e => updateTodosAvio(ai, e.target.value)} placeholder="ej: 120" style={{ width: 80, marginLeft: 8 }} />
+                    <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <label style={{ fontSize: 11, color: 'var(--text2)' }}>Ancho (igual para todos):</label>
+                      <input
+                        value={a.ancho || ''}
+                        onChange={e => updateAnchoAvio(ai, e.target.value.replace(/[^0-9.,]/g, ''))}
+                        placeholder="ej: 6"
+                        style={{ width: 70 }}
+                      />
+                      <span style={{ fontSize: 11, color: 'var(--text2)' }}>{a.unit}</span>
+                    </div>
+                    <div style={{ marginBottom: 8 }}>
+                      <label style={{ fontSize: 11, color: 'var(--text2)' }}>Largo igual para todos los talles (opcional):</label>
+                      <input
+                        value={a.todos || ''}
+                        onChange={e => updateTodosAvio(ai, e.target.value.replace(/[^0-9.,]/g, ''))}
+                        placeholder="ej: 120"
+                        style={{ width: 80, marginLeft: 8 }}
+                      />
                       <span style={{ fontSize: 11, color: 'var(--text2)', marginLeft: 4 }}>{a.unit} — dejá vacío para poner por talle</span>
                     </div>
                     {!a.todos && (
@@ -486,7 +607,12 @@ export default function Productos({ onMenuClick }) {
                         {talles.map(t => (
                           <div key={t} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <span style={{ fontWeight: 700, minWidth: 40, color: 'var(--accent)' }}>T{t}</span>
-                            <input type="number" value={a.medidas?.[t] || ''} onChange={e => updateMedidaAvio(ai, t, e.target.value)} placeholder="0" style={{ width: 80 }} />
+                            <input
+                              value={a.medidas?.[t] || ''}
+                              onChange={e => updateMedidaAvio(ai, t, e.target.value.replace(/[^0-9.,]/g, ''))}
+                              placeholder="0"
+                              style={{ width: 80 }}
+                            />
                             <span style={{ fontSize: 11, color: 'var(--text2)' }}>{a.unit}</span>
                           </div>
                         ))}
@@ -495,7 +621,13 @@ export default function Productos({ onMenuClick }) {
                   </div>
                 ))}
                 <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                  <input value={nuevoAvio.nombre} onChange={e => setNuevoAvio(f => ({ ...f, nombre: e.target.value }))} placeholder="ej: Puño, Faja, Elástico..." style={{ flex: 2 }} onKeyDown={e => e.key === 'Enter' && agregarAvio()} />
+                  <input
+                    value={nuevoAvio.nombre}
+                    onChange={e => setNuevoAvio(f => ({ ...f, nombre: e.target.value }))}
+                    placeholder="ej: Puño, Faja, Elástico..."
+                    style={{ flex: 2 }}
+                    onKeyDown={e => e.key === 'Enter' && agregarAvio()}
+                  />
                   <select value={nuevoAvio.unit} onChange={e => setNuevoAvio(f => ({ ...f, unit: e.target.value }))} style={{ width: 70 }}>
                     <option value="cm">cm</option>
                     <option value="m">m</option>
@@ -512,7 +644,8 @@ export default function Productos({ onMenuClick }) {
                 <div style={{ display: 'flex', gap: 16, marginBottom: 8, flexWrap: 'wrap' }}>
                   {[['grifaTalle', 'Grifa con talle'], ['grifa', 'Grifa sola'], ['talle', 'Talle solo']].map(([k, l]) => (
                     <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer' }}>
-                      <input type="checkbox" checked={form.terminaciones?.[k] || false} onChange={e => setForm(f => ({ ...f, terminaciones: { ...f.terminaciones, [k]: e.target.checked } }))} />
+                      <input type="checkbox" checked={form.terminaciones?.[k] || false}
+                        onChange={e => setForm(f => ({ ...f, terminaciones: { ...f.terminaciones, [k]: e.target.checked } }))} />
                       {l}
                     </label>
                   ))}
