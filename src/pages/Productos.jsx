@@ -8,25 +8,26 @@ const TABLAS = {
   mallaesp: { label: 'Malla Especial', talles: ['54', '56', '58'] }
 }
 
+const PROCESOS_DISPONIBLES = [
+  { id: 'corte', label: '✂ Corte', icon: '✂' },
+  { id: 'bordado', label: '🪡 Bordado', icon: '🪡' },
+  { id: 'estampado', label: '🎨 Estampado', icon: '🎨' },
+  { id: 'sublimado', label: '✨ Sublimado', icon: '✨' },
+  { id: 'taller', label: '🧵 Taller', icon: '🧵' },
+  { id: 'entrega', label: '📦 Entrega', icon: '📦' },
+]
+
 function PiezaRow({ pieza, index, onEdit, onDelete, onDragStart, onDragOver, onDrop }) {
   const [editing, setEditing] = useState(false)
   const [local, setLocal] = useState({ ...pieza })
 
-  function save() {
-    onEdit(index, local)
-    setEditing(false)
-  }
+  function save() { onEdit(index, local); setEditing(false) }
 
   if (editing) {
     return (
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4, background: 'var(--bg3)', padding: 6, borderRadius: 'var(--radius)', flexWrap: 'wrap' }}>
         <input value={local.nombre} onChange={e => setLocal(f => ({ ...f, nombre: e.target.value }))} style={{ flex: 2, minWidth: 100 }} autoFocus />
-        <input
-          value={local.mult}
-          onChange={e => setLocal(f => ({ ...f, mult: e.target.value.replace(/[^0-9]/g, '') }))}
-          style={{ width: 45 }}
-          placeholder="1"
-        />
+        <input value={local.mult} onChange={e => setLocal(f => ({ ...f, mult: e.target.value.replace(/[^0-9]/g, '') }))} style={{ width: 45 }} placeholder="1" />
         <span style={{ fontSize: 11, color: 'var(--text2)' }}>x prenda</span>
         <select value={local.tela_rol} onChange={e => setLocal(f => ({ ...f, tela_rol: e.target.value }))} style={{ width: 90 }}>
           <option value="tela1">Tela 1</option>
@@ -47,7 +48,7 @@ function PiezaRow({ pieza, index, onEdit, onDelete, onDragStart, onDragOver, onD
       onDrop={() => onDrop(index)}
       style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4, fontSize: 12, cursor: 'grab', padding: '4px 6px', borderRadius: 'var(--radius)', background: 'var(--bg2)' }}
     >
-      <span style={{ color: 'var(--text2)', cursor: 'grab', fontSize: 14 }}>⠿</span>
+      <span style={{ color: 'var(--text2)', fontSize: 14 }}>⠿</span>
       <span style={{ flex: 2 }}>{pieza.nombre}</span>
       <span style={{ color: 'var(--text2)' }}>×{pieza.mult}</span>
       <span style={{ color: 'var(--accent)', minWidth: 60 }}>
@@ -55,6 +56,47 @@ function PiezaRow({ pieza, index, onEdit, onDelete, onDragStart, onDragOver, onD
       </span>
       <button className="btn btn-secondary btn-sm" onClick={() => setEditing(true)}>✏</button>
       <button className="btn btn-danger btn-sm" onClick={() => onDelete(index)}>✕</button>
+    </div>
+  )
+}
+
+function ProcesoRow({ proceso, index, onEdit, onDelete, onDragStart, onDragOver, onDrop }) {
+  const [editing, setEditing] = useState(false)
+  const [local, setLocal] = useState({ ...proceso })
+
+  function save() { onEdit(index, local); setEditing(false) }
+
+  if (editing) {
+    return (
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4, background: 'var(--bg3)', padding: 6, borderRadius: 'var(--radius)', flexWrap: 'wrap' }}>
+        <select value={local.id} onChange={e => {
+          const p = PROCESOS_DISPONIBLES.find(x => x.id === e.target.value)
+          setLocal(f => ({ ...f, id: e.target.value, label: p?.label || e.target.value }))
+        }} style={{ width: 130 }}>
+          {PROCESOS_DISPONIBLES.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+        </select>
+        <input value={local.nota || ''} onChange={e => setLocal(f => ({ ...f, nota: e.target.value }))} placeholder="nota (ej: solo delantera)" style={{ flex: 1 }} />
+        <button className="btn btn-primary btn-sm" onClick={save}>✔</button>
+        <button className="btn btn-secondary btn-sm" onClick={() => setEditing(false)}>✕</button>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      draggable
+      onDragStart={() => onDragStart(index)}
+      onDragOver={e => { e.preventDefault(); onDragOver(index) }}
+      onDrop={() => onDrop(index)}
+      style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4, fontSize: 12, cursor: 'grab', padding: '6px 8px', borderRadius: 'var(--radius)', background: 'var(--bg2)' }}
+    >
+      <span style={{ color: 'var(--text2)', fontSize: 14 }}>⠿</span>
+      <span style={{ fontWeight: 600, minWidth: 110 }}>{proceso.label}</span>
+      {proceso.nota && <span style={{ color: 'var(--text2)', fontStyle: 'italic' }}>— {proceso.nota}</span>}
+      <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+        <button className="btn btn-secondary btn-sm" onClick={() => setEditing(true)}>✏</button>
+        <button className="btn btn-danger btn-sm" onClick={() => onDelete(index)}>✕</button>
+      </div>
     </div>
   )
 }
@@ -72,12 +114,18 @@ export default function Productos({ onMenuClick }) {
   const [filterProvTela, setFilterProvTela] = useState('')
   const [filterProvTela2, setFilterProvTela2] = useState('')
   const [filterProvRib, setFilterProvRib] = useState('')
-  const dragSrc = useRef(null)
+  const dragSrcPieza = useRef(null)
+  const dragSrcProceso = useRef(null)
 
   const emptyForm = {
     nombre: '', codigo: '', tabla: 'adulto', base_id: '',
     tela1_id: '', tela2_id: '', rib_id: '',
     piezas: [],
+    procesos: [
+      { id: 'corte', label: '✂ Corte', nota: '' },
+      { id: 'taller', label: '🧵 Taller', nota: '' },
+      { id: 'entrega', label: '📦 Entrega', nota: '' }
+    ],
     avios_medidas: [],
     terminaciones: { grifaTalle: false, grifa: false, talle: false },
     terminaciones_extra: [],
@@ -85,6 +133,7 @@ export default function Productos({ onMenuClick }) {
   }
   const [form, setForm] = useState(emptyForm)
   const [nuevaPieza, setNuevaPieza] = useState({ nombre: '', mult: '1', tela_rol: 'tela1' })
+  const [nuevoProceso, setNuevoProceso] = useState({ id: 'bordado', nota: '' })
   const [nuevoAvio, setNuevoAvio] = useState({ nombre: '', unit: 'cm', todos: '', ancho: '' })
   const [nuevaTerm, setNuevaTerm] = useState('')
 
@@ -137,6 +186,7 @@ export default function Productos({ onMenuClick }) {
       tela2_id: p.tela2_id || '',
       rib_id: p.rib_id || '',
       piezas: p.piezas || [],
+      procesos: p.procesos || emptyForm.procesos,
       avios_medidas: p.avios_medidas || [],
       terminaciones: p.terminaciones || { grifaTalle: false, grifa: false, talle: false },
       terminaciones_extra: p.terminaciones_extra || [],
@@ -163,36 +213,43 @@ export default function Productos({ onMenuClick }) {
       tela2_id: base.tela2_id || '',
       rib_id: base.rib_id || '',
       piezas: (base.piezas || []).map(x => ({ ...x })),
+      procesos: (base.procesos || emptyForm.procesos).map(x => ({ ...x })),
       avios_medidas: (base.avios_medidas || []).map(x => ({ ...x, medidas: { ...x.medidas } })),
       terminaciones: { ...(base.terminaciones || {}) },
       terminaciones_extra: (base.terminaciones_extra || []).map(x => ({ ...x }))
     }))
   }
 
-  // Drag & drop piezas
-  function handleDragStart(index) { dragSrc.current = index }
-  function handleDragOver(index) { }
-  function handleDrop(index) {
-    if (dragSrc.current === null || dragSrc.current === index) return
+  // Drag piezas
+  function handleDragStartPieza(i) { dragSrcPieza.current = i }
+  function handleDropPieza(i) {
+    if (dragSrcPieza.current === null || dragSrcPieza.current === i) return
     setForm(f => {
-      const piezas = [...f.piezas]
-      const [moved] = piezas.splice(dragSrc.current, 1)
-      piezas.splice(index, 0, moved)
-      dragSrc.current = null
-      return { ...f, piezas }
+      const arr = [...f.piezas]
+      const [m] = arr.splice(dragSrcPieza.current, 1)
+      arr.splice(i, 0, m)
+      dragSrcPieza.current = null
+      return { ...f, piezas: arr }
     })
   }
 
-  function editPieza(index, updated) {
+  // Drag procesos
+  function handleDragStartProceso(i) { dragSrcProceso.current = i }
+  function handleDropProceso(i) {
+    if (dragSrcProceso.current === null || dragSrcProceso.current === i) return
     setForm(f => {
-      const piezas = f.piezas.map((p, i) => i === index ? { ...updated, mult: parseInt(updated.mult) || 1 } : p)
-      return { ...f, piezas }
+      const arr = [...f.procesos]
+      const [m] = arr.splice(dragSrcProceso.current, 1)
+      arr.splice(i, 0, m)
+      dragSrcProceso.current = null
+      return { ...f, procesos: arr }
     })
   }
 
-  function deletePieza(index) {
-    setForm(f => ({ ...f, piezas: f.piezas.filter((_, i) => i !== index) }))
-  }
+  function editPieza(i, v) { setForm(f => ({ ...f, piezas: f.piezas.map((p, j) => j === i ? { ...v, mult: parseInt(v.mult) || 1 } : p) })) }
+  function deletePieza(i) { setForm(f => ({ ...f, piezas: f.piezas.filter((_, j) => j !== i) })) }
+  function editProceso(i, v) { setForm(f => ({ ...f, procesos: f.procesos.map((p, j) => j === i ? v : p) })) }
+  function deleteProceso(i) { setForm(f => ({ ...f, procesos: f.procesos.filter((_, j) => j !== i) })) }
 
   function agregarPieza() {
     if (!nuevaPieza.nombre) return
@@ -200,52 +257,31 @@ export default function Productos({ onMenuClick }) {
     setNuevaPieza({ nombre: '', mult: '1', tela_rol: 'tela1' })
   }
 
+  function agregarProceso() {
+    const p = PROCESOS_DISPONIBLES.find(x => x.id === nuevoProceso.id)
+    setForm(f => ({ ...f, procesos: [...f.procesos, { id: nuevoProceso.id, label: p?.label || nuevoProceso.id, nota: nuevoProceso.nota }] }))
+    setNuevoProceso({ id: 'bordado', nota: '' })
+  }
+
   function agregarAvio() {
     if (!nuevoAvio.nombre) return
     const talles = TABLAS[form.tabla]?.talles || []
     const medidas = {}
     talles.forEach(t => { medidas[t] = '' })
-    setForm(f => ({
-      ...f,
-      avios_medidas: [...f.avios_medidas, {
-        nombre: nuevoAvio.nombre,
-        unit: nuevoAvio.unit,
-        todos: nuevoAvio.todos,
-        ancho: nuevoAvio.ancho,
-        medidas
-      }]
-    }))
+    setForm(f => ({ ...f, avios_medidas: [...f.avios_medidas, { nombre: nuevoAvio.nombre, unit: nuevoAvio.unit, todos: nuevoAvio.todos, ancho: nuevoAvio.ancho, medidas }] }))
     setNuevoAvio({ nombre: '', unit: 'cm', todos: '', ancho: '' })
   }
 
-  function updateMedidaAvio(avioIdx, talle, valor) {
-    setForm(f => ({
-      ...f,
-      avios_medidas: f.avios_medidas.map((a, i) =>
-        i !== avioIdx ? a : { ...a, medidas: { ...a.medidas, [talle]: valor } }
-      )
-    }))
+  function updateMedidaAvio(ai, talle, valor) {
+    setForm(f => ({ ...f, avios_medidas: f.avios_medidas.map((a, i) => i !== ai ? a : { ...a, medidas: { ...a.medidas, [talle]: valor } }) }))
   }
 
-  function updateTodosAvio(avioIdx, valor) {
-    setForm(f => ({
-      ...f,
-      avios_medidas: f.avios_medidas.map((a, i) => {
-        if (i !== avioIdx) return a
-        const medidas = {}
-        Object.keys(a.medidas).forEach(t => { medidas[t] = valor })
-        return { ...a, todos: valor, medidas }
-      })
-    }))
+  function updateTodosAvio(ai, valor) {
+    setForm(f => ({ ...f, avios_medidas: f.avios_medidas.map((a, i) => { if (i !== ai) return a; const medidas = {}; Object.keys(a.medidas).forEach(t => { medidas[t] = valor }); return { ...a, todos: valor, medidas } }) }))
   }
 
-  function updateAnchoAvio(avioIdx, valor) {
-    setForm(f => ({
-      ...f,
-      avios_medidas: f.avios_medidas.map((a, i) =>
-        i !== avioIdx ? a : { ...a, ancho: valor }
-      )
-    }))
+  function updateAnchoAvio(ai, valor) {
+    setForm(f => ({ ...f, avios_medidas: f.avios_medidas.map((a, i) => i !== ai ? a : { ...a, ancho: valor }) }))
   }
 
   function agregarTerminacion() {
@@ -265,15 +301,16 @@ export default function Productos({ onMenuClick }) {
   async function handleSave() {
     if (!form.nombre) return alert('El nombre del producto es obligatorio')
     setSaving(true)
-    const codigo = form.codigo || generarCodigo(form.nombre)
     const datos = {
-      nombre: form.nombre, codigo,
+      nombre: form.nombre,
+      codigo: form.codigo || generarCodigo(form.nombre),
       tabla: form.tabla,
       base_id: parseInt(form.base_id) || null,
       tela1_id: parseInt(form.tela1_id) || null,
       tela2_id: parseInt(form.tela2_id) || null,
       rib_id: parseInt(form.rib_id) || null,
       piezas: form.piezas,
+      procesos: form.procesos,
       avios_medidas: form.avios_medidas,
       terminaciones: form.terminaciones,
       terminaciones_extra: form.terminaciones_extra,
@@ -286,6 +323,11 @@ export default function Productos({ onMenuClick }) {
     }
     setSaving(false)
     setModal(false)
+    // Actualizar vista ficha si estaba abierta
+    if (vistaFicha?.id === editing) {
+      const { data } = await supabase.from('productos').select('*').eq('id', editing).single()
+      if (data) setVistaFicha(data)
+    }
     fetchAll()
   }
 
@@ -340,7 +382,7 @@ export default function Productos({ onMenuClick }) {
                 <thead>
                   <tr>
                     <th>Código</th><th>Nombre</th><th>Base/Derivado</th>
-                    <th>Talles</th><th>Tela 1</th><th>Tela 2</th><th>RIB</th><th></th>
+                    <th>Talles</th><th>Procesos</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -355,11 +397,11 @@ export default function Productos({ onMenuClick }) {
                             : <span className="badge badge-yellow">base</span>}
                         </td>
                         <td style={{ fontSize: 11 }}>{TABLAS[p.tabla]?.label || p.tabla}</td>
-                        <td style={{ fontSize: 11 }}>{p.tela1_id ? telaLabel(p.tela1_id) : '—'}</td>
-                        <td style={{ fontSize: 11 }}>{p.tela2_id ? telaLabel(p.tela2_id) : '—'}</td>
-                        <td style={{ fontSize: 11 }}>{p.rib_id ? telaLabel(p.rib_id) : '—'}</td>
-                        <td>
-                          <button className="btn btn-secondary btn-sm" onClick={e => { e.stopPropagation(); openEdit(p) }}>✏</button>
+                        <td style={{ fontSize: 11 }}>
+                          {(p.procesos || []).map(x => x.icon || x.label?.split(' ')[0]).join(' → ')}
+                        </td>
+                        <td onClick={e => e.stopPropagation()}>
+                          <button className="btn btn-secondary btn-sm" onClick={() => openEdit(p)}>✏</button>
                           <button className="btn btn-danger btn-sm" style={{ marginLeft: 4 }} onClick={e => handleDelete(p.id, e)}>🗑</button>
                         </td>
                       </tr>
@@ -376,9 +418,30 @@ export default function Productos({ onMenuClick }) {
           <div className="table-wrap" style={{ marginTop: 16 }}>
             <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <strong style={{ fontSize: 15 }}>📋 {vistaFicha.nombre} <span style={{ fontSize: 12, color: 'var(--text2)' }}>{TABLAS[vistaFicha.tabla]?.label}</span></strong>
-              <button className="btn btn-secondary btn-sm" onClick={() => setVistaFicha(null)}>✕</button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn btn-secondary btn-sm" onClick={() => openEdit(vistaFicha)}>✏ Editar</button>
+                <button className="btn btn-secondary btn-sm" onClick={() => setVistaFicha(null)}>✕</button>
+              </div>
             </div>
             <div style={{ padding: 16 }}>
+
+              {/* Procesos */}
+              {vistaFicha.procesos?.length > 0 && (
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1 }}>⚙ Flujo de producción</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                    {vistaFicha.procesos.map((p, i) => (
+                      <React.Fragment key={i}>
+                        <div style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '6px 12px', fontSize: 13 }}>
+                          <div style={{ fontWeight: 700 }}>{p.label}</div>
+                          {p.nota && <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>{p.nota}</div>}
+                        </div>
+                        {i < vistaFicha.procesos.length - 1 && <span style={{ color: 'var(--text2)', fontSize: 18 }}>→</span>}
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Telas */}
               <div style={{ marginBottom: 20 }}>
@@ -508,6 +571,30 @@ export default function Productos({ onMenuClick }) {
                 </div>
               </div>
 
+              {/* Procesos */}
+              <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12, marginBottom: 12 }}>
+                <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8 }}>⚙ Flujo de producción <span style={{ fontSize: 10, color: 'var(--text2)', fontWeight: 400 }}>arrastrá para reordenar</span></div>
+                {form.procesos.map((p, i) => (
+                  <ProcesoRow
+                    key={i}
+                    proceso={p}
+                    index={i}
+                    onEdit={editProceso}
+                    onDelete={deleteProceso}
+                    onDragStart={handleDragStartProceso}
+                    onDragOver={() => {}}
+                    onDrop={handleDropProceso}
+                  />
+                ))}
+                <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                  <select value={nuevoProceso.id} onChange={e => setNuevoProceso(f => ({ ...f, id: e.target.value }))} style={{ width: 140 }}>
+                    {PROCESOS_DISPONIBLES.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                  </select>
+                  <input value={nuevoProceso.nota} onChange={e => setNuevoProceso(f => ({ ...f, nota: e.target.value }))} placeholder="nota (ej: solo delantera)" style={{ flex: 1 }} />
+                  <button className="btn btn-secondary btn-sm" onClick={agregarProceso}>+ Agregar</button>
+                </div>
+              </div>
+
               {/* Telas */}
               <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12, marginBottom: 12 }}>
                 <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 10 }}>🧶 Telas del producto</div>
@@ -534,35 +621,16 @@ export default function Productos({ onMenuClick }) {
                 ))}
               </div>
 
-              {/* Piezas de corte */}
+              {/* Piezas */}
               <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12, marginBottom: 12 }}>
-                <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8 }}>✂ Piezas de corte <span style={{ fontSize: 10, color: 'var(--text2)', fontWeight: 400 }}>arrastrá para reordenar</span></div>
+                <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8 }}>✂ Piezas de corte <span style={{ fontSize: 10, color: 'var(--text2)', fontWeight: 400 }}>arrastrá para reordenar · clic ✏ para editar</span></div>
                 {form.piezas.map((p, i) => (
-                  <PiezaRow
-                    key={i}
-                    pieza={p}
-                    index={i}
-                    onEdit={editPieza}
-                    onDelete={deletePieza}
-                    onDragStart={handleDragStart}
-                    onDragOver={handleDragOver}
-                    onDrop={handleDrop}
-                  />
+                  <PiezaRow key={i} pieza={p} index={i} onEdit={editPieza} onDelete={deletePieza}
+                    onDragStart={handleDragStartPieza} onDragOver={() => {}} onDrop={handleDropPieza} />
                 ))}
                 <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                  <input
-                    value={nuevaPieza.nombre}
-                    onChange={e => setNuevaPieza(f => ({ ...f, nombre: e.target.value }))}
-                    placeholder="ej: Delantera"
-                    style={{ flex: 2, minWidth: 100 }}
-                    onKeyDown={e => e.key === 'Enter' && agregarPieza()}
-                  />
-                  <input
-                    value={nuevaPieza.mult}
-                    onChange={e => setNuevaPieza(f => ({ ...f, mult: e.target.value.replace(/[^0-9]/g, '') }))}
-                    style={{ width: 45 }}
-                    placeholder="1"
-                  />
+                  <input value={nuevaPieza.nombre} onChange={e => setNuevaPieza(f => ({ ...f, nombre: e.target.value }))} placeholder="ej: Delantera" style={{ flex: 2, minWidth: 100 }} onKeyDown={e => e.key === 'Enter' && agregarPieza()} />
+                  <input value={nuevaPieza.mult} onChange={e => setNuevaPieza(f => ({ ...f, mult: e.target.value.replace(/[^0-9]/g, '') }))} style={{ width: 45 }} placeholder="1" />
                   <span style={{ fontSize: 11, color: 'var(--text2)', alignSelf: 'center' }}>x prenda</span>
                   <select value={nuevaPieza.tela_rol} onChange={e => setNuevaPieza(f => ({ ...f, tela_rol: e.target.value }))} style={{ width: 90 }}>
                     <option value="tela1">Tela 1</option>
@@ -584,22 +652,12 @@ export default function Productos({ onMenuClick }) {
                     </div>
                     <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                       <label style={{ fontSize: 11, color: 'var(--text2)' }}>Ancho (igual para todos):</label>
-                      <input
-                        value={a.ancho || ''}
-                        onChange={e => updateAnchoAvio(ai, e.target.value.replace(/[^0-9.,]/g, ''))}
-                        placeholder="ej: 6"
-                        style={{ width: 70 }}
-                      />
+                      <input value={a.ancho || ''} onChange={e => updateAnchoAvio(ai, e.target.value.replace(/[^0-9.,]/g, ''))} placeholder="ej: 6" style={{ width: 70 }} />
                       <span style={{ fontSize: 11, color: 'var(--text2)' }}>{a.unit}</span>
                     </div>
                     <div style={{ marginBottom: 8 }}>
-                      <label style={{ fontSize: 11, color: 'var(--text2)' }}>Largo igual para todos los talles (opcional):</label>
-                      <input
-                        value={a.todos || ''}
-                        onChange={e => updateTodosAvio(ai, e.target.value.replace(/[^0-9.,]/g, ''))}
-                        placeholder="ej: 120"
-                        style={{ width: 80, marginLeft: 8 }}
-                      />
+                      <label style={{ fontSize: 11, color: 'var(--text2)' }}>Largo igual para todos los talles:</label>
+                      <input value={a.todos || ''} onChange={e => updateTodosAvio(ai, e.target.value.replace(/[^0-9.,]/g, ''))} placeholder="ej: 120" style={{ width: 80, marginLeft: 8 }} />
                       <span style={{ fontSize: 11, color: 'var(--text2)', marginLeft: 4 }}>{a.unit} — dejá vacío para poner por talle</span>
                     </div>
                     {!a.todos && (
@@ -607,12 +665,7 @@ export default function Productos({ onMenuClick }) {
                         {talles.map(t => (
                           <div key={t} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <span style={{ fontWeight: 700, minWidth: 40, color: 'var(--accent)' }}>T{t}</span>
-                            <input
-                              value={a.medidas?.[t] || ''}
-                              onChange={e => updateMedidaAvio(ai, t, e.target.value.replace(/[^0-9.,]/g, ''))}
-                              placeholder="0"
-                              style={{ width: 80 }}
-                            />
+                            <input value={a.medidas?.[t] || ''} onChange={e => updateMedidaAvio(ai, t, e.target.value.replace(/[^0-9.,]/g, ''))} placeholder="0" style={{ width: 80 }} />
                             <span style={{ fontSize: 11, color: 'var(--text2)' }}>{a.unit}</span>
                           </div>
                         ))}
@@ -621,13 +674,7 @@ export default function Productos({ onMenuClick }) {
                   </div>
                 ))}
                 <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                  <input
-                    value={nuevoAvio.nombre}
-                    onChange={e => setNuevoAvio(f => ({ ...f, nombre: e.target.value }))}
-                    placeholder="ej: Puño, Faja, Elástico..."
-                    style={{ flex: 2 }}
-                    onKeyDown={e => e.key === 'Enter' && agregarAvio()}
-                  />
+                  <input value={nuevoAvio.nombre} onChange={e => setNuevoAvio(f => ({ ...f, nombre: e.target.value }))} placeholder="ej: Puño, Faja, Elástico..." style={{ flex: 2 }} onKeyDown={e => e.key === 'Enter' && agregarAvio()} />
                   <select value={nuevoAvio.unit} onChange={e => setNuevoAvio(f => ({ ...f, unit: e.target.value }))} style={{ width: 70 }}>
                     <option value="cm">cm</option>
                     <option value="m">m</option>
@@ -644,8 +691,7 @@ export default function Productos({ onMenuClick }) {
                 <div style={{ display: 'flex', gap: 16, marginBottom: 8, flexWrap: 'wrap' }}>
                   {[['grifaTalle', 'Grifa con talle'], ['grifa', 'Grifa sola'], ['talle', 'Talle solo']].map(([k, l]) => (
                     <label key={k} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer' }}>
-                      <input type="checkbox" checked={form.terminaciones?.[k] || false}
-                        onChange={e => setForm(f => ({ ...f, terminaciones: { ...f.terminaciones, [k]: e.target.checked } }))} />
+                      <input type="checkbox" checked={form.terminaciones?.[k] || false} onChange={e => setForm(f => ({ ...f, terminaciones: { ...f.terminaciones, [k]: e.target.checked } }))} />
                       {l}
                     </label>
                   ))}
