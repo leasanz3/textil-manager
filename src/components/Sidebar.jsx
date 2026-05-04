@@ -1,5 +1,6 @@
 import React from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { supabase } from '../lib/supabase'
 
 const NAV = [
   { section: 'Producción' },
@@ -26,6 +27,7 @@ export default function Sidebar({ open, onClose }) {
   const navigate = useNavigate()
   const location = useLocation()
   const handleNav = (path) => { navigate(path); onClose() }
+
   return (
     <div className={`sidebar ${open ? 'open' : ''}`}>
       <div className="sidebar-logo">
@@ -48,6 +50,15 @@ export default function Sidebar({ open, onClose }) {
           )
         )}
       </nav>
+      <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)' }}>
+        <button
+          className="btn btn-secondary btn-sm"
+          style={{ width: '100%' }}
+          onClick={() => supabase.auth.signOut()}
+        >
+          🚪 Cerrar sesión
+        </button>
+      </div>
     </div>
   )
 }
