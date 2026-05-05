@@ -56,9 +56,9 @@ export default function Pedidos({ onMenuClick }) {
   const [error, setError]             = useState('')
 
   // ── Autocomplete producto ──────────────────────────────────────────────────
-  const [productoQuery, setProductoQuery]         = useState('')
-  const [productosResults, setProductosResults]   = useState([])
-  const [showDropdown, setShowDropdown]           = useState(false)
+  const [productoQuery, setProductoQuery]           = useState('')
+  const [productosResults, setProductosResults]     = useState([])
+  const [showDropdown, setShowDropdown]             = useState(false)
   const [searchingProductos, setSearchingProductos] = useState(false)
   const searchTimeout = useRef(null)
 
@@ -67,6 +67,19 @@ export default function Pedidos({ onMenuClick }) {
   const [nuevoProducto, setNuevoProducto]   = useState({ nombre: '', codigo: '', tabla: 'adulto' })
   const [savingProducto, setSavingProducto] = useState(false)
   const [errorProducto, setErrorProducto]   = useState('')
+
+  // ── Autocomplete cliente ───────────────────────────────────────────────────
+  const [clienteQuery, setClienteQuery]           = useState('')
+  const [contactosResults, setContactosResults]   = useState([])
+  const [showClienteDropdown, setShowClienteDropdown] = useState(false)
+  const [searchingContactos, setSearchingContactos]   = useState(false)
+  const clienteSearchTimeout = useRef(null)
+
+  // ── Modal nuevo contacto ───────────────────────────────────────────────────
+  const [modalContacto, setModalContacto]   = useState(false)
+  const [nuevoContacto, setNuevoContacto]   = useState({ nombre: '', tipo: '' })
+  const [savingContacto, setSavingContacto] = useState(false)
+  const [errorContacto, setErrorContacto]   = useState('')
 
   // ── Form state ─────────────────────────────────────────────────────────────
   const emptyForm = {
@@ -103,6 +116,9 @@ export default function Pedidos({ onMenuClick }) {
     setProductoQuery('')
     setProductosResults([])
     setShowDropdown(false)
+    setClienteQuery('')
+    setContactosResults([])
+    setShowClienteDropdown(false)
     setError('')
     setModal(true)
   }
@@ -122,6 +138,9 @@ export default function Pedidos({ onMenuClick }) {
     setProductoQuery(p.producto || '')
     setProductosResults([])
     setShowDropdown(false)
+    setClienteQuery(p.cliente || '')
+    setContactosResults([])
+    setShowClienteDropdown(false)
     setError('')
     setModal(true)
   }
@@ -141,6 +160,7 @@ export default function Pedidos({ onMenuClick }) {
       return
     }
 
+    setShowDropdown(true)
     searchTimeout.current = setTimeout(async () => {
       setSearchingProductos(true)
       const { data } = await supabase
@@ -149,7 +169,6 @@ export default function Pedidos({ onMenuClick }) {
         .ilike('nombre', `%${value.trim()}%`)
         .limit(8)
       setProductosResults(data || [])
-      setShowDropdown(true)
       setSearchingProductos(false)
     }, 250)
   }
@@ -201,6 +220,72 @@ export default function Pedidos({ onMenuClick }) {
     seleccionarProducto(data)
     setModalProducto(false)
     setSavingProducto(false)
+  }
+
+  // ── Autocomplete cliente ───────────────────────────────────────────────────
+
+  function onClienteInput(value) {
+    setClienteQuery(value)
+    setF('cliente', value)
+
+    if (clienteSearchTimeout.current) clearTimeout(clienteSearchTimeout.current)
+
+    if (!value.trim()) {
+      setContactosResults([])
+      setShowClienteDropdown(false)
+      return
+    }
+
+    setShowClienteDropdown(true)
+    clienteSearchTimeout.current = setTimeout(async () => {
+      setSearchingContactos(true)
+      const { data } = await supabase
+        .from('contactos')
+        .select('id, nombre, tipo')
+        .ilike('nombre', `%${value.trim()}%`)
+        .limit(8)
+      setContactosResults(data || [])
+      setSearchingContactos(false)
+    }, 250)
+  }
+
+  function seleccionarContacto(contacto) {
+    setF('cliente', contacto.nombre)
+    setClienteQuery(contacto.nombre)
+    setShowClienteDropdown(false)
+    setContactosResults([])
+  }
+
+  function onClienteBlur() {
+    setTimeout(() => setShowClienteDropdown(false), 150)
+  }
+
+  function abrirModalContacto() {
+    setNuevoContacto({ nombre: clienteQuery, tipo: '' })
+    setErrorContacto('')
+    setShowClienteDropdown(false)
+    setModalContacto(true)
+  }
+
+  async function guardarNuevoContacto() {
+    if (!nuevoContacto.nombre.trim()) { setErrorContacto('El nombre es obligatorio'); return }
+    setSavingContacto(true)
+    setErrorContacto('')
+
+    const { data, error } = await supabase
+      .from('contactos')
+      .insert({
+        nombre: nuevoContacto.nombre.trim(),
+        tipo:   nuevoContacto.tipo.trim() || null,
+      })
+      .select('id, nombre, tipo')
+      .single()
+
+    if (error) { setErrorContacto('Error: ' + error.message); setSavingContacto(false); return }
+
+    seleccionarContacto(data)
+    setModalContacto(false)
+    setSavingContacto(false)
   }
 
   // ── Talles ─────────────────────────────────────────────────────────────────
@@ -507,13 +592,76 @@ export default function Pedidos({ onMenuClick }) {
                   )}
                 </div>
 
-                <div className="form-group">
+                {/* Campo Cliente con autocomplete */}
+                <div className="form-group" style={{ position: 'relative' }}>
                   <label>Cliente *</label>
                   <input
-                    value={form.cliente}
-                    onChange={e => setF('cliente', e.target.value)}
-                    placeholder="ej: Club Atlético..."
+                    value={clienteQuery}
+                    onChange={e => onClienteInput(e.target.value)}
+                    onBlur={onClienteBlur}
+                    onFocus={() => clienteQuery.trim() && contactosResults.length > 0 && setShowClienteDropdown(true)}
+                    placeholder="Nombre del cliente"
+                    autoComplete="off"
                   />
+                  {searchingContactos && (
+                    <div style={{ position: 'absolute', right: 10, top: 34, fontSize: 11, color: 'var(--text2)' }}>
+                      Buscando...
+                    </div>
+                  )}
+                  {showClienteDropdown && (
+                    <div style={{
+                      position: 'absolute',
+                      top: '100%',
+                      left: 0,
+                      right: 0,
+                      zIndex: 100,
+                      background: 'var(--surface)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius)',
+                      boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+                      maxHeight: 220,
+                      overflowY: 'auto',
+                    }}>
+                      {contactosResults.map(c => (
+                        <div
+                          key={c.id}
+                          onMouseDown={() => seleccionarContacto(c)}
+                          style={{
+                            padding: '9px 12px',
+                            cursor: 'pointer',
+                            fontSize: 13,
+                            borderBottom: '1px solid var(--border)',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.background = 'var(--hover)'}
+                          onMouseLeave={e => e.currentTarget.style.background = ''}
+                        >
+                          <span>{c.nombre}</span>
+                          {c.tipo && (
+                            <span style={{ fontSize: 11, color: 'var(--text2)', marginLeft: 8 }}>
+                              {c.tipo}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                      <div
+                        onMouseDown={abrirModalContacto}
+                        style={{
+                          padding: '9px 12px',
+                          cursor: 'pointer',
+                          fontSize: 13,
+                          color: 'var(--accent)',
+                          fontWeight: 600,
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'var(--hover)'}
+                        onMouseLeave={e => e.currentTarget.style.background = ''}
+                      >
+                        + Agregar contacto
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="form-group">
                   <label>Etapa actual</label>
@@ -596,6 +744,46 @@ export default function Pedidos({ onMenuClick }) {
               <button className="btn btn-secondary" onClick={() => setModal(false)}>Cancelar</button>
               <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
                 {saving ? 'Guardando...' : '✔ Guardar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal nuevo contacto ── */}
+      {modalContacto && (
+        <div className="modal-overlay" style={{ zIndex: 200 }} onClick={() => setModalContacto(false)}>
+          <div className="modal" style={{ maxWidth: 400 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>➕ Nuevo contacto</h3>
+              <button className="close-btn" onClick={() => setModalContacto(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div className="form-group">
+                <label>Nombre *</label>
+                <input
+                  value={nuevoContacto.nombre}
+                  onChange={e => setNuevoContacto(c => ({ ...c, nombre: e.target.value }))}
+                  placeholder="Nombre del cliente"
+                  autoFocus
+                />
+              </div>
+              <div className="form-group">
+                <label>Tipo <span style={{ color: 'var(--text2)', fontWeight: 400 }}>(opcional)</span></label>
+                <input
+                  value={nuevoContacto.tipo}
+                  onChange={e => setNuevoContacto(c => ({ ...c, tipo: e.target.value }))}
+                  placeholder="ej: Club, Empresa, Particular..."
+                />
+              </div>
+              {errorContacto && (
+                <p style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4 }}>⚠ {errorContacto}</p>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setModalContacto(false)}>Cancelar</button>
+              <button className="btn btn-primary" onClick={guardarNuevoContacto} disabled={savingContacto}>
+                {savingContacto ? 'Guardando...' : '✔ Guardar y seleccionar'}
               </button>
             </div>
           </div>
