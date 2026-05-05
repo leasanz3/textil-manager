@@ -55,6 +55,29 @@ function PiezaRow({ pieza, index, telaRoles, onEdit, onDelete, onDragStart, onDr
 
   const rolLabel = telaRoles.find(r => r.value === pieza.tela_rol)?.label || pieza.tela_rol
 
+  function handleTouchStart(e) {
+    onDragStart(index)
+  }
+  function handleTouchMove(e) {
+    e.preventDefault()
+    const touch = e.touches[0]
+    const el = document.elementFromPoint(touch.clientX, touch.clientY)
+    const row = el?.closest('[data-drag-index]')
+    if (row) {
+      const idx = parseInt(row.getAttribute('data-drag-index'))
+      if (!isNaN(idx)) onDragOver(idx)
+    }
+  }
+  function handleTouchEnd(e) {
+    const touch = e.changedTouches[0]
+    const el = document.elementFromPoint(touch.clientX, touch.clientY)
+    const row = el?.closest('[data-drag-index]')
+    if (row) {
+      const idx = parseInt(row.getAttribute('data-drag-index'))
+      if (!isNaN(idx)) onDrop(idx)
+    }
+  }
+
   if (editing) {
     return (
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4, background: 'var(--bg3)', padding: 6, borderRadius: 'var(--radius)', flexWrap: 'wrap' }}>
@@ -73,10 +96,14 @@ function PiezaRow({ pieza, index, telaRoles, onEdit, onDelete, onDragStart, onDr
   return (
     <div
       draggable
+      data-drag-index={index}
       onDragStart={() => onDragStart(index)}
       onDragOver={e => { e.preventDefault(); onDragOver(index) }}
       onDrop={() => onDrop(index)}
-      style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4, fontSize: 12, cursor: 'grab', padding: '4px 6px', borderRadius: 'var(--radius)', background: 'var(--bg2)' }}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4, fontSize: 12, cursor: 'grab', padding: '4px 6px', borderRadius: 'var(--radius)', background: 'var(--bg2)', touchAction: 'none' }}
     >
       <span style={{ color: 'var(--text2)', fontSize: 14 }}>⠿</span>
       <span style={{ flex: 2 }}>{pieza.nombre}</span>
@@ -112,13 +139,32 @@ function ProcesoRow({ proceso, index, onEdit, onDelete, onDragStart, onDragOver,
     )
   }
 
+  function handleTouchStart(e) { onDragStart(index) }
+  function handleTouchMove(e) {
+    e.preventDefault()
+    const touch = e.touches[0]
+    const el = document.elementFromPoint(touch.clientX, touch.clientY)
+    const row = el?.closest('[data-drag-index]')
+    if (row) { const idx = parseInt(row.getAttribute('data-drag-index')); if (!isNaN(idx)) onDragOver(idx) }
+  }
+  function handleTouchEnd(e) {
+    const touch = e.changedTouches[0]
+    const el = document.elementFromPoint(touch.clientX, touch.clientY)
+    const row = el?.closest('[data-drag-index]')
+    if (row) { const idx = parseInt(row.getAttribute('data-drag-index')); if (!isNaN(idx)) onDrop(idx) }
+  }
+
   return (
     <div
       draggable
+      data-drag-index={index}
       onDragStart={() => onDragStart(index)}
       onDragOver={e => { e.preventDefault(); onDragOver(index) }}
       onDrop={() => onDrop(index)}
-      style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4, fontSize: 12, cursor: 'grab', padding: '6px 8px', borderRadius: 'var(--radius)', background: 'var(--bg2)' }}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4, fontSize: 12, cursor: 'grab', padding: '6px 8px', borderRadius: 'var(--radius)', background: 'var(--bg2)', touchAction: 'none' }}
     >
       <span style={{ color: 'var(--text2)', fontSize: 14 }}>⠿</span>
       <span style={{ fontWeight: 600, minWidth: 110 }}>{proceso.label}</span>
@@ -233,7 +279,10 @@ export default function Productos({ onMenuClick }) {
       tela1_id:           p.tela1_id           || '',
       tela2_id:           p.tela2_id           || '',
       rib_id:             p.rib_id             || '',
-      telas_extra:        p.telas_extra        || [],
+      telas_extra:        (p.telas_extra || []).map(te => {
+        const t = telas.find(x => x.id === parseInt(te.tela_id))
+        return { ...te, prov_id: t?.proveedor_id ? String(t.proveedor_id) : '' }
+      }),
       entretela_id:       p.entretela_id       || '',
       piezas:             p.piezas             || [],
       procesos:           p.procesos           || emptyForm.procesos,
@@ -263,7 +312,10 @@ export default function Productos({ onMenuClick }) {
       tela1_id:           base.tela1_id     || '',
       tela2_id:           base.tela2_id     || '',
       rib_id:             base.rib_id       || '',
-      telas_extra:        (base.telas_extra     || []).map(x => ({ ...x })),
+      telas_extra:        (base.telas_extra || []).map(te => {
+        const t = telas.find(x => x.id === parseInt(te.tela_id))
+        return { ...te, prov_id: t?.proveedor_id ? String(t.proveedor_id) : '' }
+      }),
       entretela_id:       base.entretela_id || '',
       piezas:             (base.piezas          || []).map(x => ({ ...x })),
       procesos:           (base.procesos         || emptyForm.procesos).map(x => ({ ...x })),
@@ -326,11 +378,11 @@ export default function Productos({ onMenuClick }) {
 
   function agregarTela() {
     const idx = form.telas_extra.length + 3
-    setForm(f => ({ ...f, telas_extra: [...f.telas_extra, { label: `Tela ${idx}`, tela_id: '' }] }))
+    setForm(f => ({ ...f, telas_extra: [...f.telas_extra, { label: `Tela ${idx}`, tela_id: '', prov_id: '' }] }))
   }
 
-  function updateTelaExtra(i, tela_id) {
-    setForm(f => ({ ...f, telas_extra: f.telas_extra.map((te, j) => j === i ? { ...te, tela_id } : te) }))
+  function updateTelaExtra(i, changes) {
+    setForm(f => ({ ...f, telas_extra: f.telas_extra.map((te, j) => j === i ? { ...te, ...changes } : te) }))
   }
 
   function removeTelaExtra(i) {
@@ -401,7 +453,7 @@ export default function Productos({ onMenuClick }) {
       tela1_id:            parseInt(form.tela1_id) || null,
       tela2_id:            parseInt(form.tela2_id) || null,
       rib_id:              parseInt(form.rib_id) || null,
-      telas_extra:         form.telas_extra.map(te => ({ ...te, tela_id: parseInt(te.tela_id) || null })),
+      telas_extra:         form.telas_extra.map(({ label, tela_id }) => ({ label, tela_id: parseInt(tela_id) || null })),
       entretela_id:        parseInt(form.entretela_id) || null,
       piezas:              form.piezas,
       procesos:            form.procesos,
@@ -745,12 +797,26 @@ export default function Productos({ onMenuClick }) {
                       <span>{te.label}</span>
                       <button className="btn btn-danger btn-sm" onClick={() => removeTelaExtra(i)}>✕</button>
                     </div>
-                    <select value={te.tela_id} onChange={e => updateTelaExtra(i, e.target.value)} style={{ width: '100%' }}>
-                      <option value="">— Sin {te.label} —</option>
-                      {telas.map(t => (
-                        <option key={t.id} value={t.id}>{t.tipo}{t.color ? ` · ${t.color}` : ''}</option>
-                      ))}
-                    </select>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <select
+                        value={te.prov_id || ''}
+                        onChange={e => updateTelaExtra(i, { prov_id: e.target.value, tela_id: '' })}
+                        style={{ width: 160 }}
+                      >
+                        <option value="">Todos los proveedores</option>
+                        {proveedores.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                      </select>
+                      <select
+                        value={te.tela_id || ''}
+                        onChange={e => updateTelaExtra(i, { tela_id: e.target.value })}
+                        style={{ flex: 1 }}
+                      >
+                        <option value="">— Sin {te.label} —</option>
+                        {telasFiltradas(te.prov_id).map(t => (
+                          <option key={t.id} value={t.id}>{t.tipo}{t.color ? ` · ${t.color}` : ''}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 ))}
 
