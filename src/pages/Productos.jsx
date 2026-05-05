@@ -1,6 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 
+function useIsTouch() {
+  const [isTouch, setIsTouch] = useState(() => window.matchMedia('(hover: none)').matches)
+  useEffect(() => {
+    const mq = window.matchMedia('(hover: none)')
+    const handler = e => setIsTouch(e.matches)
+    mq.addEventListener('change', handler)
+    return () => mq.removeEventListener('change', handler)
+  }, [])
+  return isTouch
+}
+
 const TABLAS = {
   adulto:   { label: 'Adulto',         talles: ['XS', 'S', 'M', 'L', 'XL', 'XXL'] },
   nino:     { label: 'Niño',           talles: ['2', '4', '6', '8', '10', '12', '14', '16'] },
@@ -47,36 +58,14 @@ function getTelaRoles(telasExtra) {
 
 // ─── PiezaRow ─────────────────────────────────────────────────────────────────
 
-function PiezaRow({ pieza, index, telaRoles, onEdit, onDelete, onDragStart, onDragOver, onDrop }) {
+function PiezaRow({ pieza, index, total, telaRoles, onEdit, onDelete, onDragStart, onDragOver, onDrop, onMoveUp, onMoveDown }) {
   const [editing, setEditing] = useState(false)
   const [local, setLocal] = useState({ ...pieza })
+  const isTouch = useIsTouch()
 
   function save() { onEdit(index, local); setEditing(false) }
 
   const rolLabel = telaRoles.find(r => r.value === pieza.tela_rol)?.label || pieza.tela_rol
-
-  function handleTouchStart(e) {
-    onDragStart(index)
-  }
-  function handleTouchMove(e) {
-    e.preventDefault()
-    const touch = e.touches[0]
-    const el = document.elementFromPoint(touch.clientX, touch.clientY)
-    const row = el?.closest('[data-drag-index]')
-    if (row) {
-      const idx = parseInt(row.getAttribute('data-drag-index'))
-      if (!isNaN(idx)) onDragOver(idx)
-    }
-  }
-  function handleTouchEnd(e) {
-    const touch = e.changedTouches[0]
-    const el = document.elementFromPoint(touch.clientX, touch.clientY)
-    const row = el?.closest('[data-drag-index]')
-    if (row) {
-      const idx = parseInt(row.getAttribute('data-drag-index'))
-      if (!isNaN(idx)) onDrop(idx)
-    }
-  }
 
   if (editing) {
     return (
@@ -95,17 +84,21 @@ function PiezaRow({ pieza, index, telaRoles, onEdit, onDelete, onDragStart, onDr
 
   return (
     <div
-      draggable
+      draggable={!isTouch}
       data-drag-index={index}
-      onDragStart={() => onDragStart(index)}
-      onDragOver={e => { e.preventDefault(); onDragOver(index) }}
-      onDrop={() => onDrop(index)}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-      style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4, fontSize: 12, cursor: 'grab', padding: '4px 6px', borderRadius: 'var(--radius)', background: 'var(--bg2)', touchAction: 'none' }}
+      onDragStart={!isTouch ? () => onDragStart(index) : undefined}
+      onDragOver={!isTouch ? e => { e.preventDefault(); onDragOver(index) } : undefined}
+      onDrop={!isTouch ? () => onDrop(index) : undefined}
+      style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4, fontSize: 12, cursor: isTouch ? 'default' : 'grab', padding: '4px 6px', borderRadius: 'var(--radius)', background: 'var(--bg2)' }}
     >
-      <span style={{ color: 'var(--text2)', fontSize: 14 }}>⠿</span>
+      {isTouch ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <button onClick={onMoveUp} disabled={index === 0} style={{ width: 36, height: 36, fontSize: 16, lineHeight: 1, padding: 0, border: '1px solid var(--border)', borderRadius: 'var(--radius)', background: 'var(--bg3)', cursor: index === 0 ? 'default' : 'pointer', opacity: index === 0 ? 0.3 : 1 }}>↑</button>
+          <button onClick={onMoveDown} disabled={index === total - 1} style={{ width: 36, height: 36, fontSize: 16, lineHeight: 1, padding: 0, border: '1px solid var(--border)', borderRadius: 'var(--radius)', background: 'var(--bg3)', cursor: index === total - 1 ? 'default' : 'pointer', opacity: index === total - 1 ? 0.3 : 1 }}>↓</button>
+        </div>
+      ) : (
+        <span style={{ color: 'var(--text2)', fontSize: 14 }}>⠿</span>
+      )}
       <span style={{ flex: 2 }}>{pieza.nombre}</span>
       <span style={{ color: 'var(--text2)' }}>×{pieza.mult}</span>
       <span style={{ color: 'var(--accent)', minWidth: 70 }}>{rolLabel}</span>
@@ -117,9 +110,10 @@ function PiezaRow({ pieza, index, telaRoles, onEdit, onDelete, onDragStart, onDr
 
 // ─── ProcesoRow ───────────────────────────────────────────────────────────────
 
-function ProcesoRow({ proceso, index, onEdit, onDelete, onDragStart, onDragOver, onDrop }) {
+function ProcesoRow({ proceso, index, total, onEdit, onDelete, onDragStart, onDragOver, onDrop, onMoveUp, onMoveDown }) {
   const [editing, setEditing] = useState(false)
   const [local, setLocal] = useState({ ...proceso })
+  const isTouch = useIsTouch()
 
   function save() { onEdit(index, local); setEditing(false) }
 
@@ -139,34 +133,23 @@ function ProcesoRow({ proceso, index, onEdit, onDelete, onDragStart, onDragOver,
     )
   }
 
-  function handleTouchStart(e) { onDragStart(index) }
-  function handleTouchMove(e) {
-    e.preventDefault()
-    const touch = e.touches[0]
-    const el = document.elementFromPoint(touch.clientX, touch.clientY)
-    const row = el?.closest('[data-drag-index]')
-    if (row) { const idx = parseInt(row.getAttribute('data-drag-index')); if (!isNaN(idx)) onDragOver(idx) }
-  }
-  function handleTouchEnd(e) {
-    const touch = e.changedTouches[0]
-    const el = document.elementFromPoint(touch.clientX, touch.clientY)
-    const row = el?.closest('[data-drag-index]')
-    if (row) { const idx = parseInt(row.getAttribute('data-drag-index')); if (!isNaN(idx)) onDrop(idx) }
-  }
-
   return (
     <div
-      draggable
+      draggable={!isTouch}
       data-drag-index={index}
-      onDragStart={() => onDragStart(index)}
-      onDragOver={e => { e.preventDefault(); onDragOver(index) }}
-      onDrop={() => onDrop(index)}
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-      style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4, fontSize: 12, cursor: 'grab', padding: '6px 8px', borderRadius: 'var(--radius)', background: 'var(--bg2)', touchAction: 'none' }}
+      onDragStart={!isTouch ? () => onDragStart(index) : undefined}
+      onDragOver={!isTouch ? e => { e.preventDefault(); onDragOver(index) } : undefined}
+      onDrop={!isTouch ? () => onDrop(index) : undefined}
+      style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4, fontSize: 12, cursor: isTouch ? 'default' : 'grab', padding: '6px 8px', borderRadius: 'var(--radius)', background: 'var(--bg2)' }}
     >
-      <span style={{ color: 'var(--text2)', fontSize: 14 }}>⠿</span>
+      {isTouch ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <button onClick={onMoveUp} disabled={index === 0} style={{ width: 36, height: 36, fontSize: 16, lineHeight: 1, padding: 0, border: '1px solid var(--border)', borderRadius: 'var(--radius)', background: 'var(--bg3)', cursor: index === 0 ? 'default' : 'pointer', opacity: index === 0 ? 0.3 : 1 }}>↑</button>
+          <button onClick={onMoveDown} disabled={index === total - 1} style={{ width: 36, height: 36, fontSize: 16, lineHeight: 1, padding: 0, border: '1px solid var(--border)', borderRadius: 'var(--radius)', background: 'var(--bg3)', cursor: index === total - 1 ? 'default' : 'pointer', opacity: index === total - 1 ? 0.3 : 1 }}>↓</button>
+        </div>
+      ) : (
+        <span style={{ color: 'var(--text2)', fontSize: 14 }}>⠿</span>
+      )}
       <span style={{ fontWeight: 600, minWidth: 110 }}>{proceso.label}</span>
       {proceso.nota && <span style={{ color: 'var(--text2)', fontStyle: 'italic' }}>— {proceso.nota}</span>}
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
@@ -339,6 +322,14 @@ export default function Productos({ onMenuClick }) {
       return { ...f, piezas: arr }
     })
   }
+  function movePieza(from, to) {
+    setForm(f => {
+      const arr = [...f.piezas]
+      const [m] = arr.splice(from, 1)
+      arr.splice(to, 0, m)
+      return { ...f, piezas: arr }
+    })
+  }
 
   function handleDragStartProceso(i) { dragSrcProceso.current = i }
   function handleDropProceso(i) {
@@ -348,6 +339,14 @@ export default function Productos({ onMenuClick }) {
       const [m] = arr.splice(dragSrcProceso.current, 1)
       arr.splice(i, 0, m)
       dragSrcProceso.current = null
+      return { ...f, procesos: arr }
+    })
+  }
+  function moveProceso(from, to) {
+    setForm(f => {
+      const arr = [...f.procesos]
+      const [m] = arr.splice(from, 1)
+      arr.splice(to, 0, m)
       return { ...f, procesos: arr }
     })
   }
@@ -750,9 +749,10 @@ export default function Productos({ onMenuClick }) {
                 <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8 }}>⚙ Flujo de producción <span style={{ fontSize: 10, color: 'var(--text2)', fontWeight: 400 }}>arrastrá para reordenar</span></div>
                 {form.procesos.map((p, i) => (
                   <ProcesoRow
-                    key={i} proceso={p} index={i}
+                    key={i} proceso={p} index={i} total={form.procesos.length}
                     onEdit={editProceso} onDelete={deleteProceso}
                     onDragStart={handleDragStartProceso} onDragOver={() => {}} onDrop={handleDropProceso}
+                    onMoveUp={() => moveProceso(i, i - 1)} onMoveDown={() => moveProceso(i, i + 1)}
                   />
                 ))}
                 <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
@@ -858,9 +858,10 @@ export default function Productos({ onMenuClick }) {
                 <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8 }}>✂ Piezas de corte <span style={{ fontSize: 10, color: 'var(--text2)', fontWeight: 400 }}>arrastrá para reordenar · clic ✏ para editar</span></div>
                 {form.piezas.map((p, i) => (
                   <PiezaRow
-                    key={i} pieza={p} index={i} telaRoles={telaRoles}
+                    key={i} pieza={p} index={i} total={form.piezas.length} telaRoles={telaRoles}
                     onEdit={editPieza} onDelete={deletePieza}
                     onDragStart={handleDragStartPieza} onDragOver={() => {}} onDrop={handleDropPieza}
+                    onMoveUp={() => movePieza(i, i - 1)} onMoveDown={() => movePieza(i, i + 1)}
                   />
                 ))}
                 <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
