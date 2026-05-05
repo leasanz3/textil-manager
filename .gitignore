@@ -1,0 +1,15 @@
+﻿# Dependencias
+node_modules/
+
+# Variables de entorno — NUNCA subir al repo
+.env
+.env.local
+.env.production
+
+# Build
+dist/
+build/
+
+# Editor
+.vscode/
+.DS_Store
