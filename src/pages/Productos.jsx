@@ -2,26 +2,58 @@ import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 
 const TABLAS = {
-  adulto: { label: 'Adulto', talles: ['XS', 'S', 'M', 'L', 'XL', 'XXL'] },
-  nino: { label: 'Niño', talles: ['2', '4', '6', '8', '10', '12', '14', '16'] },
-  malla: { label: 'Malla', talles: ['40', '42', '44', '46', '48', '50', '52'] },
-  mallaesp: { label: 'Malla Especial', talles: ['54', '56', '58'] }
+  adulto:   { label: 'Adulto',         talles: ['XS', 'S', 'M', 'L', 'XL', 'XXL'] },
+  nino:     { label: 'Niño',           talles: ['2', '4', '6', '8', '10', '12', '14', '16'] },
+  malla:    { label: 'Malla',          talles: ['40', '42', '44', '46', '48', '50', '52'] },
+  mallaesp: { label: 'Malla Especial', talles: ['54', '56', '58'] },
 }
 
 const PROCESOS_DISPONIBLES = [
-  { id: 'corte', label: '✂ Corte', icon: '✂' },
-  { id: 'bordado', label: '🪡 Bordado', icon: '🪡' },
-  { id: 'estampado', label: '🎨 Estampado', icon: '🎨' },
-  { id: 'sublimado', label: '✨ Sublimado', icon: '✨' },
-  { id: 'taller', label: '🧵 Taller', icon: '🧵' },
-  { id: 'entrega', label: '📦 Entrega', icon: '📦' },
+  { id: 'corte',      label: '✂ Corte',         icon: '✂'  },
+  { id: 'bordado',    label: '🪡 Bordado',        icon: '🪡' },
+  { id: 'estampado',  label: '🎨 Estampado',      icon: '🎨' },
+  { id: 'sublimado',  label: '✨ Sublimado',       icon: '✨' },
+  { id: 'taller',     label: '🧵 Taller',         icon: '🧵' },
+  { id: 'planchado',  label: '🔥 Planchado',      icon: '🔥' },
+  { id: 'ojal_boton', label: '🪢 Ojal y botón',   icon: '🪢' },
+  { id: 'entrega',    label: '📦 Entrega',         icon: '📦' },
 ]
 
-function PiezaRow({ pieza, index, onEdit, onDelete, onDragStart, onDragOver, onDrop }) {
+function telaRolLabel(rol, telasExtra) {
+  if (rol === 'tela1') return 'Tela 1'
+  if (rol === 'tela2') return 'Tela 2'
+  if (rol === 'rib') return 'RIB'
+  if (rol === 'entretela') return 'Entretela'
+  const m = rol?.match(/^tela(\d+)$/)
+  if (m) {
+    const idx = parseInt(m[1]) - 3
+    return telasExtra?.[idx]?.label || `Tela ${m[1]}`
+  }
+  return rol || '—'
+}
+
+function getTelaRoles(telasExtra) {
+  const roles = [
+    { value: 'tela1', label: 'Tela 1' },
+    { value: 'tela2', label: 'Tela 2' },
+  ]
+  ;(telasExtra || []).forEach((te, i) => {
+    roles.push({ value: `tela${i + 3}`, label: te.label || `Tela ${i + 3}` })
+  })
+  roles.push({ value: 'rib',       label: 'RIB'       })
+  roles.push({ value: 'entretela', label: 'Entretela' })
+  return roles
+}
+
+// ─── PiezaRow ─────────────────────────────────────────────────────────────────
+
+function PiezaRow({ pieza, index, telaRoles, onEdit, onDelete, onDragStart, onDragOver, onDrop }) {
   const [editing, setEditing] = useState(false)
   const [local, setLocal] = useState({ ...pieza })
 
   function save() { onEdit(index, local); setEditing(false) }
+
+  const rolLabel = telaRoles.find(r => r.value === pieza.tela_rol)?.label || pieza.tela_rol
 
   if (editing) {
     return (
@@ -29,10 +61,8 @@ function PiezaRow({ pieza, index, onEdit, onDelete, onDragStart, onDragOver, onD
         <input value={local.nombre} onChange={e => setLocal(f => ({ ...f, nombre: e.target.value }))} style={{ flex: 2, minWidth: 100 }} autoFocus />
         <input value={local.mult} onChange={e => setLocal(f => ({ ...f, mult: e.target.value.replace(/[^0-9]/g, '') }))} style={{ width: 45 }} placeholder="1" />
         <span style={{ fontSize: 11, color: 'var(--text2)' }}>x prenda</span>
-        <select value={local.tela_rol} onChange={e => setLocal(f => ({ ...f, tela_rol: e.target.value }))} style={{ width: 90 }}>
-          <option value="tela1">Tela 1</option>
-          <option value="tela2">Tela 2</option>
-          <option value="rib">RIB</option>
+        <select value={local.tela_rol} onChange={e => setLocal(f => ({ ...f, tela_rol: e.target.value }))} style={{ width: 110 }}>
+          {telaRoles.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
         </select>
         <button className="btn btn-primary btn-sm" onClick={save}>✔</button>
         <button className="btn btn-secondary btn-sm" onClick={() => setEditing(false)}>✕</button>
@@ -51,14 +81,14 @@ function PiezaRow({ pieza, index, onEdit, onDelete, onDragStart, onDragOver, onD
       <span style={{ color: 'var(--text2)', fontSize: 14 }}>⠿</span>
       <span style={{ flex: 2 }}>{pieza.nombre}</span>
       <span style={{ color: 'var(--text2)' }}>×{pieza.mult}</span>
-      <span style={{ color: 'var(--accent)', minWidth: 60 }}>
-        {pieza.tela_rol === 'tela1' ? 'Tela 1' : pieza.tela_rol === 'tela2' ? 'Tela 2' : 'RIB'}
-      </span>
+      <span style={{ color: 'var(--accent)', minWidth: 70 }}>{rolLabel}</span>
       <button className="btn btn-secondary btn-sm" onClick={() => setEditing(true)}>✏</button>
       <button className="btn btn-danger btn-sm" onClick={() => onDelete(index)}>✕</button>
     </div>
   )
 }
+
+// ─── ProcesoRow ───────────────────────────────────────────────────────────────
 
 function ProcesoRow({ proceso, index, onEdit, onDelete, onDragStart, onDragOver, onDrop }) {
   const [editing, setEditing] = useState(false)
@@ -72,7 +102,7 @@ function ProcesoRow({ proceso, index, onEdit, onDelete, onDragStart, onDragOver,
         <select value={local.id} onChange={e => {
           const p = PROCESOS_DISPONIBLES.find(x => x.id === e.target.value)
           setLocal(f => ({ ...f, id: e.target.value, label: p?.label || e.target.value }))
-        }} style={{ width: 130 }}>
+        }} style={{ width: 150 }}>
           {PROCESOS_DISPONIBLES.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
         </select>
         <input value={local.nota || ''} onChange={e => setLocal(f => ({ ...f, nota: e.target.value }))} placeholder="nota (ej: solo delantera)" style={{ flex: 1 }} />
@@ -101,56 +131,67 @@ function ProcesoRow({ proceso, index, onEdit, onDelete, onDragStart, onDragOver,
   )
 }
 
+// ─── Componente principal ─────────────────────────────────────────────────────
+
 export default function Productos({ onMenuClick }) {
-  const [productos, setProductos] = useState([])
-  const [telas, setTelas] = useState([])
+  const [productos, setProductos]   = useState([])
+  const [telas, setTelas]           = useState([])
+  const [avios, setAvios]           = useState([])
   const [proveedores, setProveedores] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-  const [modal, setModal] = useState(false)
+  const [loading, setLoading]       = useState(true)
+  const [search, setSearch]         = useState('')
+  const [modal, setModal]           = useState(false)
   const [vistaFicha, setVistaFicha] = useState(null)
-  const [editing, setEditing] = useState(null)
-  const [saving, setSaving] = useState(false)
-  const [filterProvTela, setFilterProvTela] = useState('')
+  const [editing, setEditing]       = useState(null)
+  const [saving, setSaving]         = useState(false)
+  const [filterProvTela, setFilterProvTela]   = useState('')
   const [filterProvTela2, setFilterProvTela2] = useState('')
-  const [filterProvRib, setFilterProvRib] = useState('')
-  const dragSrcPieza = useRef(null)
+  const [filterProvRib, setFilterProvRib]     = useState('')
+  const dragSrcPieza   = useRef(null)
   const dragSrcProceso = useRef(null)
 
   const emptyForm = {
     nombre: '', codigo: '', tabla: 'adulto', base_id: '',
     tela1_id: '', tela2_id: '', rib_id: '',
+    telas_extra:  [],
+    entretela_id: '',
     piezas: [],
     procesos: [
-      { id: 'corte', label: '✂ Corte', nota: '' },
-      { id: 'taller', label: '🧵 Taller', nota: '' },
-      { id: 'entrega', label: '📦 Entrega', nota: '' }
+      { id: 'corte',   label: '✂ Corte',   nota: '' },
+      { id: 'taller',  label: '🧵 Taller',  nota: '' },
+      { id: 'entrega', label: '📦 Entrega', nota: '' },
     ],
     avios_medidas: [],
     terminaciones: { grifaTalle: false, grifa: false, talle: false },
     terminaciones_extra: [],
-    notas: ''
+    planchado_pares: [],
+    notas: '',
   }
-  const [form, setForm] = useState(emptyForm)
+  const [form, setForm]             = useState(emptyForm)
   const [nuevaPieza, setNuevaPieza] = useState({ nombre: '', mult: '1', tela_rol: 'tela1' })
   const [nuevoProceso, setNuevoProceso] = useState({ id: 'bordado', nota: '' })
-  const [nuevoAvio, setNuevoAvio] = useState({ nombre: '', unit: 'cm', todos: '', ancho: '' })
-  const [nuevaTerm, setNuevaTerm] = useState('')
+  const [nuevoAvio, setNuevoAvio]   = useState({ nombre: '', unit: 'cm', todos: '', ancho: '' })
+  const [nuevaTerm, setNuevaTerm]   = useState('')
+  const [nuevoPar, setNuevoPar]     = useState({ piezaA: '', piezaB: '' })
 
   useEffect(() => { fetchAll() }, [])
 
   async function fetchAll() {
     setLoading(true)
-    const [{ data: p }, { data: t }, { data: prov }] = await Promise.all([
+    const [{ data: p }, { data: t }, { data: prov }, { data: a }] = await Promise.all([
       supabase.from('productos').select('*').order('nombre'),
       supabase.from('telas').select('id, tipo, color, unidad, proveedor_id, proveedor').order('tipo'),
-      supabase.from('proveedores').select('id, nombre').order('nombre')
+      supabase.from('proveedores').select('id, nombre').order('nombre'),
+      supabase.from('avios').select('id, nombre, tipo').order('nombre'),
     ])
     setProductos(p || [])
     setTelas(t || [])
     setProveedores(prov || [])
+    setAvios(a || [])
     setLoading(false)
   }
+
+  const aviosEntretela = avios.filter(a => a.tipo?.toLowerCase() === 'entretela')
 
   function telasFiltradas(provId) {
     if (!provId) return telas
@@ -162,6 +203,13 @@ export default function Productos({ onMenuClick }) {
     return t ? `${t.tipo}${t.color ? ` · ${t.color}` : ''}` : '—'
   }
 
+  function avioLabel(id) {
+    const a = avios.find(x => x.id === parseInt(id))
+    return a ? a.nombre : '—'
+  }
+
+  // ── Abrir modal ──────────────────────────────────────────────────────────────
+
   function openNew() {
     setEditing(null)
     setForm(emptyForm)
@@ -171,26 +219,29 @@ export default function Productos({ onMenuClick }) {
 
   function openEdit(p) {
     setEditing(p.id)
-    const t1 = telas.find(t => t.id === p.tela1_id)
-    const t2 = telas.find(t => t.id === p.tela2_id)
+    const t1  = telas.find(t => t.id === p.tela1_id)
+    const t2  = telas.find(t => t.id === p.tela2_id)
     const rib = telas.find(t => t.id === p.rib_id)
-    setFilterProvTela(t1?.proveedor_id ? String(t1.proveedor_id) : '')
-    setFilterProvTela2(t2?.proveedor_id ? String(t2.proveedor_id) : '')
-    setFilterProvRib(rib?.proveedor_id ? String(rib.proveedor_id) : '')
+    setFilterProvTela(t1?.proveedor_id  ? String(t1.proveedor_id)  : '')
+    setFilterProvTela2(t2?.proveedor_id ? String(t2.proveedor_id)  : '')
+    setFilterProvRib(rib?.proveedor_id  ? String(rib.proveedor_id) : '')
     setForm({
-      nombre: p.nombre || '',
-      codigo: p.codigo || '',
-      tabla: p.tabla || 'adulto',
-      base_id: p.base_id || '',
-      tela1_id: p.tela1_id || '',
-      tela2_id: p.tela2_id || '',
-      rib_id: p.rib_id || '',
-      piezas: p.piezas || [],
-      procesos: p.procesos || emptyForm.procesos,
-      avios_medidas: p.avios_medidas || [],
-      terminaciones: p.terminaciones || { grifaTalle: false, grifa: false, talle: false },
+      nombre:             p.nombre             || '',
+      codigo:             p.codigo             || '',
+      tabla:              p.tabla              || 'adulto',
+      base_id:            p.base_id            || '',
+      tela1_id:           p.tela1_id           || '',
+      tela2_id:           p.tela2_id           || '',
+      rib_id:             p.rib_id             || '',
+      telas_extra:        p.telas_extra        || [],
+      entretela_id:       p.entretela_id       || '',
+      piezas:             p.piezas             || [],
+      procesos:           p.procesos           || emptyForm.procesos,
+      avios_medidas:      p.avios_medidas      || [],
+      terminaciones:      p.terminaciones      || { grifaTalle: false, grifa: false, talle: false },
       terminaciones_extra: p.terminaciones_extra || [],
-      notas: p.notas || ''
+      planchado_pares:    p.planchado_pares    || [],
+      notas:              p.notas              || '',
     })
     setModal(true)
   }
@@ -199,28 +250,32 @@ export default function Productos({ onMenuClick }) {
     if (!baseId) { setForm(f => ({ ...f, base_id: '' })); return }
     const base = productos.find(p => p.id === parseInt(baseId))
     if (!base) return
-    const t1 = telas.find(t => t.id === base.tela1_id)
-    const t2 = telas.find(t => t.id === base.tela2_id)
+    const t1  = telas.find(t => t.id === base.tela1_id)
+    const t2  = telas.find(t => t.id === base.tela2_id)
     const rib = telas.find(t => t.id === base.rib_id)
-    setFilterProvTela(t1?.proveedor_id ? String(t1.proveedor_id) : '')
-    setFilterProvTela2(t2?.proveedor_id ? String(t2.proveedor_id) : '')
-    setFilterProvRib(rib?.proveedor_id ? String(rib.proveedor_id) : '')
+    setFilterProvTela(t1?.proveedor_id  ? String(t1.proveedor_id)  : '')
+    setFilterProvTela2(t2?.proveedor_id ? String(t2.proveedor_id)  : '')
+    setFilterProvRib(rib?.proveedor_id  ? String(rib.proveedor_id) : '')
     setForm(f => ({
       ...f,
-      base_id: baseId,
-      tabla: base.tabla || f.tabla,
-      tela1_id: base.tela1_id || '',
-      tela2_id: base.tela2_id || '',
-      rib_id: base.rib_id || '',
-      piezas: (base.piezas || []).map(x => ({ ...x })),
-      procesos: (base.procesos || emptyForm.procesos).map(x => ({ ...x })),
-      avios_medidas: (base.avios_medidas || []).map(x => ({ ...x, medidas: { ...x.medidas } })),
-      terminaciones: { ...(base.terminaciones || {}) },
-      terminaciones_extra: (base.terminaciones_extra || []).map(x => ({ ...x }))
+      base_id:            baseId,
+      tabla:              base.tabla        || f.tabla,
+      tela1_id:           base.tela1_id     || '',
+      tela2_id:           base.tela2_id     || '',
+      rib_id:             base.rib_id       || '',
+      telas_extra:        (base.telas_extra     || []).map(x => ({ ...x })),
+      entretela_id:       base.entretela_id || '',
+      piezas:             (base.piezas          || []).map(x => ({ ...x })),
+      procesos:           (base.procesos         || emptyForm.procesos).map(x => ({ ...x })),
+      avios_medidas:      (base.avios_medidas    || []).map(x => ({ ...x, medidas: { ...x.medidas } })),
+      terminaciones:      { ...(base.terminaciones || {}) },
+      terminaciones_extra: (base.terminaciones_extra || []).map(x => ({ ...x })),
+      planchado_pares:    (base.planchado_pares  || []).map(x => ({ ...x })),
     }))
   }
 
-  // Drag piezas
+  // ── Drag ──────────────────────────────────────────────────────────────────────
+
   function handleDragStartPieza(i) { dragSrcPieza.current = i }
   function handleDropPieza(i) {
     if (dragSrcPieza.current === null || dragSrcPieza.current === i) return
@@ -233,7 +288,6 @@ export default function Productos({ onMenuClick }) {
     })
   }
 
-  // Drag procesos
   function handleDragStartProceso(i) { dragSrcProceso.current = i }
   function handleDropProceso(i) {
     if (dragSrcProceso.current === null || dragSrcProceso.current === i) return
@@ -246,10 +300,10 @@ export default function Productos({ onMenuClick }) {
     })
   }
 
-  function editPieza(i, v) { setForm(f => ({ ...f, piezas: f.piezas.map((p, j) => j === i ? { ...v, mult: parseInt(v.mult) || 1 } : p) })) }
-  function deletePieza(i) { setForm(f => ({ ...f, piezas: f.piezas.filter((_, j) => j !== i) })) }
-  function editProceso(i, v) { setForm(f => ({ ...f, procesos: f.procesos.map((p, j) => j === i ? v : p) })) }
-  function deleteProceso(i) { setForm(f => ({ ...f, procesos: f.procesos.filter((_, j) => j !== i) })) }
+  // ── Piezas ────────────────────────────────────────────────────────────────────
+
+  function editPieza(i, v)   { setForm(f => ({ ...f, piezas: f.piezas.map((p, j) => j === i ? { ...v, mult: parseInt(v.mult) || 1 } : p) })) }
+  function deletePieza(i)    { setForm(f => ({ ...f, piezas: f.piezas.filter((_, j) => j !== i) })) }
 
   function agregarPieza() {
     if (!nuevaPieza.nombre) return
@@ -257,11 +311,33 @@ export default function Productos({ onMenuClick }) {
     setNuevaPieza({ nombre: '', mult: '1', tela_rol: 'tela1' })
   }
 
+  // ── Procesos ──────────────────────────────────────────────────────────────────
+
+  function editProceso(i, v)  { setForm(f => ({ ...f, procesos: f.procesos.map((p, j) => j === i ? v : p) })) }
+  function deleteProceso(i)   { setForm(f => ({ ...f, procesos: f.procesos.filter((_, j) => j !== i) })) }
+
   function agregarProceso() {
     const p = PROCESOS_DISPONIBLES.find(x => x.id === nuevoProceso.id)
     setForm(f => ({ ...f, procesos: [...f.procesos, { id: nuevoProceso.id, label: p?.label || nuevoProceso.id, nota: nuevoProceso.nota }] }))
     setNuevoProceso({ id: 'bordado', nota: '' })
   }
+
+  // ── Telas extra ───────────────────────────────────────────────────────────────
+
+  function agregarTela() {
+    const idx = form.telas_extra.length + 3
+    setForm(f => ({ ...f, telas_extra: [...f.telas_extra, { label: `Tela ${idx}`, tela_id: '' }] }))
+  }
+
+  function updateTelaExtra(i, tela_id) {
+    setForm(f => ({ ...f, telas_extra: f.telas_extra.map((te, j) => j === i ? { ...te, tela_id } : te) }))
+  }
+
+  function removeTelaExtra(i) {
+    setForm(f => ({ ...f, telas_extra: f.telas_extra.filter((_, j) => j !== i) }))
+  }
+
+  // ── Avíos con medidas ─────────────────────────────────────────────────────────
 
   function agregarAvio() {
     if (!nuevoAvio.nombre) return
@@ -284,11 +360,25 @@ export default function Productos({ onMenuClick }) {
     setForm(f => ({ ...f, avios_medidas: f.avios_medidas.map((a, i) => i !== ai ? a : { ...a, ancho: valor }) }))
   }
 
+  // ── Terminaciones ─────────────────────────────────────────────────────────────
+
   function agregarTerminacion() {
     if (!nuevaTerm) return
     setForm(f => ({ ...f, terminaciones_extra: [...f.terminaciones_extra, { nombre: nuevaTerm }] }))
     setNuevaTerm('')
   }
+
+  // ── Planchado pares ───────────────────────────────────────────────────────────
+
+  function agregarPar() {
+    if (!nuevoPar.piezaA || !nuevoPar.piezaB) return
+    setForm(f => ({ ...f, planchado_pares: [...f.planchado_pares, { ...nuevoPar }] }))
+    setNuevoPar({ piezaA: '', piezaB: '' })
+  }
+
+  function deletePar(i) { setForm(f => ({ ...f, planchado_pares: f.planchado_pares.filter((_, j) => j !== i) })) }
+
+  // ── Código auto ───────────────────────────────────────────────────────────────
 
   function generarCodigo(nombre) {
     const pre = { canguro: 'CANG', remera: 'REM', buzo: 'BUZO', pantalon: 'PANT', malla: 'MALL', polo: 'POLO', short: 'SHORT', chomba: 'CHOM' }
@@ -298,23 +388,28 @@ export default function Productos({ onMenuClick }) {
     return p + '-' + String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, '0')
   }
 
+  // ── Guardar ───────────────────────────────────────────────────────────────────
+
   async function handleSave() {
     if (!form.nombre) return alert('El nombre del producto es obligatorio')
     setSaving(true)
     const datos = {
-      nombre: form.nombre,
-      codigo: form.codigo || generarCodigo(form.nombre),
-      tabla: form.tabla,
-      base_id: parseInt(form.base_id) || null,
-      tela1_id: parseInt(form.tela1_id) || null,
-      tela2_id: parseInt(form.tela2_id) || null,
-      rib_id: parseInt(form.rib_id) || null,
-      piezas: form.piezas,
-      procesos: form.procesos,
-      avios_medidas: form.avios_medidas,
-      terminaciones: form.terminaciones,
+      nombre:              form.nombre,
+      codigo:              form.codigo || generarCodigo(form.nombre),
+      tabla:               form.tabla,
+      base_id:             parseInt(form.base_id) || null,
+      tela1_id:            parseInt(form.tela1_id) || null,
+      tela2_id:            parseInt(form.tela2_id) || null,
+      rib_id:              parseInt(form.rib_id) || null,
+      telas_extra:         form.telas_extra.map(te => ({ ...te, tela_id: parseInt(te.tela_id) || null })),
+      entretela_id:        parseInt(form.entretela_id) || null,
+      piezas:              form.piezas,
+      procesos:            form.procesos,
+      avios_medidas:       form.avios_medidas,
+      terminaciones:       form.terminaciones,
       terminaciones_extra: form.terminaciones_extra,
-      notas: form.notas || null
+      planchado_pares:     form.planchado_pares,
+      notas:               form.notas || null,
     }
     if (editing) {
       await supabase.from('productos').update(datos).eq('id', editing)
@@ -323,7 +418,6 @@ export default function Productos({ onMenuClick }) {
     }
     setSaving(false)
     setModal(false)
-    // Actualizar vista ficha si estaba abierta
     if (vistaFicha?.id === editing) {
       const { data } = await supabase.from('productos').select('*').eq('id', editing).single()
       if (data) setVistaFicha(data)
@@ -339,11 +433,15 @@ export default function Productos({ onMenuClick }) {
     fetchAll()
   }
 
-  const filtered = productos.filter(p =>
-    !search || p.nombre?.toLowerCase().includes(search.toLowerCase()) || p.codigo?.toLowerCase().includes(search.toLowerCase())
-  )
+  // ── Cómputos render ───────────────────────────────────────────────────────────
 
-  const talles = TABLAS[form.tabla]?.talles || []
+  const filtered      = productos.filter(p => !search || p.nombre?.toLowerCase().includes(search.toLowerCase()) || p.codigo?.toLowerCase().includes(search.toLowerCase()))
+  const talles        = TABLAS[form.tabla]?.talles || []
+  const telaRoles     = getTelaRoles(form.telas_extra)
+  const tienePlanchado = form.procesos.some(p => p.id === 'planchado')
+  const nombresPiezas = form.piezas.map(p => p.nombre).filter(Boolean)
+
+  // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
     <div>
@@ -394,7 +492,7 @@ export default function Productos({ onMenuClick }) {
                         <td><strong>{p.nombre}</strong></td>
                         <td style={{ fontSize: 11 }}>
                           {base ? <span className="badge badge-blue">hijo · {base.nombre}</span>
-                            : <span className="badge badge-yellow">base</span>}
+                                : <span className="badge badge-yellow">base</span>}
                         </td>
                         <td style={{ fontSize: 11 }}>{TABLAS[p.tabla]?.label || p.tabla}</td>
                         <td style={{ fontSize: 11 }}>
@@ -413,7 +511,7 @@ export default function Productos({ onMenuClick }) {
           )}
         </div>
 
-        {/* FICHA TÉCNICA */}
+        {/* ── FICHA TÉCNICA ── */}
         {vistaFicha && (
           <div className="table-wrap" style={{ marginTop: 16 }}>
             <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -446,14 +544,23 @@ export default function Productos({ onMenuClick }) {
               {/* Telas */}
               <div style={{ marginBottom: 20 }}>
                 <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1 }}>🧶 Telas</div>
-                {[['Tela 1', vistaFicha.tela1_id], ['Tela 2', vistaFicha.tela2_id], ['RIB', vistaFicha.rib_id]].map(([rol, id]) =>
-                  id ? (
-                    <div key={rol} style={{ display: 'flex', gap: 16, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-                      <span style={{ fontWeight: 700, minWidth: 70, color: 'var(--text2)', fontSize: 14 }}>{rol}</span>
-                      <span style={{ fontWeight: 600, fontSize: 15 }}>{telaLabel(id)}</span>
-                    </div>
-                  ) : null
-                )}
+                {[
+                  ['Tela 1', vistaFicha.tela1_id],
+                  ['Tela 2', vistaFicha.tela2_id],
+                  ...((vistaFicha.telas_extra || []).map((te, i) => [te.label || `Tela ${i + 3}`, te.tela_id])),
+                  ['RIB', vistaFicha.rib_id],
+                ].map(([rol, id]) => id ? (
+                  <div key={rol} style={{ display: 'flex', gap: 16, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                    <span style={{ fontWeight: 700, minWidth: 70, color: 'var(--text2)', fontSize: 14 }}>{rol}</span>
+                    <span style={{ fontWeight: 600, fontSize: 15 }}>{telaLabel(id)}</span>
+                  </div>
+                ) : null)}
+                {vistaFicha.entretela_id ? (
+                  <div style={{ display: 'flex', gap: 16, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                    <span style={{ fontWeight: 700, minWidth: 70, color: 'var(--text2)', fontSize: 14 }}>Entretela</span>
+                    <span style={{ fontWeight: 600, fontSize: 15 }}>{avioLabel(vistaFicha.entretela_id)}</span>
+                  </div>
+                ) : null}
               </div>
 
               {/* Piezas */}
@@ -464,9 +571,23 @@ export default function Productos({ onMenuClick }) {
                     <div key={i} style={{ display: 'flex', gap: 16, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
                       <span style={{ fontWeight: 700, flex: 2, fontSize: 14 }}>{p.nombre}</span>
                       <span style={{ color: 'var(--text2)', fontSize: 13 }}>×{p.mult}</span>
-                      <span style={{ color: 'var(--accent)', fontSize: 13, minWidth: 60 }}>
-                        {p.tela_rol === 'tela1' ? 'Tela 1' : p.tela_rol === 'tela2' ? 'Tela 2' : 'RIB'}
+                      <span style={{ color: 'var(--accent)', fontSize: 13, minWidth: 70 }}>
+                        {telaRolLabel(p.tela_rol, vistaFicha.telas_extra)}
                       </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Planchado pares */}
+              {vistaFicha.planchado_pares?.length > 0 && (
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1 }}>🔥 Planchado</div>
+                  {vistaFicha.planchado_pares.map((par, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--border)', fontSize: 14 }}>
+                      <span style={{ fontWeight: 600 }}>{par.piezaA}</span>
+                      <span style={{ color: 'var(--text2)' }}>+</span>
+                      <span style={{ fontWeight: 600 }}>{par.piezaB}</span>
                     </div>
                   ))}
                 </div>
@@ -532,7 +653,7 @@ export default function Productos({ onMenuClick }) {
         )}
       </div>
 
-      {/* MODAL */}
+      {/* ── MODAL ── */}
       {modal && (
         <div className="modal-overlay" onClick={() => setModal(false)}>
           <div className="modal" style={{ maxWidth: 760 }} onClick={e => e.stopPropagation()}>
@@ -542,6 +663,7 @@ export default function Productos({ onMenuClick }) {
             </div>
             <div className="modal-body">
 
+              {/* Datos generales */}
               <div className="form-grid">
                 <div className="form-group">
                   <label>Nombre *</label>
@@ -576,18 +698,13 @@ export default function Productos({ onMenuClick }) {
                 <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8 }}>⚙ Flujo de producción <span style={{ fontSize: 10, color: 'var(--text2)', fontWeight: 400 }}>arrastrá para reordenar</span></div>
                 {form.procesos.map((p, i) => (
                   <ProcesoRow
-                    key={i}
-                    proceso={p}
-                    index={i}
-                    onEdit={editProceso}
-                    onDelete={deleteProceso}
-                    onDragStart={handleDragStartProceso}
-                    onDragOver={() => {}}
-                    onDrop={handleDropProceso}
+                    key={i} proceso={p} index={i}
+                    onEdit={editProceso} onDelete={deleteProceso}
+                    onDragStart={handleDragStartProceso} onDragOver={() => {}} onDrop={handleDropProceso}
                   />
                 ))}
                 <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                  <select value={nuevoProceso.id} onChange={e => setNuevoProceso(f => ({ ...f, id: e.target.value }))} style={{ width: 140 }}>
+                  <select value={nuevoProceso.id} onChange={e => setNuevoProceso(f => ({ ...f, id: e.target.value }))} style={{ width: 160 }}>
                     {PROCESOS_DISPONIBLES.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
                   </select>
                   <input value={nuevoProceso.nota} onChange={e => setNuevoProceso(f => ({ ...f, nota: e.target.value }))} placeholder="nota (ej: solo delantera)" style={{ flex: 1 }} />
@@ -598,10 +715,11 @@ export default function Productos({ onMenuClick }) {
               {/* Telas */}
               <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12, marginBottom: 12 }}>
                 <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 10 }}>🧶 Telas del producto</div>
+
+                {/* Tela 1 */}
                 {[
-                  { label: 'Tela 1', field: 'tela1_id', prov: filterProvTela, setProv: setFilterProvTela },
+                  { label: 'Tela 1', field: 'tela1_id', prov: filterProvTela,  setProv: setFilterProvTela  },
                   { label: 'Tela 2', field: 'tela2_id', prov: filterProvTela2, setProv: setFilterProvTela2 },
-                  { label: 'RIB', field: 'rib_id', prov: filterProvRib, setProv: setFilterProvRib },
                 ].map(({ label, field, prov, setProv }) => (
                   <div key={field} style={{ marginBottom: 10 }}>
                     <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>{label}</div>
@@ -619,27 +737,106 @@ export default function Productos({ onMenuClick }) {
                     </div>
                   </div>
                 ))}
+
+                {/* Telas extra (Tela 3, 4...) */}
+                {form.telas_extra.map((te, i) => (
+                  <div key={i} style={{ marginBottom: 10 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>{te.label}</span>
+                      <button className="btn btn-danger btn-sm" onClick={() => removeTelaExtra(i)}>✕</button>
+                    </div>
+                    <select value={te.tela_id} onChange={e => updateTelaExtra(i, e.target.value)} style={{ width: '100%' }}>
+                      <option value="">— Sin {te.label} —</option>
+                      {telas.map(t => (
+                        <option key={t.id} value={t.id}>{t.tipo}{t.color ? ` · ${t.color}` : ''}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+
+                <button className="btn btn-secondary btn-sm" style={{ marginBottom: 12 }} onClick={agregarTela}>
+                  + Agregar tela
+                </button>
+
+                {/* RIB */}
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>RIB</div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <select value={filterProvRib} onChange={e => { setFilterProvRib(e.target.value); setForm(f => ({ ...f, rib_id: '' })) }} style={{ width: 160 }}>
+                      <option value="">Todos los proveedores</option>
+                      {proveedores.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                    </select>
+                    <select value={form.rib_id} onChange={e => setForm(f => ({ ...f, rib_id: e.target.value }))} style={{ flex: 1 }}>
+                      <option value="">— Sin RIB —</option>
+                      {telasFiltradas(filterProvRib).map(t => (
+                        <option key={t.id} value={t.id}>{t.tipo}{t.color ? ` · ${t.color}` : ''}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Entretela */}
+                <div style={{ marginBottom: 0 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>Entretela</div>
+                  <select value={form.entretela_id} onChange={e => setForm(f => ({ ...f, entretela_id: e.target.value }))} style={{ width: '100%' }}>
+                    <option value="">— Sin Entretela —</option>
+                    {aviosEntretela.map(a => (
+                      <option key={a.id} value={a.id}>{a.nombre}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
-              {/* Piezas */}
+              {/* Piezas de corte */}
               <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12, marginBottom: 12 }}>
                 <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8 }}>✂ Piezas de corte <span style={{ fontSize: 10, color: 'var(--text2)', fontWeight: 400 }}>arrastrá para reordenar · clic ✏ para editar</span></div>
                 {form.piezas.map((p, i) => (
-                  <PiezaRow key={i} pieza={p} index={i} onEdit={editPieza} onDelete={deletePieza}
-                    onDragStart={handleDragStartPieza} onDragOver={() => {}} onDrop={handleDropPieza} />
+                  <PiezaRow
+                    key={i} pieza={p} index={i} telaRoles={telaRoles}
+                    onEdit={editPieza} onDelete={deletePieza}
+                    onDragStart={handleDragStartPieza} onDragOver={() => {}} onDrop={handleDropPieza}
+                  />
                 ))}
                 <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                   <input value={nuevaPieza.nombre} onChange={e => setNuevaPieza(f => ({ ...f, nombre: e.target.value }))} placeholder="ej: Delantera" style={{ flex: 2, minWidth: 100 }} onKeyDown={e => e.key === 'Enter' && agregarPieza()} />
                   <input value={nuevaPieza.mult} onChange={e => setNuevaPieza(f => ({ ...f, mult: e.target.value.replace(/[^0-9]/g, '') }))} style={{ width: 45 }} placeholder="1" />
                   <span style={{ fontSize: 11, color: 'var(--text2)', alignSelf: 'center' }}>x prenda</span>
-                  <select value={nuevaPieza.tela_rol} onChange={e => setNuevaPieza(f => ({ ...f, tela_rol: e.target.value }))} style={{ width: 90 }}>
-                    <option value="tela1">Tela 1</option>
-                    <option value="tela2">Tela 2</option>
-                    <option value="rib">RIB</option>
+                  <select value={nuevaPieza.tela_rol} onChange={e => setNuevaPieza(f => ({ ...f, tela_rol: e.target.value }))} style={{ width: 110 }}>
+                    {telaRoles.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                   </select>
                   <button className="btn btn-secondary btn-sm" onClick={agregarPieza}>+ Agregar</button>
                 </div>
               </div>
+
+              {/* Planchado — solo si el producto tiene ese proceso */}
+              {tienePlanchado && (
+                <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12, marginBottom: 12 }}>
+                  <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8 }}>🔥 Pares de planchado</div>
+                  {form.planchado_pares.length === 0 && (
+                    <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 8 }}>No hay pares definidos aún.</div>
+                  )}
+                  {form.planchado_pares.map((par, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4, fontSize: 12, background: 'var(--bg2)', padding: '4px 8px', borderRadius: 'var(--radius)' }}>
+                      <span style={{ flex: 1, fontWeight: 600 }}>{par.piezaA}</span>
+                      <span style={{ color: 'var(--text2)' }}>+</span>
+                      <span style={{ flex: 1, fontWeight: 600 }}>{par.piezaB}</span>
+                      <button className="btn btn-danger btn-sm" onClick={() => deletePar(i)}>✕</button>
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', gap: 6, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <select value={nuevoPar.piezaA} onChange={e => setNuevoPar(f => ({ ...f, piezaA: e.target.value }))} style={{ flex: 1, minWidth: 100 }}>
+                      <option value="">Pieza A...</option>
+                      {nombresPiezas.map(n => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                    <span style={{ color: 'var(--text2)' }}>+</span>
+                    <select value={nuevoPar.piezaB} onChange={e => setNuevoPar(f => ({ ...f, piezaB: e.target.value }))} style={{ flex: 1, minWidth: 100 }}>
+                      <option value="">Pieza B...</option>
+                      {nombresPiezas.map(n => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                    <button className="btn btn-secondary btn-sm" onClick={agregarPar}>+ Agregar par</button>
+                  </div>
+                </div>
+              )}
 
               {/* Avíos con medidas */}
               <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12, marginBottom: 12 }}>
@@ -712,6 +909,7 @@ export default function Productos({ onMenuClick }) {
                 <label>Notas</label>
                 <textarea value={form.notas} onChange={e => setForm(f => ({ ...f, notas: e.target.value }))} placeholder="Molde, observaciones..." style={{ height: 60 }} />
               </div>
+
             </div>
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setModal(false)}>Cancelar</button>
