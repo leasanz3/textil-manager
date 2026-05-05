@@ -62,6 +62,9 @@ export default function Pedidos({ onMenuClick }) {
   const [searchingProductos, setSearchingProductos] = useState(false)
   const searchTimeout = useRef(null)
 
+  // ── Procesos del producto seleccionado ────────────────────────────────────
+  const [procesosProducto, setProcesosProducto] = useState([])
+
   // ── Modal nuevo producto ───────────────────────────────────────────────────
   const [modalProducto, setModalProducto]   = useState(false)
   const [nuevoProducto, setNuevoProducto]   = useState({ nombre: '', codigo: '', tabla: 'adulto' })
@@ -119,6 +122,7 @@ export default function Pedidos({ onMenuClick }) {
     setClienteQuery('')
     setContactosResults([])
     setShowClienteDropdown(false)
+    setProcesosProducto([])
     setError('')
     setModal(true)
   }
@@ -141,6 +145,8 @@ export default function Pedidos({ onMenuClick }) {
     setClienteQuery(p.cliente || '')
     setContactosResults([])
     setShowClienteDropdown(false)
+    setProcesosProducto([])
+    if (p.producto_id) fetchProcesosProducto(p.producto_id, p.etapa_actual || 'corte')
     setError('')
     setModal(true)
   }
@@ -174,6 +180,7 @@ export default function Pedidos({ onMenuClick }) {
   }
 
   function seleccionarProducto(prod) {
+    const etapaActual = form.etapa_actual
     setForm(f => ({
       ...f,
       producto:    prod.nombre,
@@ -184,6 +191,24 @@ export default function Pedidos({ onMenuClick }) {
     setProductoQuery(prod.nombre)
     setShowDropdown(false)
     setProductosResults([])
+    fetchProcesosProducto(prod.id, etapaActual)
+  }
+
+  async function fetchProcesosProducto(productoId, etapaActual) {
+    if (!productoId) { setProcesosProducto([]); return }
+    const { data } = await supabase
+      .from('productos')
+      .select('procesos')
+      .eq('id', productoId)
+      .single()
+    const procesos = data?.procesos || []
+    setProcesosProducto(procesos)
+    if (procesos.length > 0) {
+      const ids = procesos.map(p => p.id)
+      if (!ids.includes(etapaActual) && etapaActual !== 'cancelado') {
+        setF('etapa_actual', procesos[0].id)
+      }
+    }
   }
 
   function onProductoBlur() {
@@ -370,6 +395,9 @@ export default function Pedidos({ onMenuClick }) {
   const enProduccion = pedidos.filter(p => p.etapa_actual !== 'entrega' && p.etapa_actual !== 'cancelado').length
   const etapaInfo = (id) => ETAPAS.find(e => e.id === id) || { label: id, color: 'badge-gray' }
   const tallesDeLaTabla = TABLAS[form.tabla]?.talles || []
+  const etapasEnModal = procesosProducto.length > 0
+    ? ETAPAS.filter(e => procesosProducto.some(p => p.id === e.id) || e.id === 'cancelado')
+    : ETAPAS
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -666,7 +694,7 @@ export default function Pedidos({ onMenuClick }) {
                 <div className="form-group">
                   <label>Etapa actual</label>
                   <select value={form.etapa_actual} onChange={e => setF('etapa_actual', e.target.value)}>
-                    {ETAPAS.map(e => (
+                    {etapasEnModal.map(e => (
                       <option key={e.id} value={e.id}>{e.label}</option>
                     ))}
                   </select>
