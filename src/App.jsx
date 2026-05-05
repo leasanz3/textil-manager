@@ -1,5 +1,7 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { supabase } from './lib/supabase'
+import Login from './pages/Login'
 import Sidebar from './components/Sidebar'
 import Pedidos from './pages/Pedidos'
 import Productos from './pages/Productos'
@@ -15,8 +17,29 @@ import Compras from './pages/Compras'
 import IVA from './pages/IVA'
 
 export default function App() {
+  const [session, setSession] = useState(undefined) // undefined = cargando
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const menu = () => setSidebarOpen(true)
+
+  useEffect(() => {
+    // Sesión actual
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session)
+    })
+    // Escuchar cambios (login / logout)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session)
+    })
+    return () => subscription.unsubscribe()
+  }, [])
+
+  // Todavía resolviendo sesión
+  if (session === undefined) return null
+
+  // Sin sesión → Login
+  if (!session) return <Login />
+
+  // Con sesión → App completa
   return (
     <BrowserRouter>
       <div className="app">
