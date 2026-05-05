@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -14,15 +14,14 @@ const ETAPAS = [
 ]
 
 const TABLAS = {
-  adulto:   { label: 'Adulto',        talles: ['XS', 'S', 'M', 'L', 'XL', 'XXL'] },
-  nino:     { label: 'Niño',          talles: ['2', '4', '6', '8', '10', '12', '14', '16'] },
-  malla:    { label: 'Malla',         talles: ['40', '42', '44', '46', '48', '50', '52'] },
+  adulto:   { label: 'Adulto',         talles: ['XS', 'S', 'M', 'L', 'XL', 'XXL'] },
+  nino:     { label: 'Niño',           talles: ['2', '4', '6', '8', '10', '12', '14', '16'] },
+  malla:    { label: 'Malla',          talles: ['40', '42', '44', '46', '48', '50', '52'] },
   mallaesp: { label: 'Malla Especial', talles: ['54', '56', '58'] },
 }
 
 const FLUJO_ETAPAS = ['corte', 'taller', 'estampado', 'sublimado', 'bordado', 'entrega']
 
-// Infiere la tabla de talles a partir de las keys del jsonb
 function inferirTabla(talles) {
   if (!talles) return 'adulto'
   const keys = Object.keys(talles)
@@ -47,23 +46,37 @@ const totalTalles = (talles) => {
 // ─── Componente principal ─────────────────────────────────────────────────────
 
 export default function Pedidos({ onMenuClick }) {
-  const [pedidos, setPedidos]     = useState([])
-  const [loading, setLoading]     = useState(true)
-  const [search, setSearch]       = useState('')
+  const [pedidos, setPedidos]         = useState([])
+  const [loading, setLoading]         = useState(true)
+  const [search, setSearch]           = useState('')
   const [filtroEtapa, setFiltroEtapa] = useState('')
-  const [modal, setModal]         = useState(false)
-  const [editing, setEditing]     = useState(null)   // id del pedido en edición, null = nuevo
-  const [saving, setSaving]       = useState(false)
-  const [error, setError]         = useState('')
+  const [modal, setModal]             = useState(false)
+  const [editing, setEditing]         = useState(null)
+  const [saving, setSaving]           = useState(false)
+  const [error, setError]             = useState('')
 
-  // Form state
+  // ── Autocomplete producto ──────────────────────────────────────────────────
+  const [productoQuery, setProductoQuery]         = useState('')
+  const [productosResults, setProductosResults]   = useState([])
+  const [showDropdown, setShowDropdown]           = useState(false)
+  const [searchingProductos, setSearchingProductos] = useState(false)
+  const searchTimeout = useRef(null)
+
+  // ── Modal nuevo producto ───────────────────────────────────────────────────
+  const [modalProducto, setModalProducto]   = useState(false)
+  const [nuevoProducto, setNuevoProducto]   = useState({ nombre: '', codigo: '', tabla: 'adulto' })
+  const [savingProducto, setSavingProducto] = useState(false)
+  const [errorProducto, setErrorProducto]   = useState('')
+
+  // ── Form state ─────────────────────────────────────────────────────────────
   const emptyForm = {
-    producto: '',
-    cliente: '',
+    producto:     '',
+    producto_id:  null,
+    cliente:      '',
     etapa_actual: 'corte',
-    fecha: '',
-    tabla: 'adulto',    // solo UI, no se guarda
-    talles: {},
+    fecha:        '',
+    tabla:        'adulto',
+    talles:       {},
   }
   const [form, setForm] = useState(emptyForm)
   const setF = (k, v) => setForm(f => ({ ...f, [k]: v }))
@@ -87,6 +100,9 @@ export default function Pedidos({ onMenuClick }) {
   function openNew() {
     setEditing(null)
     setForm(emptyForm)
+    setProductoQuery('')
+    setProductosResults([])
+    setShowDropdown(false)
     setError('')
     setModal(true)
   }
@@ -95,54 +111,130 @@ export default function Pedidos({ onMenuClick }) {
     setEditing(p.id)
     const tabla = inferirTabla(p.talles)
     setForm({
-      producto: p.producto || '',
-      cliente: p.cliente || '',
+      producto:     p.producto     || '',
+      producto_id:  p.producto_id  || null,
+      cliente:      p.cliente      || '',
       etapa_actual: p.etapa_actual || 'corte',
-      fecha: p.fecha || '',
+      fecha:        p.fecha        || '',
       tabla,
       talles: p.talles || {},
     })
+    setProductoQuery(p.producto || '')
+    setProductosResults([])
+    setShowDropdown(false)
     setError('')
     setModal(true)
   }
 
-  // ── Cambiar tabla de talles en el form ─────────────────────────────────────
+  // ── Autocomplete: buscar mientras escribe ──────────────────────────────────
+
+  function onProductoInput(value) {
+    setProductoQuery(value)
+    setF('producto', value)
+    setF('producto_id', null)
+
+    if (searchTimeout.current) clearTimeout(searchTimeout.current)
+
+    if (!value.trim()) {
+      setProductosResults([])
+      setShowDropdown(false)
+      return
+    }
+
+    searchTimeout.current = setTimeout(async () => {
+      setSearchingProductos(true)
+      const { data } = await supabase
+        .from('productos')
+        .select('id, nombre, codigo, tabla')
+        .ilike('nombre', `%${value.trim()}%`)
+        .limit(8)
+      setProductosResults(data || [])
+      setShowDropdown(true)
+      setSearchingProductos(false)
+    }, 250)
+  }
+
+  function seleccionarProducto(prod) {
+    setForm(f => ({
+      ...f,
+      producto:    prod.nombre,
+      producto_id: prod.id,
+      tabla:       prod.tabla || f.tabla,
+      talles:      prod.tabla && prod.tabla !== f.tabla ? {} : f.talles,
+    }))
+    setProductoQuery(prod.nombre)
+    setShowDropdown(false)
+    setProductosResults([])
+  }
+
+  function onProductoBlur() {
+    // Timeout para que el click en el dropdown registre antes de cerrar
+    setTimeout(() => setShowDropdown(false), 150)
+  }
+
+  // ── Guardar nuevo producto desde modal secundario ──────────────────────────
+
+  function abrirModalProducto() {
+    setNuevoProducto({ nombre: productoQuery, codigo: '', tabla: 'adulto' })
+    setErrorProducto('')
+    setShowDropdown(false)
+    setModalProducto(true)
+  }
+
+  async function guardarNuevoProducto() {
+    if (!nuevoProducto.nombre.trim()) { setErrorProducto('El nombre es obligatorio'); return }
+    setSavingProducto(true)
+    setErrorProducto('')
+
+    const { data, error } = await supabase
+      .from('productos')
+      .insert({
+        nombre: nuevoProducto.nombre.trim(),
+        codigo: nuevoProducto.codigo.trim() || null,
+        tabla:  nuevoProducto.tabla,
+      })
+      .select('id, nombre, codigo, tabla')
+      .single()
+
+    if (error) { setErrorProducto('Error: ' + error.message); setSavingProducto(false); return }
+
+    seleccionarProducto(data)
+    setModalProducto(false)
+    setSavingProducto(false)
+  }
+
+  // ── Talles ─────────────────────────────────────────────────────────────────
 
   function onTablaChange(nuevaTabla) {
     setForm(f => ({ ...f, tabla: nuevaTabla, talles: {} }))
   }
 
-  // ── Actualizar un talle en el form ─────────────────────────────────────────
-
   function setTalle(talle, val) {
     setForm(f => {
       const n = { ...f.talles }
       const num = parseInt(val) || 0
-      if (num > 0) {
-        n[talle] = num
-      } else {
-        delete n[talle]
-      }
+      if (num > 0) { n[talle] = num } else { delete n[talle] }
       return { ...f, talles: n }
     })
   }
 
-  // ── Guardar (insert o update) ──────────────────────────────────────────────
+  // ── Guardar pedido (insert o update) ──────────────────────────────────────
 
   async function handleSave() {
-    if (!form.producto.trim()) { setError('El nombre del producto es obligatorio'); return }
-    if (!form.cliente.trim())  { setError('El cliente es obligatorio'); return }
+    if (!form.producto.trim())       { setError('El nombre del producto es obligatorio'); return }
+    if (!form.cliente.trim())        { setError('El cliente es obligatorio'); return }
     if (totalTalles(form.talles) === 0) { setError('Ingresá al menos una cantidad de talle'); return }
 
     setSaving(true)
     setError('')
 
     const datos = {
-      producto:    form.producto.trim(),
-      cliente:     form.cliente.trim(),
+      producto:     form.producto.trim(),
+      producto_id:  form.producto_id || null,
+      cliente:      form.cliente.trim(),
       etapa_actual: form.etapa_actual,
-      fecha:       form.fecha || null,
-      talles:      form.talles,
+      fecha:        form.fecha || null,
+      talles:       form.talles,
     }
 
     if (editing) {
@@ -158,26 +250,21 @@ export default function Pedidos({ onMenuClick }) {
     fetchPedidos()
   }
 
-  // ── Avanzar etapa rápido desde la lista ───────────────────────────────────
+  // ── Acciones de lista ──────────────────────────────────────────────────────
 
   async function avanzarEtapa(p, e) {
     e.stopPropagation()
     const idx = FLUJO_ETAPAS.indexOf(p.etapa_actual)
     if (idx === -1 || idx >= FLUJO_ETAPAS.length - 1) return
-    const siguiente = FLUJO_ETAPAS[idx + 1]
-    await supabase.from('pedidos').update({ etapa_actual: siguiente }).eq('id', p.id)
+    await supabase.from('pedidos').update({ etapa_actual: FLUJO_ETAPAS[idx + 1] }).eq('id', p.id)
     fetchPedidos()
   }
-
-  // ── Cambiar etapa directo desde select en la lista ────────────────────────
 
   async function cambiarEtapa(p, nuevaEtapa, e) {
     e.stopPropagation()
     await supabase.from('pedidos').update({ etapa_actual: nuevaEtapa }).eq('id', p.id)
     fetchPedidos()
   }
-
-  // ── Eliminar ───────────────────────────────────────────────────────────────
 
   async function handleDelete(p, e) {
     e.stopPropagation()
@@ -197,7 +284,6 @@ export default function Pedidos({ onMenuClick }) {
 
   const enProduccion = pedidos.filter(p => p.etapa_actual !== 'entrega' && p.etapa_actual !== 'cancelado').length
   const etapaInfo = (id) => ETAPAS.find(e => e.id === id) || { label: id, color: 'badge-gray' }
-
   const tallesDeLaTabla = TABLAS[form.tabla]?.talles || []
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -286,11 +372,7 @@ export default function Pedidos({ onMenuClick }) {
                     const ei = etapaInfo(p.etapa_actual)
                     const puedeAvanzar = FLUJO_ETAPAS.indexOf(p.etapa_actual) < FLUJO_ETAPAS.length - 1
                     return (
-                      <tr
-                        key={p.id}
-                        onClick={() => openEdit(p)}
-                        style={{ cursor: 'pointer' }}
-                      >
+                      <tr key={p.id} onClick={() => openEdit(p)} style={{ cursor: 'pointer' }}>
                         <td><strong>{p.producto}</strong></td>
                         <td>{p.cliente}</td>
                         <td onClick={e => e.stopPropagation()}>
@@ -299,13 +381,9 @@ export default function Pedidos({ onMenuClick }) {
                             onChange={e => cambiarEtapa(p, e.target.value, e)}
                             className={`badge ${ei.color}`}
                             style={{
-                              border: 'none',
-                              background: 'transparent',
-                              cursor: 'pointer',
-                              fontSize: 11,
-                              fontWeight: 600,
-                              padding: '2px 4px',
-                              appearance: 'auto',
+                              border: 'none', background: 'transparent',
+                              cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                              padding: '2px 4px', appearance: 'auto',
                             }}
                           >
                             {ETAPAS.map(e => (
@@ -325,28 +403,10 @@ export default function Pedidos({ onMenuClick }) {
                         <td onClick={e => e.stopPropagation()}>
                           <div style={{ display: 'flex', gap: 4 }}>
                             {puedeAvanzar && p.etapa_actual !== 'cancelado' && (
-                              <button
-                                className="btn btn-secondary btn-sm"
-                                title="Avanzar etapa"
-                                onClick={e => avanzarEtapa(p, e)}
-                              >
-                                →
-                              </button>
+                              <button className="btn btn-secondary btn-sm" title="Avanzar etapa" onClick={e => avanzarEtapa(p, e)}>→</button>
                             )}
-                            <button
-                              className="btn btn-secondary btn-sm"
-                              title="Editar"
-                              onClick={e => { e.stopPropagation(); openEdit(p) }}
-                            >
-                              ✏
-                            </button>
-                            <button
-                              className="btn btn-danger btn-sm"
-                              title="Eliminar"
-                              onClick={e => handleDelete(p, e)}
-                            >
-                              🗑
-                            </button>
+                            <button className="btn btn-secondary btn-sm" title="Editar" onClick={e => { e.stopPropagation(); openEdit(p) }}>✏</button>
+                            <button className="btn btn-danger btn-sm" title="Eliminar" onClick={e => handleDelete(p, e)}>🗑</button>
                           </div>
                         </td>
                       </tr>
@@ -359,7 +419,7 @@ export default function Pedidos({ onMenuClick }) {
         </div>
       </div>
 
-      {/* ── Modal crear / editar ── */}
+      {/* ── Modal crear / editar pedido ── */}
       {modal && (
         <div className="modal-overlay" onClick={() => setModal(false)}>
           <div className="modal modal-lg" onClick={e => e.stopPropagation()}>
@@ -369,17 +429,84 @@ export default function Pedidos({ onMenuClick }) {
             </div>
 
             <div className="modal-body">
-              {/* Datos generales */}
               <div className="form-grid">
-                <div className="form-group">
+
+                {/* Campo Producto con autocomplete */}
+                <div className="form-group" style={{ position: 'relative' }}>
                   <label>Producto *</label>
                   <input
-                    value={form.producto}
-                    onChange={e => setF('producto', e.target.value)}
-                    placeholder="ej: Campera, Bata, Canguro..."
+                    value={productoQuery}
+                    onChange={e => onProductoInput(e.target.value)}
+                    onBlur={onProductoBlur}
+                    onFocus={() => productoQuery.trim() && productosResults.length > 0 && setShowDropdown(true)}
+                    placeholder="Buscá un producto..."
+                    autoComplete="off"
                     autoFocus
                   />
+                  {searchingProductos && (
+                    <div style={{ position: 'absolute', right: 10, top: 34, fontSize: 11, color: 'var(--text2)' }}>
+                      Buscando...
+                    </div>
+                  )}
+                  {showDropdown && (
+                    <div style={{
+                      position: 'absolute',
+                      top: '100%',
+                      left: 0,
+                      right: 0,
+                      zIndex: 100,
+                      background: 'var(--surface)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius)',
+                      boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+                      maxHeight: 220,
+                      overflowY: 'auto',
+                    }}>
+                      {productosResults.length > 0
+                        ? productosResults.map(prod => (
+                            <div
+                              key={prod.id}
+                              onMouseDown={() => seleccionarProducto(prod)}
+                              style={{
+                                padding: '9px 12px',
+                                cursor: 'pointer',
+                                fontSize: 13,
+                                borderBottom: '1px solid var(--border)',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                              }}
+                              onMouseEnter={e => e.currentTarget.style.background = 'var(--hover)'}
+                              onMouseLeave={e => e.currentTarget.style.background = ''}
+                            >
+                              <span>{prod.nombre}</span>
+                              {prod.codigo && (
+                                <span style={{ fontSize: 11, color: 'var(--text2)', marginLeft: 8 }}>
+                                  {prod.codigo}
+                                </span>
+                              )}
+                            </div>
+                          ))
+                        : null
+                      }
+                      <div
+                        onMouseDown={abrirModalProducto}
+                        style={{
+                          padding: '9px 12px',
+                          cursor: 'pointer',
+                          fontSize: 13,
+                          color: 'var(--accent)',
+                          fontWeight: 600,
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'var(--hover)'}
+                        onMouseLeave={e => e.currentTarget.style.background = ''}
+                      >
+                        + Agregar producto
+                      </div>
+                    </div>
+                  )}
                 </div>
+
                 <div className="form-group">
                   <label>Cliente *</label>
                   <input
@@ -412,11 +539,7 @@ export default function Pedidos({ onMenuClick }) {
                   <div style={{ fontWeight: 600, fontSize: 12 }}>📐 Talles</div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <span style={{ fontSize: 11, color: 'var(--text2)' }}>Tabla:</span>
-                    <select
-                      value={form.tabla}
-                      onChange={e => onTablaChange(e.target.value)}
-                      style={{ fontSize: 11 }}
-                    >
+                    <select value={form.tabla} onChange={e => onTablaChange(e.target.value)} style={{ fontSize: 11 }}>
                       {Object.entries(TABLAS).map(([k, v]) => (
                         <option key={k} value={k}>{v.label}</option>
                       ))}
@@ -424,17 +547,12 @@ export default function Pedidos({ onMenuClick }) {
                   </div>
                 </div>
 
-                {/* Grid de talles */}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {tallesDeLaTabla.map(talle => (
                     <div key={talle} style={{ textAlign: 'center', minWidth: 52 }}>
                       <div style={{
-                        fontSize: 10,
-                        fontWeight: 700,
-                        color: 'var(--accent)',
-                        textTransform: 'uppercase',
-                        letterSpacing: 1,
-                        marginBottom: 3
+                        fontSize: 10, fontWeight: 700, color: 'var(--accent)',
+                        textTransform: 'uppercase', letterSpacing: 1, marginBottom: 3,
                       }}>
                         {talle}
                       </div>
@@ -450,16 +568,10 @@ export default function Pedidos({ onMenuClick }) {
                   ))}
                 </div>
 
-                {/* Total */}
                 {totalTalles(form.talles) > 0 && (
                   <div style={{
-                    marginTop: 12,
-                    paddingTop: 10,
-                    borderTop: '1px solid var(--border)',
-                    fontSize: 13,
-                    display: 'flex',
-                    gap: 16,
-                    flexWrap: 'wrap'
+                    marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--border)',
+                    fontSize: 13, display: 'flex', gap: 16, flexWrap: 'wrap',
                   }}>
                     <span>
                       <strong style={{ color: 'var(--accent)' }}>{totalTalles(form.talles)}</strong>
@@ -484,6 +596,57 @@ export default function Pedidos({ onMenuClick }) {
               <button className="btn btn-secondary" onClick={() => setModal(false)}>Cancelar</button>
               <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
                 {saving ? 'Guardando...' : '✔ Guardar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal nuevo producto ── */}
+      {modalProducto && (
+        <div className="modal-overlay" style={{ zIndex: 200 }} onClick={() => setModalProducto(false)}>
+          <div className="modal" style={{ maxWidth: 400 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>➕ Nuevo producto</h3>
+              <button className="close-btn" onClick={() => setModalProducto(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div className="form-group">
+                <label>Nombre *</label>
+                <input
+                  value={nuevoProducto.nombre}
+                  onChange={e => setNuevoProducto(p => ({ ...p, nombre: e.target.value }))}
+                  placeholder="ej: Campera, Bata, Canguro..."
+                  autoFocus
+                />
+              </div>
+              <div className="form-group">
+                <label>Código <span style={{ color: 'var(--text2)', fontWeight: 400 }}>(opcional)</span></label>
+                <input
+                  value={nuevoProducto.codigo}
+                  onChange={e => setNuevoProducto(p => ({ ...p, codigo: e.target.value }))}
+                  placeholder="ej: CAM-001"
+                />
+              </div>
+              <div className="form-group">
+                <label>Tabla de talles</label>
+                <select
+                  value={nuevoProducto.tabla}
+                  onChange={e => setNuevoProducto(p => ({ ...p, tabla: e.target.value }))}
+                >
+                  {Object.entries(TABLAS).map(([k, v]) => (
+                    <option key={k} value={k}>{v.label}</option>
+                  ))}
+                </select>
+              </div>
+              {errorProducto && (
+                <p style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4 }}>⚠ {errorProducto}</p>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setModalProducto(false)}>Cancelar</button>
+              <button className="btn btn-primary" onClick={guardarNuevoProducto} disabled={savingProducto}>
+                {savingProducto ? 'Guardando...' : '✔ Guardar y seleccionar'}
               </button>
             </div>
           </div>
