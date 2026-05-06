@@ -678,3 +678,174 @@ select option {
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text2); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PRODUCCIÓN
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.prod-stage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.prod-stage-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 12px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.prod-stage-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(233, 69, 96, 0.15);
+}
+
+.prod-stage-card.empty { opacity: 0.55; }
+.prod-stage-card.empty:hover { opacity: 1; }
+
+.prod-stage-icon  { font-size: 32px; margin-bottom: 8px; }
+.prod-stage-label { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+.prod-stage-count { font-size: 28px; font-weight: 800; color: var(--text2); line-height: 1; }
+.prod-stage-count.has { color: var(--accent); }
+
+.prod-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.prod-tab {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+
+.prod-tab:hover { border-color: var(--accent); }
+
+.prod-tab.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.prod-tab-count {
+  background: rgba(0,0,0,0.25);
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 20px;
+  text-align: center;
+}
+
+.prod-tab.active .prod-tab-count { background: rgba(255,255,255,0.25); }
+
+.prod-list { display: flex; flex-direction: column; gap: 10px; }
+
+.prod-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.prod-card:hover { border-color: var(--accent); }
+
+.prod-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.prod-card-cliente {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text2);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.prod-card-prod { font-size: 14px; color: var(--text); }
+
+.prod-card-meta { text-align: right; flex-shrink: 0; }
+
+.prod-card-total { font-size: 20px; font-weight: 700; color: var(--accent); line-height: 1.1; }
+.prod-card-total span { font-size: 11px; font-weight: 500; color: var(--text2); }
+
+.prod-card-fecha { font-size: 11px; color: var(--text2); margin-top: 2px; }
+.prod-card-fecha.venc { color: var(--danger); font-weight: 600; }
+
+.prod-card-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.prod-card-foot-left  { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.prod-card-foot-right { display: flex; gap: 6px; }
+
+.prod-card-pill {
+  font-size: 11px;
+  color: var(--text2);
+  background: var(--bg3);
+  padding: 3px 8px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.prod-bar {
+  display: inline-block;
+  width: 70px;
+  height: 5px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.prod-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s;
+}
+
+.groupbox {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+
+.groupbox-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: var(--text);
+}

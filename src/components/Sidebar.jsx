@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 
 const NAV = [
   { section: 'Producción' },
+  { path: '/produccion', icon: '🏭', label: 'Producción' },
   { path: '/pedidos', icon: '📋', label: 'Pedidos' },
   { path: '/productos', icon: '📦', label: 'Productos' },
   { section: 'Telas' },
