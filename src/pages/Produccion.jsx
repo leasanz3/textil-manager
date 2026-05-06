@@ -147,6 +147,12 @@ export default function Produccion({ onMenuClick }) {
     return m
   }, [lotesEtapa])
 
+  // ── Cambiar etapa directamente ────────────────────────────────────────────
+  async function cambiarEtapa(pedidoId, nuevaEtapa) {
+    await supabase.from('pedidos').update({ etapa_actual: nuevaEtapa }).eq('id', pedidoId)
+    await refetch()
+  }
+
   // ── Avanzar etapa ──────────────────────────────────────────────────────────
   async function avanzarEtapa(pedidoId, etapaActual) {
     const p = pedidos.find(x => x.id === pedidoId)
@@ -298,7 +304,7 @@ export default function Produccion({ onMenuClick }) {
                 pedido={p}
                 lotes={lotesPorPedido[p.id] || []}
                 onOpen={() => setPedidoOpen(p.id)}
-                onAvanzar={() => avanzarEtapa(p.id, etapaSel)}
+                onCambiarEtapa={(nuevaEtapa) => cambiarEtapa(p.id, nuevaEtapa)}
               />
             ))}
           </div>
@@ -324,7 +330,7 @@ export default function Produccion({ onMenuClick }) {
 // ─── PedidoRow ────────────────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function PedidoRow({ pedido, lotes, onOpen, onAvanzar }) {
+function PedidoRow({ pedido, lotes, onOpen, onCambiarEtapa }) {
   const items  = pedidoItems(pedido)
   const total  = pedidoTotal(pedido)
   const hechas = sumarHechas(lotes)
@@ -369,7 +375,15 @@ function PedidoRow({ pedido, lotes, onOpen, onAvanzar }) {
         </div>
         <div className="prod-card-foot-right" onClick={e => e.stopPropagation()}>
           <button className="btn btn-secondary btn-sm" onClick={onOpen}>📝 Asistente</button>
-          <button className="btn btn-primary btn-sm" onClick={onAvanzar} title="Cerrar etapa y pasar a la siguiente">▶ Avanzar</button>
+          <select
+            value={pedido.etapa_actual || ''}
+            onChange={e => onCambiarEtapa(e.target.value)}
+            style={{ fontSize: 12, padding: '5px 8px' }}
+          >
+            {ETAPAS.map(e => (
+              <option key={e.id} value={e.id}>{e.icon} {e.label}</option>
+            ))}
+          </select>
         </div>
       </div>
     </div>
