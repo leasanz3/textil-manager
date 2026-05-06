@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Sidebar from './components/Sidebar'
 import Pedidos from './pages/Pedidos'
 import Productos from './pages/Productos'
+import Produccion from './pages/Produccion'
 import { Contactos } from './pages/Telas'
 import CatalogoTelas from './pages/CatalogoTelas'
 import ComprasTela from './pages/ComprasTela'
@@ -25,6 +26,7 @@ export default function App() {
         <div className="main">
           <Routes>
             <Route path="/" element={<Navigate to="/pedidos" replace />} />
+            <Route path="/produccion" element={<Produccion onMenuClick={menu} />} />
             <Route path="/pedidos" element={<Pedidos onMenuClick={menu} />} />
             <Route path="/productos" element={<Productos onMenuClick={menu} />} />
             <Route path="/telas/catalogo" element={<CatalogoTelas onMenuClick={menu} />} />
