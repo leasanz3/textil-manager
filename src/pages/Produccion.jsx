@@ -16,6 +16,26 @@ const ETAPAS = [
 
 const ETAPA_BY_ID   = Object.fromEntries(ETAPAS.map(e => [e.id, e]))
 
+// ─── Colores por cliente ──────────────────────────────────────────────────────
+// Editá acá: border = franja izquierda, bg = fondo del header, text = texto header
+const COLORES_CLIENTE = {
+  _default: { border: '#a8a8a8', bg: '#f4f4ec', text: '#333333' },
+}
+
+const COLORES_NOMBRE = {
+  'Santiago Y Lorena': { border: '#1a5aa8', bg: '#fff8d0', text: '#002855' },
+  'Casa Sanz':         { border: '#222222', bg: '#f8f8f8', text: '#111111' },
+  'Maju':              { border: '#2a7a2a', bg: '#fffad0', text: '#1a4a1a' },
+}
+
+function getColorCliente(nombre, id) {
+  if (id && COLORES_CLIENTE[id]) return COLORES_CLIENTE[id]
+  const key = Object.keys(COLORES_NOMBRE).find(k =>
+    nombre?.toLowerCase().includes(k.toLowerCase())
+  )
+  return key ? COLORES_NOMBRE[key] : COLORES_CLIENTE._default
+}
+
 const ORDEN_TALLES = ['XS','S','M','L','XL','XXL','2','4','6','8','10','12','14','16','40','42','44','46','48','50','52','54','56','58']
 
 function tallesOrdenados(tallesObj) {
@@ -90,11 +110,11 @@ export default function Produccion({ onMenuClick }) {
   const [lotesEtapa, setLotesEtapa] = useState([])
   const [loading, setLoading]       = useState(true)
 
-  const [etapaSel, setEtapaSel]   = useState(null)
+  const [etapaSel, setEtapaSel]   = useState('corte')
   const [pedidoOpen, setPedidoOpen] = useState(null)
 
   useEffect(() => { fetchBase() }, [])
-  useEffect(() => { if (etapaSel) fetchLotesEtapa(etapaSel) }, [etapaSel])
+  useEffect(() => { fetchLotesEtapa(etapaSel) }, [etapaSel])
 
   async function fetchBase() {
     setLoading(true)
@@ -134,7 +154,6 @@ export default function Produccion({ onMenuClick }) {
 
   // ── Pedidos en la etapa seleccionada ──────────────────────────────────────
   const pedidosEtapa = useMemo(() => {
-    if (!etapaSel) return []
     return pedidos
       .filter(p => p.etapa_actual === etapaSel)
       .sort((a, b) => {
@@ -184,131 +203,105 @@ export default function Produccion({ onMenuClick }) {
     await refetch()
   }
 
-  // ═══════════════════ Render: Hub ══════════════════════════════════════════
-  if (!etapaSel) {
-    return (
-      <div>
-        <div className="topbar">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button className="mobile-menu-btn" onClick={onMenuClick}>☰</button>
-            <h2>🏭 Producción</h2>
-          </div>
-        </div>
-
-        <div className="content">
-          {loading ? (
-            <div className="loading"><div className="spinner" /> Cargando…</div>
-          ) : (
-            <>
-              <div className="card" style={{ marginBottom: 12 }}>
-                <div className="card-header">🏭 Asistente de producción por etapa</div>
-                <div className="card-body" style={{ fontSize: 11, color: 'var(--text2)' }}>
-                  Elegí una etapa para ver los pedidos en cola y registrar el avance.
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 8, marginBottom: 12 }}>
-                {ETAPAS.map(e => (
-                  <div key={e.id} className="card" style={{ cursor: 'pointer' }} onClick={() => setEtapaSel(e.id)}>
-                    <div className={`card-header ${e.color}`}>
-                      <span>{e.icon} {e.label}</span>
-                      <span className="badge badge-blue">{counts[e.id]}</span>
-                    </div>
-                    <div className="card-body" style={{ padding: '6px 10px', fontSize: 11, color: counts[e.id] === 0 ? 'var(--text2)' : 'var(--text)' }}>
-                      {counts[e.id]} {counts[e.id] === 1 ? 'pedido' : 'pedidos'}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="stat-grid" style={{ marginTop: 20 }}>
-                <div className="stat-card">
-                  <div className="stat-value">
-                    {pedidos.filter(p => !['entrega', 'cancelado'].includes(p.etapa_actual)).length}
-                  </div>
-                  <div className="stat-label">En producción</div>
-                </div>
-                <div className="stat-card">
-                  <div className="stat-value" style={{ color: 'var(--success)' }}>
-                    {pedidos.filter(p => p.etapa_actual === 'entrega').length}
-                  </div>
-                  <div className="stat-label">Entregados</div>
-                </div>
-                <div className="stat-card">
-                  <div className="stat-value" style={{ color: 'var(--warning)' }}>
-                    {pedidos.filter(p =>
-                      p.fecha &&
-                      p.fecha < new Date().toISOString().split('T')[0] &&
-                      !['entrega', 'cancelado'].includes(p.etapa_actual)
-                    ).length}
-                  </div>
-                  <div className="stat-label">Vencidos</div>
-                </div>
-                <div className="stat-card">
-                  <div className="stat-value" style={{ color: 'var(--accent)' }}>
-                    {pedidos
-                      .filter(p => !['entrega', 'cancelado'].includes(p.etapa_actual))
-                      .reduce((a, p) => a + pedidoTotal(p), 0)}
-                  </div>
-                  <div className="stat-label">Unidades en curso</div>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    )
-  }
-
-  // ═══════════════════ Render: Cola de etapa ════════════════════════════════
-  const eInfo = ETAPA_BY_ID[etapaSel]
+  // ═══════════════════ Render ═══════════════════════════════════════════════
   return (
     <div>
       <div className="topbar">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <button className="mobile-menu-btn" onClick={onMenuClick}>☰</button>
-          <h2>{eInfo.icon} {eInfo.label}</h2>
-        </div>
-        <div className="topbar-actions">
-          <button className="btn btn-secondary btn-sm" onClick={() => { setEtapaSel(null); setPedidoOpen(null) }}>
-            ← Producción
-          </button>
+          <h2>🏭 Producción</h2>
         </div>
       </div>
 
       <div className="content">
-        <div className="prod-tabs">
-          {ETAPAS.map(e => (
-            <button
-              key={e.id}
-              className={`prod-tab ${etapaSel === e.id ? 'active' : ''}`}
-              onClick={() => { setEtapaSel(e.id); setPedidoOpen(null) }}
-            >
-              <span>{e.icon}</span>
-              <span>{e.label}</span>
-              <span className="prod-tab-count">{counts[e.id]}</span>
-            </button>
-          ))}
-        </div>
-
-        {pedidosEtapa.length === 0 ? (
-          <div className="empty-state">
-            <div className="icon">{eInfo.icon}</div>
-            <h3>No hay pedidos en {eInfo.label.toLowerCase()}</h3>
-            <p>Cuando un pedido entre en esta etapa lo vas a ver acá.</p>
-          </div>
+        {loading ? (
+          <div className="loading"><div className="spinner" /> Cargando…</div>
         ) : (
-          <div className="prod-list">
-            {pedidosEtapa.map(p => (
-              <PedidoRow
-                key={p.id}
-                pedido={p}
-                lotes={lotesPorPedido[p.id] || []}
-                onOpen={() => setPedidoOpen(p.id)}
-                onCambiarEtapa={(nuevaEtapa) => cambiarEtapa(p.id, nuevaEtapa)}
-              />
-            ))}
-          </div>
+          <>
+            {/* Tabs de etapas */}
+            <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid #003d7a', marginBottom: 12, flexWrap: 'wrap' }}>
+              {ETAPAS.map(e => {
+                const activa = etapaSel === e.id
+                return (
+                  <button
+                    key={e.id}
+                    onClick={() => { setEtapaSel(e.id); setPedidoOpen(null) }}
+                    style={{
+                      padding: '5px 14px',
+                      fontFamily: 'Tahoma, sans-serif',
+                      fontSize: 11,
+                      fontWeight: 'bold',
+                      border: '1px solid #a8a8a8',
+                      borderBottom: activa ? '2px solid #ece9d8' : '1px solid #a8a8a8',
+                      background: activa ? '#ece9d8' : 'linear-gradient(to bottom, #f4f4ec, #d8d4c8)',
+                      color: activa ? '#003d7a' : '#555',
+                      cursor: 'pointer',
+                      marginBottom: activa ? -2 : 0,
+                      display: 'flex', gap: 6, alignItems: 'center',
+                    }}
+                  >
+                    {e.icon} {e.label}
+                    <span style={{
+                      background: counts[e.id] > 0 ? '#003d7a' : '#d8d4c8',
+                      color: counts[e.id] > 0 ? '#fff' : '#888',
+                      padding: '0 5px',
+                      fontSize: 10,
+                      fontWeight: 'bold',
+                      minWidth: 18,
+                      textAlign: 'center',
+                    }}>
+                      {counts[e.id] || 0}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* Lista de pedidos */}
+            {pedidosEtapa.length === 0 ? (
+              <div className="empty-state">
+                <div className="icon">{ETAPA_BY_ID[etapaSel]?.icon}</div>
+                <h3>No hay pedidos en {ETAPA_BY_ID[etapaSel]?.label?.toLowerCase()}</h3>
+                <p>Cuando un pedido entre en esta etapa lo vas a ver acá.</p>
+              </div>
+            ) : (
+              <div style={{ marginBottom: 16 }}>
+                {pedidosEtapa.map(p => (
+                  <PedidoRow
+                    key={p.id}
+                    pedido={p}
+                    lotes={lotesPorPedido[p.id] || []}
+                    onOpen={() => setPedidoOpen(p.id)}
+                    onCambiarEtapa={(nuevaEtapa) => cambiarEtapa(p.id, nuevaEtapa)}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* Stats */}
+            <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(4,1fr)' }}>
+              <div className="stat-card">
+                <div className="stat-value">{pedidos.filter(p => !['entrega', 'cancelado'].includes(p.etapa_actual)).length}</div>
+                <div className="stat-label">En producción</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-value" style={{ color: 'var(--success)' }}>{pedidos.filter(p => p.etapa_actual === 'entrega').length}</div>
+                <div className="stat-label">Entregados</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-value" style={{ color: 'var(--warning)' }}>
+                  {pedidos.filter(p => p.fecha && p.fecha < new Date().toISOString().split('T')[0] && !['entrega', 'cancelado'].includes(p.etapa_actual)).length}
+                </div>
+                <div className="stat-label">Vencidos</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-value" style={{ color: 'var(--accent)' }}>
+                  {pedidos.filter(p => !['entrega', 'cancelado'].includes(p.etapa_actual)).reduce((a, p) => a + pedidoTotal(p), 0)}
+                </div>
+                <div className="stat-label">Unidades en curso</div>
+              </div>
+            </div>
+          </>
         )}
       </div>
 
@@ -338,76 +331,55 @@ function PedidoRow({ pedido, lotes, onOpen, onCambiarEtapa }) {
   const avance = total > 0 ? Math.min(100, Math.round((hechas / total) * 100)) : 0
   const venc   = pedido.fecha && pedido.fecha < new Date().toISOString().split('T')[0]
   const abierto = lotes.find(l => !l.completado_at)
-  const dias   = diasDesde(abierto?.iniciado_at || pedido.created_at)
+  const col    = getColorCliente(pedido.cliente, pedido.cliente_id)
 
   return (
-    <div className="prod-card" onClick={onOpen}>
-      <div className="prod-card-head">
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div className="prod-card-cliente">{pedido.cliente || '—'}</div>
-          <div className="prod-card-prod">
-            {items.map((it, i) => (
-              <span key={i}>
-                {i > 0 && ' · '}
-                <strong>{it.producto || '—'}</strong>
-                <span style={{ color: 'var(--text2)' }}> × {totalTalles(it.talles)}</span>
-              </span>
-            ))}
-          </div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
-            {pedidoItems(pedido).map((it, idx) => {
-              const talles = tallesOrdenados(it.talles)
-              if (!talles.length) return null
-              return (
-                <div key={idx} style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
-                  {pedidoItems(pedido).length > 1 && (
-                    <span style={{ fontSize: 11, color: 'var(--text2)', marginRight: 2 }}>{it.producto}:</span>
-                  )}
-                  {talles.map(([t, c]) => (
-                    <span key={t} style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 6, padding: '2px 8px', fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
-                      {t} <span style={{ color: 'var(--accent)' }}>{c}</span>
-                    </span>
-                  ))}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-        <div className="prod-card-meta">
-          <div className="prod-card-total">{total} <span>u.</span></div>
-          <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>
-            {pedido.fecha_pedido && <span>📋 {fmtFecha(pedido.fecha_pedido)}</span>}
-            {pedido.fecha_pedido && pedido.fecha && <span style={{ margin: '0 4px' }}>·</span>}
-            {pedido.fecha && (
-              <span style={{ color: venc ? 'var(--danger)' : 'var(--text2)' }}>
-                🏁 {fmtFecha(pedido.fecha)}
-              </span>
-            )}
-          </div>
-        </div>
+    <div style={{ border: '1px solid #a8a8a8', borderLeft: `5px solid ${col.border}`, boxShadow: '1px 1px 0 #b8b8b8', marginBottom: 8, background: '#fff' }}>
+
+      {/* Header cliente */}
+      <div style={{ background: col.bg, borderBottom: `1px solid ${col.border}`, padding: '5px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }} onClick={onOpen}>
+        <span style={{ fontWeight: 'bold', color: col.text, fontSize: 12 }}>{pedido.cliente || '—'}</span>
+        <span style={{ fontSize: 10, color: '#555', display: 'flex', gap: 8, alignItems: 'center' }}>
+          {pedido.fecha_pedido && <span>📋 {fmtFecha(pedido.fecha_pedido)}</span>}
+          {pedido.fecha && <span style={{ color: venc ? 'var(--danger)' : '#555' }}>🏁 {fmtFecha(pedido.fecha)}</span>}
+          <strong style={{ color: col.text }}>{total} u.</strong>
+        </span>
       </div>
 
-      <div className="prod-card-foot">
-        <div className="prod-card-foot-left">
-          <span className="prod-card-pill">
-            {abierto?.iniciado_at
-              ? `📅 ${fmtFecha(abierto.iniciado_at.split('T')[0])}`
-              : `⏱ ${dias} ${dias === 1 ? 'día' : 'días'}`}
-          </span>
+      {/* Body */}
+      <div style={{ padding: '8px 10px' }}>
+        {items.map((it, idx) => {
+          const talles = tallesOrdenados(it.talles)
+          return (
+            <div key={idx} style={{ marginBottom: idx < items.length - 1 ? 6 : 0 }}>
+              <span style={{ fontWeight: 'bold', fontSize: 11 }}>{it.producto || '—'}</span>
+              <span style={{ color: '#555', fontSize: 11 }}> × {totalTalles(it.talles)}</span>
+              <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', marginTop: 3 }}>
+                {talles.map(([t, c]) => (
+                  <span key={t} style={{ border: '1px solid #a8a8a8', padding: '1px 5px', fontSize: 10, fontWeight: 'bold', background: '#f4f4ec' }}>
+                    {t} <span style={{ color: col.border }}>{c}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+
+        {/* Progreso + acciones */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }} onClick={e => e.stopPropagation()}>
           {abierto?.responsable_nombre && (
-            <span className="prod-card-pill">👤 {abierto.responsable_nombre}</span>
+            <span style={{ fontSize: 10, color: '#555' }}>👤 {abierto.responsable_nombre}</span>
           )}
-          <span className="prod-card-pill">
-            <span className="prod-bar"><span className="prod-bar-fill" style={{ width: `${avance}%` }} /></span>
-            {hechas}/{total} ({avance}%)
-          </span>
-        </div>
-        <div className="prod-card-foot-right" onClick={e => e.stopPropagation()}>
+          <span style={{ fontSize: 10, color: '#555' }}>{hechas}/{total} u.</span>
+          <div style={{ flex: 1, height: 6, background: '#e0ddd4', border: '1px solid #c8c4b8' }}>
+            <div style={{ width: `${avance}%`, height: '100%', background: col.border }} />
+          </div>
+          <span style={{ fontSize: 10, color: '#555' }}>{avance}%</span>
           <button className="btn btn-secondary btn-sm" onClick={onOpen}>📝 Asistente</button>
           <select
             value={pedido.etapa_actual || ''}
             onChange={e => onCambiarEtapa(e.target.value)}
-            style={{ fontSize: 12, padding: '5px 8px' }}
+            style={{ fontSize: 11, padding: '2px 4px' }}
           >
             {ETAPAS.map(e => (
               <option key={e.id} value={e.id}>{e.icon} {e.label}</option>
