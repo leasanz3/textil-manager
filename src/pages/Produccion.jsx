@@ -353,6 +353,24 @@ function PedidoRow({ pedido, lotes, onOpen, onCambiarEtapa }) {
               </span>
             ))}
           </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+            {pedidoItems(pedido).map((it, idx) => {
+              const talles = Object.entries(it.talles || {}).filter(([, c]) => c > 0)
+              if (!talles.length) return null
+              return (
+                <div key={idx} style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+                  {pedidoItems(pedido).length > 1 && (
+                    <span style={{ fontSize: 11, color: 'var(--text2)', marginRight: 2 }}>{it.producto}:</span>
+                  )}
+                  {talles.map(([t, c]) => (
+                    <span key={t} style={{ background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 6, padding: '2px 8px', fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
+                      {t} <span style={{ color: 'var(--accent)' }}>{c}</span>
+                    </span>
+                  ))}
+                </div>
+              )
+            })}
+          </div>
         </div>
         <div className="prod-card-meta">
           <div className="prod-card-total">{total} <span>u.</span></div>
