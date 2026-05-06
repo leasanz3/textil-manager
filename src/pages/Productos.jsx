@@ -166,6 +166,7 @@ export default function Productos({ onMenuClick }) {
   const [productos, setProductos]   = useState([])
   const [telas, setTelas]           = useState([])
   const [avios, setAvios]           = useState([])
+  const [contactos, setContactos]   = useState([])
   const [proveedores, setProveedores] = useState([])
   const [loading, setLoading]       = useState(true)
   const [search, setSearch]         = useState('')
@@ -176,11 +177,17 @@ export default function Productos({ onMenuClick }) {
   const [filterProvTela, setFilterProvTela]   = useState('')
   const [filterProvTela2, setFilterProvTela2] = useState('')
   const [filterProvRib, setFilterProvRib]     = useState('')
+  const [clienteQuery, setClienteQuery]               = useState('')
+  const [contactosResults, setContactosResults]       = useState([])
+  const [showClienteDropdown, setShowClienteDropdown] = useState(false)
+  const [searchingContactos, setSearchingContactos]   = useState(false)
+  const clienteSearchTimeout = useRef(null)
   const dragSrcPieza   = useRef(null)
   const dragSrcProceso = useRef(null)
 
   const emptyForm = {
     nombre: '', codigo: '', tabla: 'adulto', base_id: '',
+    cliente_id: null,
     tela1_id: '', tela2_id: '', rib_id: '',
     telas_extra:  [],
     entretela_id: '',
@@ -207,16 +214,18 @@ export default function Productos({ onMenuClick }) {
 
   async function fetchAll() {
     setLoading(true)
-    const [{ data: p }, { data: t }, { data: prov }, { data: a }] = await Promise.all([
+    const [{ data: p }, { data: t }, { data: prov }, { data: a }, { data: c }] = await Promise.all([
       supabase.from('productos').select('*').order('nombre'),
       supabase.from('telas').select('id, tipo, color, unidad, proveedor_id, proveedor').order('tipo'),
       supabase.from('proveedores').select('id, nombre').order('nombre'),
       supabase.from('avios').select('id, nombre, tipo').order('nombre'),
+      supabase.from('contactos').select('id, nombre, tipo').order('nombre'),
     ])
     setProductos(p || [])
     setTelas(t || [])
     setProveedores(prov || [])
     setAvios(a || [])
+    setContactos(c || [])
     setLoading(false)
   }
 
@@ -243,6 +252,7 @@ export default function Productos({ onMenuClick }) {
     setEditing(null)
     setForm(emptyForm)
     setFilterProvTela(''); setFilterProvTela2(''); setFilterProvRib('')
+    setClienteQuery(''); setContactosResults([]); setShowClienteDropdown(false)
     setModal(true)
   }
 
@@ -254,11 +264,15 @@ export default function Productos({ onMenuClick }) {
     setFilterProvTela(t1?.proveedor_id  ? String(t1.proveedor_id)  : '')
     setFilterProvTela2(t2?.proveedor_id ? String(t2.proveedor_id)  : '')
     setFilterProvRib(rib?.proveedor_id  ? String(rib.proveedor_id) : '')
+    const clienteDeProducto = contactos.find(c => c.id === p.cliente_id)
+    setClienteQuery(clienteDeProducto?.nombre || '')
+    setContactosResults([]); setShowClienteDropdown(false)
     setForm({
       nombre:             p.nombre             || '',
       codigo:             p.codigo             || '',
       tabla:              p.tabla              || 'adulto',
       base_id:            p.base_id            || '',
+      cliente_id:         p.cliente_id         || null,
       tela1_id:           p.tela1_id           || '',
       tela2_id:           p.tela2_id           || '',
       rib_id:             p.rib_id             || '',
@@ -308,6 +322,44 @@ export default function Productos({ onMenuClick }) {
       planchado_pares:    (base.planchado_pares  || []).map(x => ({ ...x })),
     }))
   }
+
+  // ── Autocomplete cliente asociado ────────────────────────────────────────────
+
+  function onClienteInput(value) {
+    setClienteQuery(value)
+    if (!value.trim()) {
+      setForm(f => ({ ...f, cliente_id: null }))
+      setContactosResults([])
+      setShowClienteDropdown(false)
+      return
+    }
+    setShowClienteDropdown(true)
+    if (clienteSearchTimeout.current) clearTimeout(clienteSearchTimeout.current)
+    clienteSearchTimeout.current = setTimeout(async () => {
+      setSearchingContactos(true)
+      const { data } = await supabase
+        .from('contactos').select('id, nombre, tipo')
+        .ilike('nombre', `%${value.trim()}%`).limit(8)
+      setContactosResults(data || [])
+      setSearchingContactos(false)
+    }, 250)
+  }
+
+  function seleccionarContacto(contacto) {
+    setForm(f => ({ ...f, cliente_id: contacto.id }))
+    setClienteQuery(contacto.nombre)
+    setShowClienteDropdown(false)
+    setContactosResults([])
+  }
+
+  function limpiarCliente() {
+    setForm(f => ({ ...f, cliente_id: null }))
+    setClienteQuery('')
+    setContactosResults([])
+    setShowClienteDropdown(false)
+  }
+
+  function onClienteBlur() { setTimeout(() => setShowClienteDropdown(false), 150) }
 
   // ── Drag ──────────────────────────────────────────────────────────────────────
 
@@ -449,6 +501,7 @@ export default function Productos({ onMenuClick }) {
       codigo:              form.codigo || generarCodigo(form.nombre),
       tabla:               form.tabla,
       base_id:             parseInt(form.base_id) || null,
+      cliente_id:          form.cliente_id || null,
       tela1_id:            parseInt(form.tela1_id) || null,
       tela2_id:            parseInt(form.tela2_id) || null,
       rib_id:              parseInt(form.rib_id) || null,
@@ -970,6 +1023,46 @@ export default function Productos({ onMenuClick }) {
                   <input value={nuevaTerm} onChange={e => setNuevaTerm(e.target.value)} placeholder="ej: Planchado cartera con entretela" style={{ flex: 1 }} onKeyDown={e => e.key === 'Enter' && agregarTerminacion()} />
                   <button className="btn btn-secondary btn-sm" onClick={agregarTerminacion}>+ Agregar</button>
                 </div>
+              </div>
+
+              {/* Cliente asociado */}
+              <div className="form-group" style={{ position: 'relative' }}>
+                <label>Cliente asociado <span style={{ color: 'var(--text2)', fontWeight: 400 }}>(opcional)</span></label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input
+                    value={clienteQuery}
+                    onChange={e => onClienteInput(e.target.value)}
+                    onBlur={onClienteBlur}
+                    onFocus={() => clienteQuery.trim() && contactosResults.length > 0 && setShowClienteDropdown(true)}
+                    placeholder="Buscar contacto..."
+                    autoComplete="off"
+                    style={{ flex: 1 }}
+                  />
+                  {clienteQuery && (
+                    <button className="btn btn-secondary btn-sm" onClick={limpiarCliente} title="Quitar cliente">✕</button>
+                  )}
+                </div>
+                {searchingContactos && (
+                  <div style={{ position: 'absolute', right: 48, top: 34, fontSize: 11, color: 'var(--text2)' }}>Buscando...</div>
+                )}
+                {showClienteDropdown && (
+                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', boxShadow: '0 4px 16px rgba(0,0,0,0.18)', maxHeight: 200, overflowY: 'auto' }}>
+                    {contactosResults.length === 0 ? (
+                      <div style={{ padding: '9px 12px', fontSize: 13, color: 'var(--text2)' }}>Sin resultados</div>
+                    ) : contactosResults.map(c => (
+                      <div
+                        key={c.id}
+                        onMouseDown={() => seleccionarContacto(c)}
+                        style={{ padding: '9px 12px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'var(--hover)'}
+                        onMouseLeave={e => e.currentTarget.style.background = ''}
+                      >
+                        <span>{c.nombre}</span>
+                        {c.tipo && <span style={{ fontSize: 11, color: 'var(--text2)', marginLeft: 8 }}>{c.tipo}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="form-group">
