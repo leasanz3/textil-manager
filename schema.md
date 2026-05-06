@@ -217,6 +217,7 @@ Fichas técnicas de productos con piezas, materiales y procesos de confección.
 | `cliente`      | text      | Nombre del cliente                                                                                |
 | `talles`       | jsonb     | Cantidades por talle: `{ XS: 5, S: 10, M: 8, ... }`                                              |
 | `etapa_actual` | text      | `'corte'` \| `'taller'` \| `'estampado'` \| `'bordado'` \| `'sublimado'` \| `'entrega'` \| `'cancelado'` |
+| `fecha_pedido` | date      | Fecha en que entró el encargo del cliente                                                         |
 | `fecha`        | date      | Fecha de entrega comprometida                                                                     |
 | `created_at`   | timestamp |                                                                                                   |
 

@@ -243,6 +243,7 @@ export default function Pedidos({ onMenuClick }) {
     cliente:      '',
     cliente_id:   null,
     etapa_actual: 'corte',
+    fecha_pedido: '',
     fecha:        '',
     items: [{ producto: '', producto_id: null, tabla: 'adulto', talles: {} }],
   }
@@ -282,6 +283,7 @@ export default function Pedidos({ onMenuClick }) {
       cliente:      p.cliente      || '',
       cliente_id:   null,
       etapa_actual: p.etapa_actual || 'corte',
+      fecha_pedido: p.fecha_pedido || '',
       fecha:        p.fecha        || '',
       items: p.items && p.items.length > 0
         ? p.items
@@ -405,6 +407,7 @@ export default function Pedidos({ onMenuClick }) {
       producto_id:  firstItem.producto_id || null,
       cliente:      form.cliente.trim(),
       etapa_actual: form.etapa_actual,
+      fecha_pedido: form.fecha_pedido || null,
       fecha:        form.fecha || null,
       talles:       firstItem.talles,
       items:        form.items,
@@ -536,6 +539,7 @@ export default function Pedidos({ onMenuClick }) {
                     <th>Cliente</th>
                     <th>Etapa</th>
                     <th>Total</th>
+                    <th>Pedido</th>
                     <th>Entrega</th>
                     <th>Detalle</th>
                     <th style={{ width: 140 }}>Acciones</th>
@@ -566,6 +570,7 @@ export default function Pedidos({ onMenuClick }) {
                           </select>
                         </td>
                         <td><strong>{pedidoTotal(p)} u.</strong></td>
+                        <td style={{ fontSize: 12, color: 'var(--text2)' }}>{fmtFecha(p.fecha_pedido)}</td>
                         <td style={{ color: p.fecha < new Date().toISOString().split('T')[0] && p.etapa_actual !== 'entrega' ? 'var(--danger)' : undefined }}>
                           {fmtFecha(p.fecha)}
                         </td>
@@ -659,6 +664,10 @@ export default function Pedidos({ onMenuClick }) {
                   <select value={form.etapa_actual} onChange={e => setF('etapa_actual', e.target.value)}>
                     {ETAPAS.map(e => <option key={e.id} value={e.id}>{e.label}</option>)}
                   </select>
+                </div>
+                <div className="form-group">
+                  <label>Fecha del pedido</label>
+                  <input type="date" value={form.fecha_pedido} onChange={e => setF('fecha_pedido', e.target.value)} />
                 </div>
                 <div className="form-group">
                   <label>Fecha de entrega</label>
