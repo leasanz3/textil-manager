@@ -4,14 +4,14 @@ import { supabase } from '../lib/supabase'
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
 const ETAPAS = [
-  { id: 'corte',      label: 'Corte',        icon: '✂',  tipo: ['otro', 'taller'] },
-  { id: 'taller',     label: 'Taller',       icon: '🧵', tipo: ['taller'] },
-  { id: 'estampado',  label: 'Estampado',    icon: '🎨', tipo: ['estampador'] },
-  { id: 'bordado',    label: 'Bordado',      icon: '🪡', tipo: ['bordador'] },
-  { id: 'sublimado',  label: 'Sublimado',    icon: '✨', tipo: ['sublimador'] },
-  { id: 'planchado',  label: 'Planchado',    icon: '🔥', tipo: ['otro', 'taller'] },
-  { id: 'ojal_boton', label: 'Ojal y botón', icon: '🪢', tipo: ['otro', 'taller'] },
-  { id: 'entrega',    label: 'Entrega',      icon: '📦', tipo: [] },
+  { id: 'corte',      label: 'Corte',        icon: '✂',  tipo: ['otro', 'taller'],  color: '' },
+  { id: 'taller',     label: 'Taller',       icon: '🧵', tipo: ['taller'],           color: '' },
+  { id: 'estampado',  label: 'Estampado',    icon: '🎨', tipo: ['estampador'],       color: 'gold' },
+  { id: 'bordado',    label: 'Bordado',      icon: '🪡', tipo: ['bordador'],         color: '' },
+  { id: 'sublimado',  label: 'Sublimado',    icon: '✨', tipo: ['sublimador'],       color: 'gold' },
+  { id: 'planchado',  label: 'Planchado',    icon: '🔥', tipo: ['otro', 'taller'],  color: '' },
+  { id: 'ojal_boton', label: 'Ojal y botón', icon: '🪢', tipo: ['otro', 'taller'],  color: '' },
+  { id: 'entrega',    label: 'Entrega',      icon: '📦', tipo: [],                   color: 'green' },
 ]
 
 const ETAPA_BY_ID   = Object.fromEntries(ETAPAS.map(e => [e.id, e]))
@@ -200,29 +200,22 @@ export default function Produccion({ onMenuClick }) {
             <div className="loading"><div className="spinner" /> Cargando…</div>
           ) : (
             <>
-              <div className="card" style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: 4 }}>
-                  Asistente de trabajo por etapa.
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--text2)' }}>
+              <div className="card" style={{ marginBottom: 12 }}>
+                <div className="card-header">🏭 Asistente de producción por etapa</div>
+                <div className="card-body" style={{ fontSize: 11, color: 'var(--text2)' }}>
                   Elegí una etapa para ver los pedidos en cola y registrar el avance.
                 </div>
               </div>
 
-              <div className="prod-stage-grid">
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 8, marginBottom: 12 }}>
                 {ETAPAS.map(e => (
-                  <div
-                    key={e.id}
-                    className={`prod-stage-card ${counts[e.id] === 0 ? 'empty' : ''}`}
-                    onClick={() => setEtapaSel(e.id)}
-                  >
-                    <div className="prod-stage-icon">{e.icon}</div>
-                    <div className="prod-stage-label">{e.label}</div>
-                    <div className={`prod-stage-count ${counts[e.id] === 0 ? '' : 'has'}`}>
-                      {counts[e.id]}
+                  <div key={e.id} className="card" style={{ cursor: 'pointer' }} onClick={() => setEtapaSel(e.id)}>
+                    <div className={`card-header ${e.color}`}>
+                      <span>{e.icon} {e.label}</span>
+                      <span className="badge badge-blue">{counts[e.id]}</span>
                     </div>
-                    <div style={{ fontSize: 10, color: 'var(--text2)' }}>
-                      {counts[e.id] === 1 ? 'pedido' : 'pedidos'}
+                    <div className="card-body" style={{ padding: '6px 10px', fontSize: 11, color: counts[e.id] === 0 ? 'var(--text2)' : 'var(--text)' }}>
+                      {counts[e.id]} {counts[e.id] === 1 ? 'pedido' : 'pedidos'}
                     </div>
                   </div>
                 ))}
