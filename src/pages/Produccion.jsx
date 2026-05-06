@@ -356,15 +356,25 @@ function PedidoRow({ pedido, lotes, onOpen, onCambiarEtapa }) {
         </div>
         <div className="prod-card-meta">
           <div className="prod-card-total">{total} <span>u.</span></div>
-          {pedido.fecha && (
-            <div className={`prod-card-fecha ${venc ? 'venc' : ''}`}>📅 {fmtFecha(pedido.fecha)}</div>
-          )}
+          <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 2 }}>
+            {pedido.fecha_pedido && <span>📋 {fmtFecha(pedido.fecha_pedido)}</span>}
+            {pedido.fecha_pedido && pedido.fecha && <span style={{ margin: '0 4px' }}>·</span>}
+            {pedido.fecha && (
+              <span style={{ color: venc ? 'var(--danger)' : 'var(--text2)' }}>
+                🏁 {fmtFecha(pedido.fecha)}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
       <div className="prod-card-foot">
         <div className="prod-card-foot-left">
-          <span className="prod-card-pill">⏱ {dias} {dias === 1 ? 'día' : 'días'}</span>
+          <span className="prod-card-pill">
+            {abierto?.iniciado_at
+              ? `📅 ${fmtFecha(abierto.iniciado_at.split('T')[0])}`
+              : `⏱ ${dias} ${dias === 1 ? 'día' : 'días'}`}
+          </span>
           {abierto?.responsable_nombre && (
             <span className="prod-card-pill">👤 {abierto.responsable_nombre}</span>
           )}
@@ -411,6 +421,11 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
         talles:      guardado?.talles || {},
       }
     })
+  )
+  const [fechaIngreso, setFechaIngreso] = useState(
+    loteAbierto?.iniciado_at
+      ? loteAbierto.iniciado_at.split('T')[0]
+      : new Date().toISOString().split('T')[0]
   )
   const [responsableId, setResponsableId] = useState(loteAbierto?.responsable_id || null)
   const [nota, setNota]                   = useState(loteAbierto?.nota || '')
@@ -459,6 +474,7 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
       responsable_nombre: responsable?.nombre || null,
       hechas:             hechasState,
       nota:               nota || null,
+      iniciado_at:        fechaIngreso ? new Date(fechaIngreso).toISOString() : new Date().toISOString(),
     }
 
     let err = null
@@ -497,6 +513,14 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
 
         <div className="modal-body">
           <div className="form-grid" style={{ marginBottom: 16 }}>
+            <div className="form-group">
+              <label>📅 Fecha de ingreso</label>
+              <input
+                type="date"
+                value={fechaIngreso}
+                onChange={e => setFechaIngreso(e.target.value)}
+              />
+            </div>
             <div className="form-group">
               <label>👤 Responsable</label>
               <select
@@ -585,7 +609,8 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
               <div style={{ marginTop: 8 }}>
                 {lotesCerrados.map(l => (
                   <div key={l.id} style={{ fontSize: 11, padding: '6px 10px', background: 'var(--bg3)', borderRadius: 'var(--radius)', marginBottom: 4 }}>
-                    <strong>{fmtFecha(l.completado_at?.split('T')[0])}</strong>
+                    <strong>{fmtFecha(l.iniciado_at?.split('T')[0])}</strong>
+                    {l.completado_at && <span style={{ color: 'var(--text2)' }}> → {fmtFecha(l.completado_at.split('T')[0])}</span>}
                     {l.responsable_nombre && <> · 👤 {l.responsable_nombre}</>}
                     <> · {sumarHechas([l])} u.</>
                     {l.nota && <div style={{ color: 'var(--text2)', marginTop: 2 }}>{l.nota}</div>}
