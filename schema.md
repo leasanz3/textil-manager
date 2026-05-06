@@ -197,6 +197,8 @@ Fichas técnicas de productos con piezas, materiales y procesos de confección.
 | `tela1_id`           | integer   | FK → `telas.id` (tela principal)                                                                                      |
 | `tela2_id`           | integer   | FK → `telas.id` (tela secundaria)                                                                                     |
 | `rib_id`             | integer   | FK → `telas.id` (tela para puños / cuellos)                                                                           |
+| `molde`              | text      | Nombre del molde (texto libre)                                                                                        |
+| `avios_ids`          | jsonb     | `[{ avio_id: integer, nombre: text }]` — avíos del catálogo vinculados a esta ficha                                   |
 | `piezas`             | jsonb     | `[{ nombre: string, mult: integer, tela_rol: 'tela1'\|'tela2'\|'rib' }]`                                              |
 | `procesos`           | jsonb     | `[{ id: string, label: string, nota: string }]`                                                                       |
 | `avios_medidas`      | jsonb     | `[{ nombre, unit, todos, ancho, medidas: { [talle]: valor } }]`                                                       |

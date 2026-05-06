@@ -56,6 +56,70 @@ function getTelaRoles(telasExtra) {
   return roles
 }
 
+// ─── AvioSearch ───────────────────────────────────────────────────────────────
+
+function AvioSearch({ onSelect }) {
+  const [query, setQuery]     = useState('')
+  const [results, setResults] = useState([])
+  const [show, setShow]       = useState(false)
+  const timeout = useRef(null)
+
+  function onInput(val) {
+    setQuery(val)
+    if (timeout.current) clearTimeout(timeout.current)
+    if (!val.trim()) { setResults([]); setShow(false); return }
+    setShow(true)
+    timeout.current = setTimeout(async () => {
+      const { data } = await supabase
+        .from('avios')
+        .select('id, nombre, tipo, descripcion')
+        .ilike('nombre', `%${val.trim()}%`)
+        .limit(10)
+      setResults(data || [])
+    }, 250)
+  }
+
+  function seleccionar(av) {
+    onSelect(av)
+    setQuery('')
+    setResults([])
+    setShow(false)
+  }
+
+  return (
+    <div style={{ position: 'relative', marginTop: 8 }}>
+      <input
+        value={query}
+        onChange={e => onInput(e.target.value)}
+        onBlur={() => setTimeout(() => setShow(false), 150)}
+        placeholder="Buscar avío del catálogo..."
+        style={{ fontSize: 12 }}
+      />
+      {show && results.length > 0 && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', boxShadow: '0 4px 16px rgba(0,0,0,0.18)', maxHeight: 220, overflowY: 'auto' }}>
+          {results.map(av => (
+            <div
+              key={av.id}
+              onMouseDown={() => seleccionar(av)}
+              style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 12, borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between' }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--hover)'}
+              onMouseLeave={e => e.currentTarget.style.background = ''}
+            >
+              <span style={{ fontWeight: 600 }}>{av.nombre}</span>
+              <span style={{ color: 'var(--text2)' }}>{av.tipo}{av.descripcion ? ` · ${av.descripcion}` : ''}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {show && results.length === 0 && query.trim() && (
+        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '8px 12px', fontSize: 12, color: 'var(--text2)' }}>
+          Sin resultados para "{query}"
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── PiezaRow ─────────────────────────────────────────────────────────────────
 
 function PiezaRow({ pieza, index, total, telaRoles, onEdit, onDelete, onDragStart, onDragOver, onDrop, onMoveUp, onMoveDown }) {
@@ -188,6 +252,7 @@ export default function Productos({ onMenuClick }) {
   const emptyForm = {
     nombre: '', codigo: '', tabla: 'adulto', base_id: '',
     cliente_id: null,
+    molde: '',
     tela1_id: '', tela2_id: '', rib_id: '',
     telas_extra:  [],
     entretela_id: '',
@@ -197,6 +262,7 @@ export default function Productos({ onMenuClick }) {
       { id: 'taller',  label: '🧵 Taller',  nota: '' },
       { id: 'entrega', label: '📦 Entrega', nota: '' },
     ],
+    avios_ids: [],
     avios_medidas: [],
     terminaciones: { grifaTalle: false, grifa: false, talle: false },
     terminaciones_extra: [],
@@ -273,6 +339,7 @@ export default function Productos({ onMenuClick }) {
       tabla:              p.tabla              || 'adulto',
       base_id:            p.base_id            || '',
       cliente_id:         p.cliente_id         || null,
+      molde:              p.molde              || '',
       tela1_id:           p.tela1_id           || '',
       tela2_id:           p.tela2_id           || '',
       rib_id:             p.rib_id             || '',
@@ -283,6 +350,7 @@ export default function Productos({ onMenuClick }) {
       entretela_id:       p.entretela_id       || '',
       piezas:             p.piezas             || [],
       procesos:           p.procesos           || emptyForm.procesos,
+      avios_ids:          p.avios_ids          || [],
       avios_medidas:      p.avios_medidas      || [],
       terminaciones:      p.terminaciones      || { grifaTalle: false, grifa: false, talle: false },
       terminaciones_extra: p.terminaciones_extra || [],
@@ -502,6 +570,7 @@ export default function Productos({ onMenuClick }) {
       tabla:               form.tabla,
       base_id:             parseInt(form.base_id) || null,
       cliente_id:          form.cliente_id || null,
+      molde:               form.molde || null,
       tela1_id:            parseInt(form.tela1_id) || null,
       tela2_id:            parseInt(form.tela2_id) || null,
       rib_id:              parseInt(form.rib_id) || null,
@@ -509,6 +578,7 @@ export default function Productos({ onMenuClick }) {
       entretela_id:        parseInt(form.entretela_id) || null,
       piezas:              form.piezas,
       procesos:            form.procesos,
+      avios_ids:           form.avios_ids,
       avios_medidas:       form.avios_medidas,
       terminaciones:       form.terminaciones,
       terminaciones_extra: form.terminaciones_extra,
@@ -626,6 +696,28 @@ export default function Productos({ onMenuClick }) {
               </div>
             </div>
             <div style={{ padding: 16 }}>
+
+              {/* Molde y avíos vinculados */}
+              {(vistaFicha.molde || vistaFicha.avios_ids?.length > 0) && (
+                <div style={{ marginBottom: 16 }}>
+                  {vistaFicha.molde && (
+                    <div style={{ fontSize: 12, marginBottom: 6 }}>
+                      <span style={{ color: 'var(--text2)', marginRight: 6 }}>Molde:</span>
+                      <strong>{vistaFicha.molde}</strong>
+                    </div>
+                  )}
+                  {vistaFicha.avios_ids?.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Avíos</div>
+                      {vistaFicha.avios_ids.map((av, i) => (
+                        <span key={i} style={{ display: 'inline-block', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 12, padding: '2px 10px', fontSize: 11, marginRight: 6, marginBottom: 4 }}>
+                          🧷 {av.nombre}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Procesos */}
               {vistaFicha.procesos?.length > 0 && (
@@ -795,6 +887,10 @@ export default function Productos({ onMenuClick }) {
                     ))}
                   </select>
                 </div>
+                <div className="form-group">
+                  <label>Molde</label>
+                  <input value={form.molde} onChange={e => setForm(f => ({ ...f, molde: e.target.value }))} placeholder="ej: Canguro M-12" />
+                </div>
               </div>
 
               {/* Procesos */}
@@ -957,6 +1053,26 @@ export default function Productos({ onMenuClick }) {
                   </div>
                 </div>
               )}
+
+              {/* Avíos del producto */}
+              <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12, marginBottom: 12 }}>
+                <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8 }}>🧷 Avíos del producto</div>
+                {form.avios_ids.length === 0 && (
+                  <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 8 }}>No hay avíos vinculados aún.</div>
+                )}
+                {form.avios_ids.map((av, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, fontSize: 12, background: 'var(--bg2)', padding: '4px 8px', borderRadius: 'var(--radius)' }}>
+                    <span style={{ flex: 1, fontWeight: 600 }}>{av.nombre}</span>
+                    <button className="btn btn-danger btn-sm" onClick={() => setForm(f => ({ ...f, avios_ids: f.avios_ids.filter((_, j) => j !== i) }))}>✕</button>
+                  </div>
+                ))}
+                <AvioSearch
+                  onSelect={av => {
+                    if (form.avios_ids.find(a => a.avio_id === av.id)) return
+                    setForm(f => ({ ...f, avios_ids: [...f.avios_ids, { avio_id: av.id, nombre: av.nombre }] }))
+                  }}
+                />
+              </div>
 
               {/* Avíos con medidas */}
               <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12, marginBottom: 12 }}>
