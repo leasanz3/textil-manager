@@ -15,6 +15,14 @@ const ETAPAS = [
 ]
 
 const ETAPA_BY_ID   = Object.fromEntries(ETAPAS.map(e => [e.id, e]))
+
+const ORDEN_TALLES = ['XS','S','M','L','XL','XXL','2','4','6','8','10','12','14','16','40','42','44','46','48','50','52','54','56','58']
+
+function tallesOrdenados(tallesObj) {
+  return ORDEN_TALLES
+    .filter(t => (tallesObj || {})[t] > 0)
+    .map(t => [t, tallesObj[t]])
+}
 const FLUJO_DEFAULT = ['corte', 'taller', 'estampado', 'bordado', 'sublimado', 'planchado', 'ojal_boton', 'entrega']
 
 const TABLAS = {
@@ -355,7 +363,7 @@ function PedidoRow({ pedido, lotes, onOpen, onCambiarEtapa }) {
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
             {pedidoItems(pedido).map((it, idx) => {
-              const talles = Object.entries(it.talles || {}).filter(([, c]) => c > 0)
+              const talles = tallesOrdenados(it.talles)
               if (!talles.length) return null
               return (
                 <div key={idx} style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
