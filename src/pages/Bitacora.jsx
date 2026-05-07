@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
@@ -37,16 +37,6 @@ const S = {
   },
   wpb: { padding: '6px 8px' },
   nl: { listStyle: 'none', margin: 0, padding: 0 },
-  nlSec: {
-    padding: '5px 10px 3px',
-    background: '#f4f4ec',
-    borderBottom: '1px solid #d8d8c8',
-    fontWeight: 'bold',
-    fontSize: '10px',
-    color: '#555',
-    textTransform: 'uppercase',
-    letterSpacing: '0.04em',
-  },
   nlYr: {
     padding: '4px 10px',
     background: '#f0f0e8',
@@ -72,15 +62,6 @@ const S = {
     textDecoration: 'none',
     borderBottom: '1px dotted #d8d8d8',
     cursor: 'pointer',
-  },
-  nlLink: {
-    display: 'block',
-    padding: '4px 10px 4px 22px',
-    color: '#0033cc',
-    textDecoration: 'none',
-    borderBottom: '1px dotted #d8d8d8',
-    cursor: 'pointer',
-    fontSize: '11px',
   },
   ehead: {
     background: 'linear-gradient(to bottom, #fff5d4 0%, #f4d98a 100%)',
@@ -161,14 +142,6 @@ const S = {
     display: 'inline-block', padding: '0 5px', fontSize: '9px', fontWeight: 'bold',
     border: '1px solid #c8a040', background: '#fff3c8', color: '#5a3a00',
   },
-  tagBlock: {
-    display: 'inline-block', padding: '0 5px', fontSize: '9px', fontWeight: 'bold',
-    border: '1px solid #c06060', background: '#f4d4d4', color: '#8a0000',
-  },
-  tagOk: {
-    display: 'inline-block', padding: '0 5px', fontSize: '9px', fontWeight: 'bold',
-    border: '1px solid #6b9a3a', background: '#dff0c8', color: '#2a5a10',
-  },
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -188,8 +161,7 @@ function semanaDelAnio(fechaStr) {
   const [y, m, d] = fechaStr.split('-').map(Number)
   const dt = new Date(y, m - 1, d)
   const iniAnio = new Date(y, 0, 1)
-  const diffMs = dt - iniAnio
-  return Math.ceil((diffMs / 86400000 + iniAnio.getDay() + 1) / 7)
+  return Math.ceil(((dt - iniAnio) / 86400000 + iniAnio.getDay() + 1) / 7)
 }
 
 function diaDelAnio(fechaStr) {
@@ -201,20 +173,17 @@ function diaDelAnio(fechaStr) {
 
 function fechaAnterior(fechaStr) {
   const [y, m, d] = fechaStr.split('-').map(Number)
-  const dt = new Date(y, m - 1, d - 1)
-  return dt.toISOString().split('T')[0]
+  return new Date(y, m - 1, d - 1).toISOString().split('T')[0]
 }
 
 function fechaSiguiente(fechaStr) {
   const [y, m, d] = fechaStr.split('-').map(Number)
-  const dt = new Date(y, m - 1, d + 1)
-  return dt.toISOString().split('T')[0]
+  return new Date(y, m - 1, d + 1).toISOString().split('T')[0]
 }
 
 function mesNombre(num) {
-  const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
-                 'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
-  return meses[num - 1]
+  return ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+          'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][num - 1]
 }
 
 function formatFechaCorta(fechaStr) {
@@ -222,29 +191,24 @@ function formatFechaCorta(fechaStr) {
   return `${d}/${m}`
 }
 
+function formatHora(isoStr) {
+  if (!isoStr) return '—'
+  const dt = new Date(isoStr)
+  return `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`
+}
+
 function calcularRacha(entradas) {
   if (!entradas.length) return { actual: 0, mejor: 0 }
   const fechas = new Set(entradas.map(e => e.fecha))
-  let actual = 0, mejor = 0, corriente = 0
-  const today = hoy()
-  let cursor = today
-  while (fechas.has(cursor)) {
-    corriente++
-    cursor = fechaAnterior(cursor)
-  }
-  actual = corriente
+  let cursor = hoy(), corriente = 0
+  while (fechas.has(cursor)) { corriente++; cursor = fechaAnterior(cursor) }
   let maxRun = 0, run = 0
   const sorted = [...fechas].sort()
   for (let i = 0; i < sorted.length; i++) {
-    if (i === 0) { run = 1 } else {
-      const prev = sorted[i - 1]
-      const curr = sorted[i]
-      run = (fechaSiguiente(prev) === curr) ? run + 1 : 1
-    }
+    run = (i > 0 && fechaSiguiente(sorted[i - 1]) === sorted[i]) ? run + 1 : 1
     if (run > maxRun) maxRun = run
   }
-  mejor = maxRun
-  return { actual, mejor }
+  return { actual: corriente, mejor: maxRun }
 }
 
 function buildArbol(entradas) {
@@ -267,21 +231,20 @@ export default function Bitacora({ onMenuClick }) {
   const [fechaActiva, setFechaActiva] = useState(hoy())
   const [texto, setTexto] = useState('')
   const [pedidoId, setPedidoId] = useState('')
-  const [entradas, setEntradas] = useState([])
+  const [entradas, setEntradas] = useState([])      // todas — para árbol y racha
+  const [entradasDia, setEntradasDia] = useState([]) // del día activo — para historial
   const [pedidos, setPedidos] = useState([])
-  const [guardado, setGuardado] = useState(null) // null | 'saving' | 'ok'
+  const [guardado, setGuardado] = useState(null)    // null | 'saving' | 'HH:MM'
   const [mesesAbiertos, setMesesAbiertos] = useState({})
-  const autoSaveRef = useRef(null)
-  const userId = useRef(null)
+  const [userId, setUserId] = useState(null)
 
-  // inicializar user_id
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      userId.current = data.session?.user?.id ?? null
+      setUserId(data.session?.user?.id ?? null)
     })
   }, [])
 
-  // cargar todas las entradas (para árbol + racha)
+  // todas las entradas (árbol + racha + estadísticas)
   const cargarEntradas = useCallback(async () => {
     const { data } = await supabase
       .from('bitacora')
@@ -290,27 +253,24 @@ export default function Bitacora({ onMenuClick }) {
     if (data) setEntradas(data)
   }, [])
 
-  // cargar pedidos activos para el select
+  // entradas del día activo (historial)
+  const cargarEntradasDia = useCallback(async (fecha) => {
+    const { data } = await supabase
+      .from('bitacora')
+      .select('id, fecha, texto, pedido_id, created_at')
+      .eq('fecha', fecha)
+      .order('created_at', { ascending: true })
+    if (data) setEntradasDia(data)
+  }, [])
+
+  // pedidos — query simplificada
   const cargarPedidos = useCallback(async () => {
     const { data } = await supabase
       .from('pedidos')
-      .select('id, cliente, producto')
-      .not('etapa', 'in', '("entrega","cancelado")')
+      .select('id, cliente')
       .order('created_at', { ascending: false })
-      .limit(20)
+      .limit(30)
     if (data) setPedidos(data)
-  }, [])
-
-  // cargar texto de la fecha activa
-  const cargarEntrada = useCallback(async (fecha) => {
-    const { data } = await supabase
-      .from('bitacora')
-      .select('*')
-      .eq('fecha', fecha)
-      .maybeSingle()
-    setTexto(data?.texto ?? '')
-    setPedidoId(data?.pedido_id ?? '')
-    setGuardado(null)
   }, [])
 
   useEffect(() => {
@@ -319,8 +279,8 @@ export default function Bitacora({ onMenuClick }) {
   }, [cargarEntradas, cargarPedidos])
 
   useEffect(() => {
-    cargarEntrada(fechaActiva)
-  }, [fechaActiva, cargarEntrada])
+    cargarEntradasDia(fechaActiva)
+  }, [fechaActiva, cargarEntradasDia])
 
   // abrir el mes/año de la fecha activa por defecto
   useEffect(() => {
@@ -328,141 +288,51 @@ export default function Bitacora({ onMenuClick }) {
     setMesesAbiertos(prev => ({ ...prev, [`${y}-${m}`]: true }))
   }, [fechaActiva])
 
-  const guardar = useCallback(async (txt, pid) => {
-    if (!userId.current) return
+  const guardar = async () => {
+    if (!userId || !texto.trim()) return
     setGuardado('saving')
-    await supabase.from('bitacora').upsert(
-      { fecha: fechaActiva, texto: txt, pedido_id: pid || null, user_id: userId.current },
-      { onConflict: 'fecha,user_id' }
-    )
+    await supabase.from('bitacora').insert({
+      fecha: fechaActiva,
+      texto: texto.trim(),
+      pedido_id: pedidoId || null,
+      user_id: userId,
+    })
     const now = new Date()
     const hhmm = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`
     setGuardado(hhmm)
-    cargarEntradas()
-  }, [fechaActiva, cargarEntradas])
-
-  const handleTexto = (val) => {
-    setTexto(val)
-    setGuardado(null)
-    clearTimeout(autoSaveRef.current)
-    autoSaveRef.current = setTimeout(() => guardar(val, pedidoId), 1500)
+    setTexto('')
+    setPedidoId('')
+    await Promise.all([cargarEntradas(), cargarEntradasDia(fechaActiva)])
+    setTimeout(() => setGuardado(null), 3000)
   }
 
-  const handlePedido = (val) => {
-    setPedidoId(val)
-    clearTimeout(autoSaveRef.current)
-    autoSaveRef.current = setTimeout(() => guardar(texto, val), 1500)
-  }
+  const irA = (fecha) => setFechaActiva(fecha)
 
-  const irA = (fecha) => {
-    clearTimeout(autoSaveRef.current)
-    setFechaActiva(fecha)
-  }
-
-  // ── árbol lateral ──
+  // ── derivados ──
   const arbol = buildArbol(entradas)
   const anios = Object.keys(arbol).sort((a, b) => b - a)
-
-  // ── racha ──
   const { actual: rachaActual, mejor: rachaMejor } = calcularRacha(entradas)
-
-  // ── historial del mes activo ──
-  const [mesActivo, anioActivo] = [
-    parseInt(fechaActiva.split('-')[1]),
-    parseInt(fechaActiva.split('-')[0]),
-  ]
+  const mesActivo = parseInt(fechaActiva.split('-')[1])
+  const anioActivo = parseInt(fechaActiva.split('-')[0])
+  const mesAnteriorNum = mesActivo === 1 ? 12 : mesActivo - 1
+  const anioAnteriorNum = mesActivo === 1 ? anioActivo - 1 : anioActivo
   const entradasMes = entradas.filter(e => {
     const [y, m] = e.fecha.split('-').map(Number)
     return y === anioActivo && m === mesActivo
   })
-
-  // ── pedidos activos sidebar (5) ──
-  const pedidosActivos = pedidos.slice(0, 5)
-
-  // ── estadísticas ──
-  const mesAnteriorNum = mesActivo === 1 ? 12 : mesActivo - 1
-  const anioAnteriorNum = mesActivo === 1 ? anioActivo - 1 : anioActivo
   const entradasMesAnterior = entradas.filter(e => {
     const [y, m] = e.fecha.split('-').map(Number)
     return y === anioAnteriorNum && m === mesAnteriorNum
   })
   const totalAnio = entradas.filter(e => e.fecha.startsWith(String(anioActivo))).length
-
-  // ── pedido vinculado actual ──
-  const pedidoVinculado = pedidos.find(p => p.id === pedidoId)
-
-  const hoverLink = { ':hover': { background: '#ffffcc' } }
-  void hoverLink
+  const pedidosActivos = pedidos.slice(0, 5)
 
   return (
     <div style={S.page}>
-      {/* botón menú móvil */}
-      <div style={{ marginBottom: '8px', display: 'none' }} className="mobile-menu-btn">
-        <button style={S.btn} onClick={onMenuClick}>☰ Menú</button>
-      </div>
-
       <div style={S.layout}>
 
-        {/* ── COLUMNA IZQUIERDA ── */}
+        {/* ── COLUMNA IZQUIERDA — solo árbol ── */}
         <div>
-          {/* Módulos */}
-          <div style={S.wp}>
-            <div style={S.wph}>Módulos</div>
-            <div style={{ padding: 0 }}>
-              <ul style={S.nl}>
-                <li style={S.nlSec}>Operativo</li>
-                <li>
-                  <NavLink style={S.nlLink} onClick={() => navigate('/pedidos')}>
-                    📋 Pedidos
-                  </NavLink>
-                </li>
-                <li>
-                  <NavLink style={S.nlLink} onClick={() => navigate('/produccion')}>
-                    🏭 Producción
-                  </NavLink>
-                </li>
-                <li style={S.nlSec}>Catálogos</li>
-                <li>
-                  <NavLink style={S.nlLink} onClick={() => navigate('/telas/catalogo')}>
-                    🧵 Telas
-                  </NavLink>
-                </li>
-                <li>
-                  <NavLink style={S.nlLink} onClick={() => navigate('/avios/catalogo')}>
-                    🧷 Avíos
-                  </NavLink>
-                </li>
-                <li>
-                  <NavLink style={S.nlLink} onClick={() => navigate('/productos')}>
-                    👕 Productos
-                  </NavLink>
-                </li>
-                <li style={S.nlSec}>Admin</li>
-                <li>
-                  <NavLink style={S.nlLink} onClick={() => navigate('/proveedores')}>
-                    🏢 Proveedores
-                  </NavLink>
-                </li>
-                <li>
-                  <NavLink style={S.nlLink} onClick={() => navigate('/contactos')}>
-                    👥 Contactos
-                  </NavLink>
-                </li>
-                <li>
-                  <NavLink style={S.nlLink} onClick={() => navigate('/compras')}>
-                    🧾 Compras
-                  </NavLink>
-                </li>
-                <li>
-                  <NavLink style={S.nlLink} onClick={() => navigate('/iva')}>
-                    ⚙ IVA
-                  </NavLink>
-                </li>
-              </ul>
-            </div>
-          </div>
-
-          {/* Árbol de entradas */}
           <div style={S.wp}>
             <div style={S.wph}>📓 Bitácora</div>
             <div style={{ padding: 0 }}>
@@ -488,10 +358,12 @@ export default function Bitacora({ onMenuClick }) {
                         const dias = arbol[y][m]
                         return (
                           <React.Fragment key={key}>
-                            <li className="nl-mo">
+                            <li>
                               <span
                                 style={S.nlMoLink}
                                 onClick={() => setMesesAbiertos(prev => ({ ...prev, [key]: !open }))}
+                                onMouseEnter={e => { e.currentTarget.style.background = '#ffffcc' }}
+                                onMouseLeave={e => { e.currentTarget.style.background = '' }}
                               >
                                 {open ? '▼' : '▶'} {mesNombre(Number(m))} ({dias.length})
                               </span>
@@ -501,7 +373,7 @@ export default function Bitacora({ onMenuClick }) {
                               const esHoy = f === hoy()
                               const esActiva = f === fechaActiva
                               return (
-                                <li key={f} className="nl-dy">
+                                <li key={f}>
                                   <span
                                     style={{
                                       ...S.nlDyLink,
@@ -534,7 +406,7 @@ export default function Bitacora({ onMenuClick }) {
 
         {/* ── COLUMNA CENTRAL ── */}
         <div>
-          {/* Editor del día */}
+          {/* Editor */}
           <div style={S.wp}>
             <div style={S.ehead}>
               <div>
@@ -560,8 +432,8 @@ export default function Bitacora({ onMenuClick }) {
               <textarea
                 style={S.textarea}
                 value={texto}
-                onChange={e => handleTexto(e.target.value)}
-                placeholder="Escribí tu entrada del día…"
+                onChange={e => setTexto(e.target.value)}
+                placeholder="Escribí tu entrada…"
                 onFocus={e => { e.target.style.borderColor = '#0058b8'; e.target.style.background = '#fff' }}
                 onBlur={e => { e.target.style.borderColor = ''; e.target.style.background = '#fffff8' }}
               />
@@ -572,12 +444,12 @@ export default function Bitacora({ onMenuClick }) {
               <select
                 style={S.select}
                 value={pedidoId}
-                onChange={e => handlePedido(e.target.value)}
+                onChange={e => setPedidoId(e.target.value)}
               >
                 <option value="">— ninguno —</option>
                 {pedidos.map(p => (
                   <option key={p.id} value={p.id}>
-                    {p.cliente} — {p.producto}
+                    #{p.id.slice(0, 8)} — {p.cliente}
                   </option>
                 ))}
               </select>
@@ -593,57 +465,37 @@ export default function Bitacora({ onMenuClick }) {
               )}
               <HoverBtn
                 style={{ ...S.btn, ...S.btnp, marginLeft: guardado ? '0' : 'auto' }}
-                onClick={() => { clearTimeout(autoSaveRef.current); guardar(texto, pedidoId) }}
+                onClick={guardar}
               >
                 Guardar ▸
               </HoverBtn>
             </div>
           </div>
 
-          {/* Historial del mes */}
+          {/* Historial del día */}
           <div style={S.wp}>
             <div style={S.wph}>
-              <span>📅 {mesNombre(mesActivo)} {anioActivo} — {entradasMes.length} entradas</span>
-              <span style={{ fontSize: '10px', fontWeight: 'normal' }}>
-                [<HoverLink onClick={() => irA(`${anioActivo}-${String(mesActivo === 1 ? 12 : mesActivo - 1).padStart(2,'0')}-01`)}>
-                  ◀ {mesNombre(mesAnteriorNum)}
-                </HoverLink>]
-                &nbsp;
-                [<HoverLink>Ver todo</HoverLink>]
-              </span>
+              <span>📋 {formatFechaCorta(fechaActiva)} — {entradasDia.length} {entradasDia.length === 1 ? 'entrada' : 'entradas'}</span>
             </div>
             <div style={{ padding: 0 }}>
               <table style={S.ht}>
                 <thead>
                   <tr>
-                    <th style={{ ...S.th, width: '80px' }}>Fecha</th>
+                    <th style={{ ...S.th, width: '48px' }}>Hora</th>
                     <th style={S.th}>Extracto</th>
                     <th style={{ ...S.th, width: '90px' }}>Pedido</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {entradasMes.map((e, i) => {
-                    const esActiva = e.fecha === fechaActiva
-                    const esHoy = e.fecha === hoy()
+                  {entradasDia.map((e, i) => {
                     const pedVin = pedidos.find(p => p.id === e.pedido_id)
                     return (
-                      <HoverRow
-                        key={e.id}
-                        style={i % 2 === 0 ? { background: '#fafafa' } : {}}
-                        onClick={() => irA(e.fecha)}
-                      >
-                        <td style={{ ...S.td, fontWeight: esActiva ? 'bold' : 'normal', whiteSpace: 'nowrap', color: esHoy ? '#000' : '#555' }}>
-                          {formatFechaCorta(e.fecha)}{esHoy ? ' hoy' : ''}
+                      <HoverRow key={e.id} style={i % 2 === 0 ? { background: '#fafafa' } : {}}>
+                        <td style={{ ...S.td, whiteSpace: 'nowrap', color: '#555' }}>
+                          {formatHora(e.created_at)}
                         </td>
                         <td style={S.td}>
-                          <HoverLink onClick={() => irA(e.fecha)}>
-                            {(e.texto || '').slice(0, 80)}{(e.texto || '').length > 80 ? '…' : ''}
-                          </HoverLink>
-                          {(e.texto || '').length > 80 && (
-                            <span style={{ color: '#555', fontSize: '9px', display: 'block', marginTop: '1px' }}>
-                              {(e.texto || '').slice(80, 140)}{(e.texto || '').length > 140 ? '…' : ''}
-                            </span>
-                          )}
+                          {(e.texto || '').slice(0, 100)}{(e.texto || '').length > 100 ? '…' : ''}
                         </td>
                         <td style={S.td}>
                           {pedVin ? (
@@ -653,21 +505,19 @@ export default function Bitacora({ onMenuClick }) {
                       </HoverRow>
                     )
                   })}
-                  {entradasMes.length === 0 && (
+                  {entradasDia.length === 0 && (
                     <tr>
                       <td colSpan={3} style={{ ...S.td, color: '#888', textAlign: 'center', padding: '10px' }}>
-                        Sin entradas este mes
+                        Sin entradas este día
                       </td>
                     </tr>
                   )}
                 </tbody>
               </table>
               <div style={{ background: '#ece9d8', padding: '3px 8px', fontSize: '10px', borderTop: '1px solid #d8d8c8' }}>
-                Mostrando {mesNombre(mesActivo)} {anioActivo}
+                <HoverLink>Exportar día</HoverLink>
                 &nbsp;|&nbsp;
-                <HoverLink>Exportar mes</HoverLink>
-                &nbsp;|&nbsp;
-                <HoverLink>Ver todo el archivo</HoverLink>
+                <HoverLink>Ver archivo completo</HoverLink>
               </div>
             </div>
           </div>
@@ -681,23 +531,16 @@ export default function Bitacora({ onMenuClick }) {
             <div style={{ padding: 0 }}>
               {pedidosActivos.map(p => (
                 <div key={p.id} style={S.si}>
-                  <span style={{ color: '#888', fontSize: '9px', display: 'block' }}>
-                    {p.cliente}
-                  </span>
                   <HoverLink onClick={() => navigate('/pedidos')}>
-                    {p.producto}
+                    {p.cliente}
                   </HoverLink>
-                  <br />
-                  <span style={{ fontSize: '9px' }}>
-                    {p.etapa || 'En producción'}
-                  </span>
                 </div>
               ))}
               {pedidosActivos.length === 0 && (
                 <div style={{ ...S.si, color: '#888' }}>Sin pedidos activos</div>
               )}
               <div style={{ padding: '4px 8px', background: '#ece9d8', borderTop: '1px solid #d8d8c8', textAlign: 'right', fontSize: '10px' }}>
-                <HoverLink onClick={() => navigate('/pedidos')}>Ver todos los pedidos →</HoverLink>
+                <HoverLink onClick={() => navigate('/pedidos')}>Ver todos →</HoverLink>
               </div>
             </div>
           </div>
@@ -724,16 +567,7 @@ export default function Bitacora({ onMenuClick }) {
             <div style={{ ...S.wpb, fontSize: '10px', lineHeight: 2 }}>
               <b>{entradasMes.length}</b> entradas en {mesNombre(mesActivo)}<br />
               <b>{entradasMesAnterior.length}</b> entradas en {mesNombre(mesAnteriorNum)}<br />
-              <b>{totalAnio}</b> entradas en total ({anioActivo})<br />
-              <hr style={{ border: 'none', borderTop: '1px dotted #d8d8d8', margin: '4px 0' }} />
-              Último pedido mencionado:<br />
-              {pedidoVinculado ? (
-                <HoverLink onClick={() => navigate('/pedidos')}>
-                  {pedidoVinculado.cliente} — {formatFechaCorta(fechaActiva)}
-                </HoverLink>
-              ) : (
-                <span style={{ color: '#888' }}>—</span>
-              )}
+              <b>{totalAnio}</b> entradas en total ({anioActivo})
             </div>
           </div>
 
@@ -741,7 +575,7 @@ export default function Bitacora({ onMenuClick }) {
           <div style={S.wp}>
             <div style={S.wph}>🔧 Acciones</div>
             <div style={{ ...S.wpb, fontSize: '11px', lineHeight: 2.1 }}>
-              <HoverLink onClick={() => irA(hoy())}>📝 Nueva entrada hoy</HoverLink><br />
+              <HoverLink onClick={() => irA(hoy())}>📝 Ir a hoy</HoverLink><br />
               <HoverLink>🔍 Buscar en bitácora</HoverLink><br />
               <HoverLink>📤 Exportar mes a texto</HoverLink><br />
               <HoverLink>📋 Ver archivo completo</HoverLink>
@@ -754,15 +588,12 @@ export default function Bitacora({ onMenuClick }) {
   )
 }
 
-// ─── micro-componentes con hover ──────────────────────────────────────────────
-function HoverLink({ onClick, children, style }) {
+// ─── micro-componentes ────────────────────────────────────────────────────────
+function HoverLink({ onClick, children }) {
   const [hov, setHov] = useState(false)
   return (
     <span
-      style={{
-        color: '#0033cc', textDecoration: hov ? 'underline' : 'none',
-        cursor: 'pointer', ...(style || {}),
-      }}
+      style={{ color: '#0033cc', textDecoration: hov ? 'underline' : 'none', cursor: 'pointer' }}
       onClick={onClick}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
@@ -774,9 +605,16 @@ function HoverLink({ onClick, children, style }) {
 
 function HoverBtn({ style, onClick, children }) {
   const [hov, setHov] = useState(false)
+  const isBlue = style?.background?.includes('4a90d9')
   return (
     <button
-      style={{ ...style, ...(hov ? { background: '#ffffcc', color: '#000' } : {}), fontFamily: 'Tahoma, Verdana, sans-serif', fontSize: '11px' }}
+      style={{
+        ...style,
+        ...(hov && !isBlue ? { background: '#ffffcc', color: '#000' } : {}),
+        ...(hov && isBlue ? { background: 'linear-gradient(to bottom, #5aa0e9, #3070b8)' } : {}),
+        fontFamily: 'Tahoma, Verdana, sans-serif',
+        fontSize: '11px',
+      }}
       onClick={onClick}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
@@ -786,30 +624,15 @@ function HoverBtn({ style, onClick, children }) {
   )
 }
 
-function HoverRow({ style, onClick, children }) {
+function HoverRow({ style, children }) {
   const [hov, setHov] = useState(false)
   return (
     <tr
-      style={{ cursor: 'pointer', ...(hov ? { background: '#ffffcc' } : style) }}
-      onClick={onClick}
+      style={{ ...(hov ? { background: '#ffffcc' } : style) }}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
     >
       {children}
     </tr>
-  )
-}
-
-function NavLink({ style, onClick, children }) {
-  const [hov, setHov] = useState(false)
-  return (
-    <span
-      style={{ ...style, ...(hov ? { background: '#ffffcc', textDecoration: 'underline' } : {}) }}
-      onClick={onClick}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
-    >
-      {children}
-    </span>
   )
 }
