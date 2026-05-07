@@ -449,7 +449,7 @@ export default function Bitacora({ onMenuClick }) {
                 <option value="">— ninguno —</option>
                 {pedidos.map(p => (
                   <option key={p.id} value={p.id}>
-                    #{p.id.slice(0, 8)} — {p.cliente}
+                    #{String(p.id).slice(0, 8)} — {p.cliente}
                   </option>
                 ))}
               </select>
