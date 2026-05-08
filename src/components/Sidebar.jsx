@@ -3,9 +3,9 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 const NAV = [
+  { section: 'Diario' },
+  { path: '/diario',       icon: '📓', label: 'Diario' },
   { section: 'Producción' },
-  { path: '/bitacora',     icon: '📓', label: 'Bitácora' },
-  { path: '/tareas',       icon: '✅', label: 'Tareas' },
   { path: '/pedidos',      icon: '📋', label: 'Pedidos' },
   { path: '/productos',    icon: '📦', label: 'Productos' },
   { path: '/produccion',   icon: '🏭', label: 'Producción' },
