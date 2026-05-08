@@ -43,6 +43,20 @@ const totalTalles = (talles) => {
   return Object.values(talles).reduce((a, b) => a + (Number(b) || 0), 0)
 }
 
+function sortedTallesEntries(talles, tabla) {
+  const orden = TABLAS[tabla]?.talles || []
+  return Object.entries(talles || {})
+    .filter(([, c]) => Number(c) > 0)
+    .sort(([a], [b]) => {
+      const ia = orden.indexOf(a)
+      const ib = orden.indexOf(b)
+      if (ia === -1 && ib === -1) return 0
+      if (ia === -1) return 1
+      if (ib === -1) return -1
+      return ia - ib
+    })
+}
+
 function pedidoTotal(p) {
   if (p.items && p.items.length > 0) return p.items.reduce((a, it) => a + totalTalles(it.talles), 0)
   return totalTalles(p.talles)
@@ -197,7 +211,7 @@ function ItemPedido({ item, index, total, clienteId, onUpdate, onDelete, onOpenN
               <span style={{ color: 'var(--text2)', marginLeft: 4 }}>unidades</span>
             </span>
             <span style={{ color: 'var(--text2)' }}>
-              {Object.entries(item.talles).filter(([, c]) => c > 0).map(([t, c]) => `${t}:${c}`).join('  ')}
+              {sortedTallesEntries(item.talles, item.tabla).map(([t, c]) => `${t}:${c}`).join('  ')}
             </span>
           </div>
         )}
@@ -585,11 +599,11 @@ export default function Pedidos({ onMenuClick }) {
                             ? items.map((it, i) => (
                                 <div key={i}>
                                   {items.length > 1 && <span style={{ fontWeight: 600 }}>{it.producto}: </span>}
-                                  {Object.entries(it.talles).filter(([, c]) => c > 0).map(([t, c]) => `${t}:${c}`).join(' ')}
+                                  {sortedTallesEntries(it.talles, it.tabla).map(([t, c]) => `${t}:${c}`).join(' ')}
                                 </div>
                               ))
                             : p.talles
-                              ? Object.entries(p.talles).map(([t, c]) => `${t}:${c}`).join(' ')
+                              ? sortedTallesEntries(p.talles, inferirTabla(p.talles)).map(([t, c]) => `${t}:${c}`).join(' ')
                               : '—'
                           }
                         </td>
@@ -666,7 +680,7 @@ export default function Pedidos({ onMenuClick }) {
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1 }}>📦 Productos</div>
                   {items.map((it, i) => {
-                    const tallesActivos = Object.entries(it.talles || {}).filter(([, c]) => Number(c) > 0)
+                    const tallesActivos = sortedTallesEntries(it.talles, it.tabla || inferirTabla(it.talles))
                     return (
                       <div key={i} style={{ marginBottom: 14, padding: '10px 14px', background: 'var(--bg2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
                         <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>
