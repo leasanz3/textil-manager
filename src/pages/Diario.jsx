@@ -936,7 +936,7 @@ function TareaRow({ style, onCheck, onDelete, hecha, children }) {
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
     >
-      <input type="checkbox" checked={!!hecha} onChange={onCheck} style={{ marginTop: '2px', cursor: 'pointer' }} />
+      <input type="checkbox" checked={!!hecha} onChange={onCheck} style={{ width: 'auto', flexShrink: 0, marginTop: '2px', cursor: 'pointer' }} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px' }}>{children}</div>
       <button
         style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#a00', fontSize: '11px', padding: '0 2px', fontFamily: 'Tahoma, Verdana, sans-serif', lineHeight: 1 }}
