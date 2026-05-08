@@ -17,6 +17,7 @@ import Proveedores from './pages/Proveedores'
 import Compras from './pages/Compras'
 import IVA from './pages/IVA'
 import Bitacora from './pages/Bitacora'
+import Tareas from './pages/Tareas'
 
 export default function App() {
   const [session, setSession] = useState(undefined) // undefined = cargando
@@ -66,6 +67,7 @@ export default function App() {
             <Route path="/iva" element={<IVA onMenuClick={menu} />} />
             <Route path="/contactos" element={<Contactos onMenuClick={menu} />} />
             <Route path="/bitacora" element={<Bitacora onMenuClick={menu} />} />
+            <Route path="/tareas" element={<Tareas onMenuClick={menu} />} />
           </Routes>
         </div>
       </div>
