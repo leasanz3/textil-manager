@@ -217,6 +217,7 @@ export default function Pedidos({ onMenuClick }) {
   const [editing, setEditing]         = useState(null)
   const [saving, setSaving]           = useState(false)
   const [error, setError]             = useState('')
+  const [vistaFicha, setVistaFicha]   = useState(null)
 
   // ── Autocomplete cliente ───────────────────────────────────────────────────
   const [clienteQuery, setClienteQuery]               = useState('')
@@ -423,6 +424,10 @@ export default function Pedidos({ onMenuClick }) {
 
     setSaving(false)
     setModal(false)
+    if (vistaFicha?.id === editing) {
+      const { data } = await supabase.from('pedidos').select('*').eq('id', editing).single()
+      if (data) setVistaFicha(data)
+    }
     fetchPedidos()
   }
 
@@ -447,6 +452,7 @@ export default function Pedidos({ onMenuClick }) {
     const label = p.items?.length > 0 ? p.items[0].producto : p.producto
     if (!window.confirm(`¿Eliminar el pedido de "${label}" para ${p.cliente}?`)) return
     await supabase.from('pedidos').delete().eq('id', p.id)
+    if (vistaFicha?.id === p.id) setVistaFicha(null)
     fetchPedidos()
   }
 
@@ -551,7 +557,7 @@ export default function Pedidos({ onMenuClick }) {
                     const puedeAvanzar = FLUJO_ETAPAS.indexOf(p.etapa_actual) < FLUJO_ETAPAS.length - 1
                     const items = p.items && p.items.length > 0 ? p.items : null
                     return (
-                      <tr key={p.id} onClick={() => openEdit(p)} style={{ cursor: 'pointer' }}>
+                      <tr key={p.id} onClick={() => setVistaFicha(vistaFicha?.id === p.id ? null : p)} style={{ cursor: 'pointer' }}>
                         <td>
                           <strong>{items ? items[0].producto : p.producto}</strong>
                           {items && items.length > 1 && (
@@ -604,6 +610,92 @@ export default function Pedidos({ onMenuClick }) {
             </div>
           )}
         </div>
+
+        {/* ── FICHA DEL PEDIDO ── */}
+        {vistaFicha && (() => {
+          const ei = etapaInfo(vistaFicha.etapa_actual)
+          const items = vistaFicha.items && vistaFicha.items.length > 0
+            ? vistaFicha.items
+            : [{ producto: vistaFicha.producto, talles: vistaFicha.talles || {} }]
+          return (
+            <div className="table-wrap" style={{ marginTop: 16 }}>
+              <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <strong style={{ fontSize: 15 }}>
+                  📋 {items[0].producto}
+                  {items.length > 1 && <span style={{ fontSize: 12, color: 'var(--text2)', marginLeft: 8 }}>+{items.length - 1} ítem{items.length > 2 ? 's' : ''}</span>}
+                  <span style={{ fontSize: 12, color: 'var(--text2)', marginLeft: 10, fontWeight: 400 }}>— {vistaFicha.cliente}</span>
+                </strong>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn btn-secondary btn-sm" onClick={() => openEdit(vistaFicha)}>✏ Editar</button>
+                  <button className="btn btn-secondary btn-sm" onClick={() => setVistaFicha(null)}>✕</button>
+                </div>
+              </div>
+              <div style={{ padding: 16 }}>
+
+                {/* Metadatos */}
+                <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap', marginBottom: 20, fontSize: 13 }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3 }}>Cliente</div>
+                    <strong>{vistaFicha.cliente}</strong>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3 }}>Etapa</div>
+                    <span className={`badge ${ei.color}`}>{ei.label}</span>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3 }}>Total</div>
+                    <strong style={{ color: 'var(--accent)' }}>{pedidoTotal(vistaFicha)} u.</strong>
+                  </div>
+                  {vistaFicha.fecha_pedido && (
+                    <div>
+                      <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3 }}>Fecha pedido</div>
+                      <span>{fmtFecha(vistaFicha.fecha_pedido)}</span>
+                    </div>
+                  )}
+                  {vistaFicha.fecha && (
+                    <div>
+                      <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3 }}>Entrega</div>
+                      <span style={{ color: vistaFicha.fecha < new Date().toISOString().split('T')[0] && vistaFicha.etapa_actual !== 'entrega' ? 'var(--danger)' : undefined }}>
+                        {fmtFecha(vistaFicha.fecha)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Ítems con talles */}
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1 }}>📦 Productos</div>
+                  {items.map((it, i) => {
+                    const tallesActivos = Object.entries(it.talles || {}).filter(([, c]) => Number(c) > 0)
+                    return (
+                      <div key={i} style={{ marginBottom: 14, padding: '10px 14px', background: 'var(--bg2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>
+                          {it.producto || '—'}
+                          <span style={{ marginLeft: 10, fontSize: 12, color: 'var(--text2)', fontWeight: 400 }}>
+                            {totalTalles(it.talles)} u. en total
+                          </span>
+                        </div>
+                        {tallesActivos.length > 0 ? (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                            {tallesActivos.map(([t, c]) => (
+                              <div key={t} style={{ textAlign: 'center', minWidth: 48, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '4px 8px' }}>
+                                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1 }}>{t}</div>
+                                <div style={{ fontSize: 16, fontWeight: 700, marginTop: 2 }}>{c}</div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: 12, color: 'var(--text2)' }}>Sin talles cargados</span>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+
+              </div>
+            </div>
+          )
+        })()}
       </div>
 
       {/* ── Modal crear / editar pedido ── */}
