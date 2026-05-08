@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
@@ -211,6 +211,22 @@ function calcularRacha(entradas) {
   return { actual: corriente, mejor: maxRun }
 }
 
+function resumirPedido(p) {
+  if (!p) return ''
+  const partes = [p.cliente]
+  if (p.items && p.items.length > 0) {
+    const prods = p.items.map(it => {
+      const ts = Object.entries(it.talles || {}).filter(([, c]) => Number(c) > 0).map(([t, c]) => `${t}:${c}`).join(' ')
+      return ts ? `${it.producto} — ${ts}` : it.producto
+    }).join(', ')
+    partes.push(prods)
+  } else if (p.producto) {
+    const ts = Object.entries(p.talles || {}).filter(([, c]) => Number(c) > 0).map(([t, c]) => `${t}:${c}`).join(' ')
+    partes.push(ts ? `${p.producto} — ${ts}` : p.producto)
+  }
+  return partes.join(' — ')
+}
+
 function buildArbol(entradas) {
   const arbol = {}
   for (const e of entradas) {
@@ -228,6 +244,7 @@ function buildArbol(entradas) {
 // ─── componente principal ─────────────────────────────────────────────────────
 export default function Bitacora({ onMenuClick }) {
   const navigate = useNavigate()
+  const textareaRef = useRef(null)
   const [fechaActiva, setFechaActiva] = useState(hoy())
   const [texto, setTexto] = useState('')
   const [pedidoId, setPedidoId] = useState('')
@@ -263,13 +280,13 @@ export default function Bitacora({ onMenuClick }) {
     if (data) setEntradasDia(data)
   }, [])
 
-  // pedidos — query simplificada
   const cargarPedidos = useCallback(async () => {
     const { data } = await supabase
       .from('pedidos')
-      .select('id, cliente')
+      .select('id, cliente, producto, talles, items, etapa')
+      .not('etapa', 'in', '("entrega","cancelado")')
       .order('created_at', { ascending: false })
-      .limit(30)
+      .limit(10)
     if (data) setPedidos(data)
   }, [])
 
@@ -325,7 +342,7 @@ export default function Bitacora({ onMenuClick }) {
     return y === anioAnteriorNum && m === mesAnteriorNum
   })
   const totalAnio = entradas.filter(e => e.fecha.startsWith(String(anioActivo))).length
-  const pedidosActivos = pedidos.slice(0, 5)
+  const pedidosActivos = pedidos
 
   return (
     <div style={S.page}>
@@ -430,6 +447,7 @@ export default function Bitacora({ onMenuClick }) {
 
             <div style={{ padding: '8px' }}>
               <textarea
+                ref={textareaRef}
                 style={S.textarea}
                 value={texto}
                 onChange={e => setTexto(e.target.value)}
@@ -448,9 +466,7 @@ export default function Bitacora({ onMenuClick }) {
               >
                 <option value="">— ninguno —</option>
                 {pedidos.map(p => (
-                  <option key={p.id} value={p.id}>
-                    #{String(p.id).slice(0, 8)} — {p.cliente}
-                  </option>
+                  <option key={p.id} value={p.id}>{resumirPedido(p)}</option>
                 ))}
               </select>
               {guardado && guardado !== 'saving' && (
@@ -490,7 +506,7 @@ export default function Bitacora({ onMenuClick }) {
                   {entradasDia.map((e, i) => {
                     const pedVin = pedidos.find(p => p.id === e.pedido_id)
                     return (
-                      <HoverRow key={e.id} style={i % 2 === 0 ? { background: '#fafafa' } : {}}>
+                      <HoverRow key={e.id} style={i % 2 === 0 ? { background: '#fafafa' } : {}} onClick={() => { setTexto(e.texto || ''); setPedidoId(e.pedido_id ? String(e.pedido_id) : '') }}>
                         <td style={{ ...S.td, whiteSpace: 'nowrap', color: '#555' }}>
                           {formatHora(e.created_at)}
                         </td>
@@ -532,7 +548,7 @@ export default function Bitacora({ onMenuClick }) {
               {pedidosActivos.map(p => (
                 <div key={p.id} style={S.si}>
                   <HoverLink onClick={() => navigate('/pedidos')}>
-                    {p.cliente}
+                    {resumirPedido(p)}
                   </HoverLink>
                 </div>
               ))}
@@ -575,10 +591,32 @@ export default function Bitacora({ onMenuClick }) {
           <div style={S.wp}>
             <div style={S.wph}>🔧 Acciones</div>
             <div style={{ ...S.wpb, fontSize: '11px', lineHeight: 2.1 }}>
-              <HoverLink onClick={() => irA(hoy())}>📝 Ir a hoy</HoverLink><br />
-              <HoverLink>🔍 Buscar en bitácora</HoverLink><br />
-              <HoverLink>📤 Exportar mes a texto</HoverLink><br />
-              <HoverLink>📋 Ver archivo completo</HoverLink>
+              <HoverLink onClick={() => {
+                setTexto(''); setPedidoId(''); irA(hoy())
+                setTimeout(() => textareaRef.current?.focus(), 50)
+              }}>📝 Nueva entrada hoy</HoverLink><br />
+              <HoverLink onClick={() => {
+                const mesStr = String(mesActivo).padStart(2, '0')
+                const entradasExportar = [...entradas]
+                  .filter(e => e.fecha.startsWith(`${anioActivo}-${mesStr}`))
+                  .sort((a, b) => a.fecha.localeCompare(b.fecha))
+                const contenido = entradasExportar
+                  .map(e => `=== ${fechaLarga(e.fecha)} ===\n${e.texto}`)
+                  .join('\n\n')
+                const blob = new Blob([contenido], { type: 'text/plain;charset=utf-8' })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url; a.download = `bitacora-${anioActivo}-${mesStr}.txt`
+                a.click(); URL.revokeObjectURL(url)
+              }}>📤 Exportar mes a texto</HoverLink><br />
+              <HoverLink onClick={() => {
+                if (anios.length === 0) return
+                const primerAnio = anios[anios.length - 1]
+                const meses = Object.keys(arbol[primerAnio]).sort((a, b) => Number(a) - Number(b))
+                const primerMes = meses[0]
+                const dias = [...arbol[primerAnio][primerMes]].sort((a, b) => Number(a) - Number(b))
+                irA(`${primerAnio}-${String(primerMes).padStart(2,'0')}-${String(dias[0]).padStart(2,'0')}`)
+              }}>📋 Ver primer entrada</HoverLink>
             </div>
           </div>
         </div>
@@ -624,13 +662,14 @@ function HoverBtn({ style, onClick, children }) {
   )
 }
 
-function HoverRow({ style, children }) {
+function HoverRow({ style, onClick, children }) {
   const [hov, setHov] = useState(false)
   return (
     <tr
-      style={{ ...(hov ? { background: '#ffffcc' } : style) }}
+      style={{ ...(hov ? { background: '#ffffcc' } : style), ...(onClick ? { cursor: 'pointer' } : {}) }}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
+      onClick={onClick}
     >
       {children}
     </tr>
