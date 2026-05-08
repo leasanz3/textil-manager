@@ -283,8 +283,8 @@ export default function Bitacora({ onMenuClick }) {
   const cargarPedidos = useCallback(async () => {
     const { data } = await supabase
       .from('pedidos')
-      .select('id, cliente, producto, talles, items, etapa')
-      .not('etapa', 'in', '("entrega","cancelado")')
+      .select('id, cliente, producto, talles, items, etapa_actual')
+      .not('etapa_actual', 'in', '("entrega","cancelado")')
       .order('created_at', { ascending: false })
       .limit(10)
     if (data) setPedidos(data)
