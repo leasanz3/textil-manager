@@ -10,6 +10,8 @@ export default function StockTela({ onMenuClick }) {
   const [rendimientos, setRendimientos] = useState([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [sortCol, setSortCol] = useState('fecha')
+  const [sortDir, setSortDir] = useState('desc')
   const [modal, setModal] = useState(false)
   const [editingTela, setEditingTela] = useState(null)
   const [saving, setSaving] = useState(false)
@@ -29,7 +31,7 @@ export default function StockTela({ onMenuClick }) {
     setLoading(true)
     const [{ data: t }, { data: c }, { data: r }] = await Promise.all([
       supabase.from('telas').select('*').order('tipo'),
-      supabase.from('compras_tela').select('tela_id, cantidad, unidad, compra_id').order('fecha', { ascending: false }),
+      supabase.from('compras_tela').select('tela_id, cantidad, unidad, compra_id, fecha').order('fecha', { ascending: false }),
       supabase.from('rendimientos_tela').select('*').order('fecha', { ascending: false })
     ])
     setTelas(t || [])
@@ -78,8 +80,8 @@ export default function StockTela({ onMenuClick }) {
     if (!editingTela) return
     setSaving(true)
     await supabase.from('telas').update({
-      metros_iniciales: parseFloat(stockForm.metros_iniciales) || null,
-      stock_metros: parseFloat(stockForm.stock_metros) || null
+      metros_iniciales: stockForm.metros_iniciales !== '' ? parseFloat(stockForm.metros_iniciales) : null,
+      stock_metros: stockForm.stock_metros !== '' ? parseFloat(stockForm.stock_metros) : null
     }).eq('id', editingTela.id)
     setSaving(false)
     setModal(false)
@@ -122,12 +124,33 @@ export default function StockTela({ onMenuClick }) {
     fetchAll()
   }
 
-  const filtered = telasConMovimiento.filter(t =>
-    !search ||
-    t.tipo?.toLowerCase().includes(search.toLowerCase()) ||
-    t.color?.toLowerCase().includes(search.toLowerCase()) ||
-    t.proveedor?.toLowerCase().includes(search.toLowerCase())
-  )
+  function toggleSort(col) {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortCol(col); setSortDir(col === 'tela' ? 'asc' : 'desc') }
+  }
+
+  const filtered = telasConMovimiento
+    .filter(t =>
+      !search ||
+      t.tipo?.toLowerCase().includes(search.toLowerCase()) ||
+      t.color?.toLowerCase().includes(search.toLowerCase()) ||
+      t.proveedor?.toLowerCase().includes(search.toLowerCase())
+    )
+    .sort((a, b) => {
+      let cmp = 0
+      if (sortCol === 'tela') {
+        cmp = (a.tipo || '').localeCompare(b.tipo || '')
+      } else if (sortCol === 'fecha') {
+        const fa = ultimaCompra(a.id)?.fecha || ''
+        const fb = ultimaCompra(b.id)?.fecha || ''
+        cmp = fa.localeCompare(fb)
+      } else if (sortCol === 'stock') {
+        const sa = a.stock_metros ?? -Infinity
+        const sb = b.stock_metros ?? -Infinity
+        cmp = sa - sb
+      }
+      return sortDir === 'asc' ? cmp : -cmp
+    })
 
   return (
     <div>
@@ -174,13 +197,26 @@ export default function StockTela({ onMenuClick }) {
               <table>
                 <thead>
                   <tr>
-                    <th>Tela</th>
-                    <th>Última compra</th>
-                    <th>Metros iniciales</th>
-                    <th>Stock disponible</th>
-                    <th>Rend. vendedor</th>
-                    <th>Rend. real promedio</th>
-                    <th></th>
+                    {[
+                      { col: 'tela', label: 'Tela' },
+                      { col: null, label: 'Proveedor' },
+                      { col: 'fecha', label: 'Última compra' },
+                      { col: null, label: 'Metros iniciales' },
+                      { col: 'stock', label: 'Stock disponible' },
+                      { col: null, label: 'Rend./kg' },
+                      { col: null, label: 'Rend. real prom.' },
+                      { col: null, label: '' },
+                    ].map(({ col, label }, i) => col ? (
+                      <th key={i} style={{ cursor: 'pointer', userSelect: 'none' }}
+                        onClick={() => toggleSort(col)}
+                        onMouseEnter={e => { e.currentTarget.style.background = '#ffffcc' }}
+                        onMouseLeave={e => { e.currentTarget.style.background = '' }}
+                      >
+                        {label} {sortCol === col ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+                      </th>
+                    ) : (
+                      <th key={i}>{label}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
@@ -195,10 +231,14 @@ export default function StockTela({ onMenuClick }) {
                         <td>
                           <strong>{t.tipo}</strong>
                           {t.color && <div style={{ fontSize: 11, color: 'var(--text2)' }}>{t.color}</div>}
-                          {t.proveedor && <div style={{ fontSize: 11, color: 'var(--text2)' }}>{t.proveedor}</div>}
                         </td>
                         <td style={{ fontSize: 12 }}>
-                          {uc ? `${fmtNum(uc.cantidad)} ${uc.unidad}` : '—'}
+                          {t.proveedor || '—'}
+                        </td>
+                        <td style={{ fontSize: 12 }}>
+                          {uc
+                            ? <><strong>{fmtNum(uc.cantidad)} {uc.unidad}</strong>{uc.fecha && <div style={{ color: 'var(--text2)' }}>{fmtFecha(uc.fecha)}</div>}</>
+                            : '—'}
                         </td>
                         <td style={{ fontSize: 12 }}>
                           {t.metros_iniciales != null ? `${fmtNum(t.metros_iniciales)} m` : '—'}
