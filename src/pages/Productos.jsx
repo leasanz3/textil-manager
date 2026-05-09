@@ -238,6 +238,8 @@ export default function Productos({ onMenuClick }) {
   const [vistaFicha, setVistaFicha] = useState(null)
   const [editing, setEditing]       = useState(null)
   const [saving, setSaving]         = useState(false)
+  const [fichaTelasCosto, setFichaTelasCosto] = useState([])
+  const [fichaRefCot,     setFichaRefCot]     = useState({})
   const [filterProvTela, setFilterProvTela]   = useState('')
   const [filterProvTela2, setFilterProvTela2] = useState('')
   const [filterProvRib, setFilterProvRib]     = useState('')
@@ -268,6 +270,8 @@ export default function Productos({ onMenuClick }) {
     terminaciones_extra: [],
     planchado_pares: [],
     notas: '',
+    costo_confeccion: '', costo_corte: '', costo_elasticos: '',
+    costo_estampado_frente: '', costo_estampado_espalda: '', costo_otros: '',
   }
   const [form, setForm]             = useState(emptyForm)
   const [nuevaPieza, setNuevaPieza] = useState({ nombre: '', mult: '1', tela_rol: 'tela1' })
@@ -277,6 +281,57 @@ export default function Productos({ onMenuClick }) {
   const [nuevoPar, setNuevoPar]     = useState({ piezaA: '', piezaB: '' })
 
   useEffect(() => { fetchAll() }, [])
+
+  useEffect(() => {
+    if (vistaFicha) loadFichaCostos(vistaFicha)
+    else { setFichaTelasCosto([]); setFichaRefCot({}) }
+  }, [vistaFicha?.id])
+
+  async function loadFichaCostos(prod) {
+    const ids = [prod.tela1_id, prod.tela2_id, prod.rib_id]
+      .concat((prod.telas_extra || []).map(te => te.tela_id))
+      .filter(Boolean).map(Number)
+
+    const [{ data: telasD }, { data: rends }, { data: cots }] = await Promise.all([
+      ids.length > 0
+        ? supabase.from('telas').select('id, tipo, color, precio, rendimiento').in('id', ids)
+        : Promise.resolve({ data: [] }),
+      ids.length > 0
+        ? supabase.from('rendimientos_tela').select('tela_id, rendimiento').in('tela_id', ids)
+        : Promise.resolve({ data: [] }),
+      supabase.from('cotizaciones')
+        .select('costo_confeccion, costo_corte, costo_elasticos, costo_estampado_frente, costo_estampado_espalda, costo_otros')
+        .eq('producto_id', prod.id),
+    ])
+
+    // Rendimiento real promedio por tela
+    const rendRealMap = {}
+    ;(rends || []).forEach(r => {
+      if (r.rendimiento == null) return
+      if (!rendRealMap[r.tela_id]) rendRealMap[r.tela_id] = []
+      rendRealMap[r.tela_id].push(parseFloat(r.rendimiento))
+    })
+
+    setFichaTelasCosto((telasD || []).map(t => ({
+      ...t,
+      costo:        (parseFloat(t.precio) || 0) * (parseFloat(t.rendimiento) || 0),
+      rendReal:     rendRealMap[t.id]?.length > 0
+                      ? rendRealMap[t.id].reduce((a, b) => a + b, 0) / rendRealMap[t.id].length
+                      : null,
+      rendRealCount: rendRealMap[t.id]?.length || 0,
+    })))
+
+    // Promedios de cotizaciones por campo
+    const REF_KEYS = ['costo_confeccion','costo_corte','costo_elasticos','costo_estampado_frente','costo_estampado_espalda','costo_otros']
+    const ref = {}
+    REF_KEYS.forEach(k => {
+      const vals = (cots || []).map(c => c[k]).filter(v => v != null && parseFloat(v) > 0)
+      ref[k] = vals.length > 0
+        ? { promedio: vals.reduce((a, b) => a + parseFloat(b), 0) / vals.length, count: vals.length }
+        : null
+    })
+    setFichaRefCot(ref)
+  }
 
   async function fetchAll() {
     setLoading(true)
@@ -356,6 +411,12 @@ export default function Productos({ onMenuClick }) {
       terminaciones_extra: p.terminaciones_extra || [],
       planchado_pares:    p.planchado_pares    || [],
       notas:              p.notas              || '',
+      costo_confeccion:        p.costo_confeccion        != null ? String(p.costo_confeccion)        : '',
+      costo_corte:             p.costo_corte             != null ? String(p.costo_corte)             : '',
+      costo_elasticos:         p.costo_elasticos         != null ? String(p.costo_elasticos)         : '',
+      costo_estampado_frente:  p.costo_estampado_frente  != null ? String(p.costo_estampado_frente)  : '',
+      costo_estampado_espalda: p.costo_estampado_espalda != null ? String(p.costo_estampado_espalda) : '',
+      costo_otros:             p.costo_otros             != null ? String(p.costo_otros)             : '',
     })
     setModal(true)
   }
@@ -584,6 +645,12 @@ export default function Productos({ onMenuClick }) {
       terminaciones_extra: form.terminaciones_extra,
       planchado_pares:     form.planchado_pares,
       notas:               form.notas || null,
+      costo_confeccion:         parseFloat(form.costo_confeccion)        || 0,
+      costo_corte:              parseFloat(form.costo_corte)             || 0,
+      costo_elasticos:          parseFloat(form.costo_elasticos)         || 0,
+      costo_estampado_frente:   parseFloat(form.costo_estampado_frente)  || 0,
+      costo_estampado_espalda:  parseFloat(form.costo_estampado_espalda) || 0,
+      costo_otros:              parseFloat(form.costo_otros)             || 0,
     }
     if (editing) {
       await supabase.from('productos').update(datos).eq('id', editing)
@@ -837,6 +904,97 @@ export default function Productos({ onMenuClick }) {
                     ))}
                   </div>
                 ) : null
+              })()}
+
+              {/* 💰 Costos */}
+              {(() => {
+                const fmtC = n => n != null ? '$' + Number(n).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '$0,00'
+                const EDIT_KEYS = [
+                  { key: 'costo_confeccion',        label: 'Confección',        sec: 'conf' },
+                  { key: 'costo_corte',             label: 'Corte',             sec: 'conf' },
+                  { key: 'costo_elasticos',         label: 'Elásticos y avíos', sec: 'elas' },
+                  { key: 'costo_estampado_frente',  label: 'Estampado frente',  sec: 'est'  },
+                  { key: 'costo_estampado_espalda', label: 'Estampado espalda', sec: 'est'  },
+                  { key: 'costo_otros',             label: 'Otros costos',      sec: 'otros'},
+                ]
+                const subtotalTelas = fichaTelasCosto.reduce((a, t) => a + (t.costo || 0), 0)
+                const costoTotal    = subtotalTelas + EDIT_KEYS.reduce((a, c) => a + (parseFloat(vistaFicha[c.key]) || 0), 0)
+                const TH  = { padding: '4px 8px', color: '#1a3a6b', background: 'linear-gradient(to bottom, #e8eef7, #c8d4e8)', fontSize: 11, border: '1px solid #c8d4e8', fontWeight: 700 }
+                const TD  = { padding: '5px 8px', border: '1px solid #eee', fontSize: 12, verticalAlign: 'middle' }
+                const SEC = { padding: '3px 8px', background: '#f0f4f8', fontWeight: 700, color: '#1a3a6b', fontSize: 11, border: '1px solid #e0e8f0' }
+                const SECCIONES = [
+                  { label: '✂ Confección y corte', keys: ['costo_confeccion','costo_corte'] },
+                  { label: '🧵 Elásticos y avíos',  keys: ['costo_elasticos'] },
+                  { label: '🖨 Estampado',           keys: ['costo_estampado_frente','costo_estampado_espalda'] },
+                  { label: 'Otros',                  keys: ['costo_otros'] },
+                ]
+                return (
+                  <div style={{ marginBottom: 20 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1 }}>💰 Costos</div>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: 'Tahoma, Arial, sans-serif' }}>
+                      <thead>
+                        <tr>
+                          <th style={{ ...TH, textAlign: 'left', width: '34%' }}>Ítem</th>
+                          <th style={{ ...TH, textAlign: 'right', width: '22%' }}>Valor</th>
+                          <th style={{ ...TH, textAlign: 'left',  width: '28%' }}>Ref. promedio</th>
+                          <th style={{ ...TH, textAlign: 'right', width: '16%' }}>Calculado</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {/* — Telas — */}
+                        <tr><td colSpan={4} style={SEC}>🧶 Telas</td></tr>
+                        {fichaTelasCosto.length === 0 ? (
+                          <tr><td colSpan={4} style={{ ...TD, color: '#888', fontStyle: 'italic' }}>Sin telas con datos de precio</td></tr>
+                        ) : fichaTelasCosto.map(t => (
+                          <tr key={t.id} onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'} onMouseLeave={e => e.currentTarget.style.background = ''}>
+                            <td style={TD}>{t.tipo}{t.color ? ` · ${t.color}` : ''}</td>
+                            <td style={{ ...TD, textAlign: 'right', color: '#555', fontSize: 11 }}>
+                              {t.rendimiento != null
+                                ? <>${Number(t.precio||0).toFixed(2)} × {Number(t.rendimiento).toFixed(2)} m/kg</>
+                                : <span style={{ color: '#c87000' }}>⚠ Sin rendimiento — completar en catálogo</span>}
+                            </td>
+                            <td style={{ ...TD, color: '#888', fontStyle: 'italic' }}>
+                              {t.rendReal != null ? `real: ${Number(t.rendReal).toFixed(2)} m/kg (${t.rendRealCount} reg.)` : '—'}
+                            </td>
+                            <td style={{ ...TD, textAlign: 'right', fontWeight: 700 }}>
+                              {t.rendimiento != null ? fmtC(t.costo) : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                        <tr style={{ background: '#f4f8f0' }}>
+                          <td colSpan={3} style={{ ...TD, fontWeight: 700 }}>Subtotal telas</td>
+                          <td style={{ ...TD, textAlign: 'right', fontWeight: 700 }}>{fmtC(subtotalTelas)}</td>
+                        </tr>
+
+                        {/* — Secciones editables — */}
+                        {SECCIONES.map(sec => {
+                          const keyMap = Object.fromEntries(EDIT_KEYS.map(e => [e.key, e.label]))
+                          return (
+                            <React.Fragment key={sec.label}>
+                              <tr><td colSpan={4} style={SEC}>{sec.label}</td></tr>
+                              {sec.keys.map(k => (
+                                <tr key={k} onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'} onMouseLeave={e => e.currentTarget.style.background = ''}>
+                                  <td style={TD}>{keyMap[k]}</td>
+                                  <td style={{ ...TD, textAlign: 'right', fontWeight: 700 }}>{fmtC(vistaFicha[k] || 0)}</td>
+                                  <td style={{ ...TD, color: '#888', fontStyle: 'italic' }}>
+                                    {fichaRefCot[k] ? `prom. ${fmtC(fichaRefCot[k].promedio)} (${fichaRefCot[k].count} cotiz.)` : '—'}
+                                  </td>
+                                  <td style={TD}></td>
+                                </tr>
+                              ))}
+                            </React.Fragment>
+                          )
+                        })}
+
+                        {/* — Total — */}
+                        <tr style={{ background: 'linear-gradient(to bottom, #e8eef7, #c8d4e8)' }}>
+                          <td colSpan={3} style={{ padding: 8, fontWeight: 700, fontSize: 13, color: '#1a3a6b', border: '1px solid #6b83a8' }}>COSTO TOTAL</td>
+                          <td style={{ padding: 8, textAlign: 'right', fontWeight: 700, fontSize: 15, color: '#1a3a6b', border: '1px solid #6b83a8' }}>{fmtC(costoTotal)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                )
               })()}
 
               {vistaFicha.notas && (
@@ -1138,6 +1296,31 @@ export default function Productos({ onMenuClick }) {
                 <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                   <input value={nuevaTerm} onChange={e => setNuevaTerm(e.target.value)} placeholder="ej: Planchado cartera con entretela" style={{ flex: 1 }} onKeyDown={e => e.key === 'Enter' && agregarTerminacion()} />
                   <button className="btn btn-secondary btn-sm" onClick={agregarTerminacion}>+ Agregar</button>
+                </div>
+              </div>
+
+              {/* Costos */}
+              <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12, marginBottom: 12 }}>
+                <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 10 }}>💰 Costos por unidad</div>
+                <div className="form-grid">
+                  {[
+                    ['costo_confeccion',        'Confección'],
+                    ['costo_corte',             'Corte'],
+                    ['costo_elasticos',         'Elásticos y avíos'],
+                    ['costo_estampado_frente',  'Estampado frente'],
+                    ['costo_estampado_espalda', 'Estampado espalda'],
+                    ['costo_otros',             'Otros'],
+                  ].map(([key, label]) => (
+                    <div key={key} className="form-group">
+                      <label>{label}</label>
+                      <input
+                        type="number"
+                        value={form[key]}
+                        onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+                        placeholder="0"
+                      />
+                    </div>
+                  ))}
                 </div>
               </div>
 
