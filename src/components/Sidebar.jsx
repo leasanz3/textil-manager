@@ -6,6 +6,7 @@ const NAV = [
   { section: 'Diario' },
   { path: '/diario',       icon: '📓', label: 'Diario' },
   { section: 'Producción' },
+  { path: '/',             icon: '🏠', label: 'Home' },
   { path: '/pedidos',      icon: '📋', label: 'Pedidos' },
   { path: '/productos',    icon: '📦', label: 'Productos' },
   { path: '/produccion',   icon: '🏭', label: 'Producción' },
