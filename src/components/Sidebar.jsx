@@ -22,6 +22,7 @@ const NAV = [
   { path: '/proveedores', icon: '🏢', label: 'Proveedores' },
   { path: '/compras',     icon: '🧾', label: 'Facturas' },
   { section: 'Finanzas' },
+  { path: '/cotizacion',  icon: '💰', label: 'Cotización' },
   { path: '/iva',         icon: '📄', label: 'IVA' },
   { section: 'Directorio' },
   { path: '/contactos',   icon: '👥', label: 'Contactos' },
