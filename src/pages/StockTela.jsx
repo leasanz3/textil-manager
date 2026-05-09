@@ -106,14 +106,6 @@ export default function StockTela({ onMenuClick }) {
       notas: rendForm.notas || null
     })
 
-    // Si tiene rendimiento, actualizar el promedio en el catálogo
-    if (rendimiento) {
-      const rends = rendimientos.filter(r => r.tela_id === editingTela.id && r.rendimiento)
-      const todos = [...rends.map(r => parseFloat(r.rendimiento)), rendimiento]
-      const promedio = todos.reduce((a, r) => a + r, 0) / todos.length
-      await supabase.from('telas').update({ rendimiento: promedio }).eq('id', editingTela.id)
-    }
-
     // Actualizar metros iniciales si no tenía
     if (!editingTela.metros_iniciales && metros) {
       await supabase.from('telas').update({ metros_iniciales: metros }).eq('id', editingTela.id)
@@ -127,6 +119,7 @@ export default function StockTela({ onMenuClick }) {
   function toggleSort(col) {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortCol(col); setSortDir(col === 'tela' ? 'asc' : 'desc') }
+    // tela → asc (A→Z); fecha/stock/rendimiento → desc (mayor primero)
   }
 
   const filtered = telasConMovimiento
@@ -148,6 +141,10 @@ export default function StockTela({ onMenuClick }) {
         const sa = a.stock_metros ?? -Infinity
         const sb = b.stock_metros ?? -Infinity
         cmp = sa - sb
+      } else if (sortCol === 'rendimiento') {
+        const ra = a.rendimiento ?? -Infinity
+        const rb = b.rendimiento ?? -Infinity
+        cmp = ra - rb
       }
       return sortDir === 'asc' ? cmp : -cmp
     })
@@ -203,8 +200,8 @@ export default function StockTela({ onMenuClick }) {
                       { col: 'fecha', label: 'Última compra' },
                       { col: null, label: 'Metros iniciales' },
                       { col: 'stock', label: 'Stock disponible' },
-                      { col: null, label: 'Rend./kg' },
-                      { col: null, label: 'Rend. real prom.' },
+                      { col: 'rendimiento', label: 'Rend. catálogo' },
+                      { col: null, label: 'Rend. prom. real' },
                       { col: null, label: '' },
                     ].map(({ col, label }, i) => col ? (
                       <th key={i} style={{ cursor: 'pointer', userSelect: 'none' }}
@@ -351,7 +348,7 @@ export default function StockTela({ onMenuClick }) {
                 <div>
                   <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 12 }}>
                     Registrá cuántos metros obtuviste de esta tela para calcular el rendimiento real.
-                    {editingTela.rendimiento && <span> Rendimiento del vendedor: <strong>{fmtNum(editingTela.rendimiento)} m/kg</strong></span>}
+                    {editingTela.rendimiento != null && <span> Rend. catálogo: <strong>{fmtNum(editingTela.rendimiento)} m/kg</strong></span>}
                   </div>
                   <div className="form-grid">
                     <div className="form-group">
