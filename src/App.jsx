@@ -20,6 +20,7 @@ import Bitacora from './pages/Bitacora'
 import Tareas from './pages/Tareas'
 import Diario from './pages/Diario'
 import Home from './pages/Home'
+import Cotizacion from './pages/Cotizacion'
 
 export default function App() {
   const [session, setSession] = useState(undefined) // undefined = cargando
@@ -66,6 +67,7 @@ export default function App() {
             <Route path="/avios" element={<Navigate to="/avios/catalogo" replace />} />
             <Route path="/proveedores" element={<Proveedores onMenuClick={menu} />} />
             <Route path="/compras" element={<Compras onMenuClick={menu} />} />
+            <Route path="/cotizacion" element={<Cotizacion onMenuClick={menu} />} />
             <Route path="/iva" element={<IVA onMenuClick={menu} />} />
             <Route path="/contactos" element={<Contactos onMenuClick={menu} />} />
             <Route path="/diario" element={<Diario onMenuClick={menu} />} />
