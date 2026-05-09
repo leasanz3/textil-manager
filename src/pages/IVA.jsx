@@ -19,12 +19,13 @@ export default function IVA({ onMenuClick }) {
   const [mes, setMes] = useState('')
   const [desde, setDesde] = useState('')
   const [hasta, setHasta] = useState('')
+  const [sortAsc, setSortAsc] = useState(false)
 
   useEffect(() => { fetchCompras() }, [])
 
   async function fetchCompras() {
     setLoading(true)
-    const { data } = await supabase.from('compras').select('*').order('fecha', { ascending: true })
+    const { data } = await supabase.from('compras').select('*').order('fecha', { ascending: false })
     setCompras(data || [])
     setLoading(false)
   }
@@ -47,12 +48,17 @@ export default function IVA({ onMenuClick }) {
     else setHasta(val)
   }
 
-  const filtradas = compras.filter(x => {
-    if (!x.fecha) return false
-    if (desde && x.fecha < desde) return false
-    if (hasta && x.fecha > hasta) return false
-    return true
-  })
+  const filtradas = compras
+    .filter(x => {
+      if (!x.fecha) return false
+      if (desde && x.fecha < desde) return false
+      if (hasta && x.fecha > hasta) return false
+      return true
+    })
+    .sort((a, b) => sortAsc
+      ? (a.fecha || '').localeCompare(b.fecha || '')
+      : (b.fecha || '').localeCompare(a.fecha || '')
+    )
 
   const conIVA = filtradas.filter(x => x.acredita_iva !== false)
   const sinIVA = filtradas.filter(x => x.acredita_iva === false)
@@ -138,7 +144,13 @@ export default function IVA({ onMenuClick }) {
               <table>
                 <thead>
                   <tr>
-                    <th>#</th><th>Proveedor</th><th>Fecha</th><th>Factura</th>
+                    <th>#</th><th>Proveedor</th>
+                    <th style={{ cursor: 'pointer', userSelect: 'none' }}
+                      onClick={() => setSortAsc(v => !v)}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#ffffcc' }}
+                      onMouseLeave={e => { e.currentTarget.style.background = '' }}
+                    >Fecha {sortAsc ? '▲' : '▼'}</th>
+                    <th>Factura</th>
                     <th>Base fiscal $UY</th><th>Subtotal</th><th>IVA 22%</th><th>Moneda</th>
                   </tr>
                 </thead>
@@ -185,7 +197,15 @@ export default function IVA({ onMenuClick }) {
             </div>
             <table>
               <thead>
-                <tr><th>#</th><th>Proveedor</th><th>Fecha</th><th>Factura</th><th>Total</th></tr>
+                <tr>
+                  <th>#</th><th>Proveedor</th>
+                  <th style={{ cursor: 'pointer', userSelect: 'none' }}
+                    onClick={() => setSortAsc(v => !v)}
+                    onMouseEnter={e => { e.currentTarget.style.background = '#ffffcc' }}
+                    onMouseLeave={e => { e.currentTarget.style.background = '' }}
+                  >Fecha {sortAsc ? '▲' : '▼'}</th>
+                  <th>Factura</th><th>Total</th>
+                </tr>
               </thead>
               <tbody>
                 {sinIVA.map(x => (
