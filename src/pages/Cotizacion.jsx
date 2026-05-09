@@ -88,7 +88,6 @@ export default function Cotizacion({ onMenuClick }) {
     if (margenPct !== '' && costoTotal > 0) {
       setPrecioVenta((costoTotal * (1 + parseFloat(margenPct) / 100)).toFixed(2))
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [costoTotal])
 
   async function fetchInit() {
