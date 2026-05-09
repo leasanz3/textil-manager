@@ -264,10 +264,13 @@ function formatFechaCorta(f) {
   return `${d}/${m}`
 }
 
-function formatHora(isoStr) {
+function horaUY(isoStr) {
   if (!isoStr) return '—'
-  const dt = new Date(isoStr)
-  return `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`
+  return new Date(isoStr).toLocaleTimeString('es-UY', {
+    timeZone: 'America/Montevideo',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 
 function calcularRacha(entradas) {
@@ -410,8 +413,7 @@ export default function Diario({ onMenuClick }) {
       pedido_id: pedidoBitacoraId || null,
       user_id: userId,
     })
-    const now = new Date()
-    setGuardado(`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`)
+    setGuardado(horaUY(new Date().toISOString()))
     setTexto(''); setPedidoBitacoraId('')
     await Promise.all([cargarEntradas(), cargarEntradasDia(fechaActiva)])
     setTimeout(() => setGuardado(null), 3000)
@@ -434,6 +436,11 @@ export default function Diario({ onMenuClick }) {
 
   const marcarTareaHecha = async (t) => {
     await supabase.from('tareas').update({ hecha: true, fecha_hecha: new Date().toISOString() }).eq('id', t.id)
+    await cargarTareas()
+  }
+
+  const desmarcarTareaHecha = async (t) => {
+    await supabase.from('tareas').update({ hecha: false, fecha_hecha: null }).eq('id', t.id)
     await cargarTareas()
   }
 
@@ -722,7 +729,7 @@ export default function Diario({ onMenuClick }) {
                       key={t.id}
                       hecha
                       style={{ background: i % 2 === 0 ? '#fafafa' : '#fff' }}
-                      onCheck={() => {}}
+                      onCheck={() => desmarcarTareaHecha(t)}
                       onDelete={() => eliminarTarea(t)}
                     >
                       <span style={{ flex: 1, textDecoration: 'line-through', color: '#888' }}>{t.texto}</span>
@@ -756,7 +763,7 @@ export default function Diario({ onMenuClick }) {
                         style={{ background: i % 2 === 0 ? '#fafafa' : '#fff' }}
                         onClick={() => { setTexto(e.texto || ''); setPedidoBitacoraId(e.pedido_id ? String(e.pedido_id) : '') }}
                       >
-                        <td style={{ ...S.td, whiteSpace: 'nowrap', color: '#555' }}>{formatHora(e.created_at)}</td>
+                        <td style={{ ...S.td, whiteSpace: 'nowrap', color: '#555' }}>{horaUY(e.created_at)}</td>
                         <td style={S.td}>{(e.texto || '').slice(0, 100)}{(e.texto || '').length > 100 ? '…' : ''}</td>
                         <td style={S.td}>{pedVin ? <span style={S.tagWait}>{pedVin.cliente}</span> : '—'}</td>
                       </HoverRow>
@@ -774,7 +781,7 @@ export default function Diario({ onMenuClick }) {
               <div style={{ background: '#ece9d8', padding: '3px 8px', fontSize: '10px', borderTop: '1px solid #d8d8c8' }}>
                 <HoverLink onClick={() => {
                   const sorted = [...entradasDia].sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''))
-                  const contenido = `=== ${fechaLarga(fechaActiva)} ===\n\n` + sorted.map(e => `${formatHora(e.created_at)} — ${e.texto}`).join('\n')
+                  const contenido = `=== ${fechaLarga(fechaActiva)} ===\n\n` + sorted.map(e => `${horaUY(e.created_at)} — ${e.texto}`).join('\n')
                   const blob = new Blob([contenido], { type: 'text/plain;charset=utf-8' })
                   const url = URL.createObjectURL(blob)
                   const a = document.createElement('a')
