@@ -19,6 +19,7 @@ import IVA from './pages/IVA'
 import Bitacora from './pages/Bitacora'
 import Tareas from './pages/Tareas'
 import Diario from './pages/Diario'
+import Home from './pages/Home'
 
 export default function App() {
   const [session, setSession] = useState(undefined) // undefined = cargando
@@ -51,7 +52,7 @@ export default function App() {
         <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
         <div className="main">
           <Routes>
-            <Route path="/" element={<Navigate to="/pedidos" replace />} />
+            <Route path="/" element={<Home onMenuClick={menu} />} />
             <Route path="/produccion" element={<Produccion onMenuClick={menu} />} />
             <Route path="/pedidos" element={<Pedidos onMenuClick={menu} />} />
             <Route path="/productos" element={<Productos onMenuClick={menu} />} />
