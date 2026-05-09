@@ -18,6 +18,7 @@ export default function Compras({ onMenuClick }) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [showTcHistorial, setShowTcHistorial] = useState(false)
+  const [sortAsc, setSortAsc] = useState(false)
 
   const [form, setForm] = useState({
     proveedor_id: '', factura: '', fecha: new Date().toISOString().split('T')[0],
@@ -155,12 +156,17 @@ export default function Compras({ onMenuClick }) {
     fetchAll()
   }
 
-  const filtered = compras.filter(c => {
-    const q = search.toLowerCase()
-    const ms = !q || c.proveedor?.toLowerCase().includes(q) || (c.factura || '').includes(q)
-    const mp = !filterProv || String(c.proveedor_id) === filterProv
-    return ms && mp
-  })
+  const filtered = compras
+    .filter(c => {
+      const q = search.toLowerCase()
+      const ms = !q || c.proveedor?.toLowerCase().includes(q) || (c.factura || '').includes(q)
+      const mp = !filterProv || String(c.proveedor_id) === filterProv
+      return ms && mp
+    })
+    .sort((a, b) => sortAsc
+      ? (a.fecha || '').localeCompare(b.fecha || '')
+      : (b.fecha || '').localeCompare(a.fecha || '')
+    )
 
   const totalIVA = filtered.filter(x => x.acredita_iva !== false).reduce((a, x) => a + (x.iva || 0), 0)
   const totalCompras = filtered.reduce((a, x) => a + (x.total_final || x.total_uyu || 0), 0)
@@ -211,7 +217,13 @@ export default function Compras({ onMenuClick }) {
               <table>
                 <thead>
                   <tr>
-                    <th>#</th><th>Proveedor</th><th>Fecha</th><th>Factura</th>
+                    <th>#</th><th>Proveedor</th>
+                    <th style={{ cursor: 'pointer', userSelect: 'none' }}
+                      onClick={() => setSortAsc(v => !v)}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#ffffcc' }}
+                      onMouseLeave={e => { e.currentTarget.style.background = '' }}
+                    >Fecha {sortAsc ? '▲' : '▼'}</th>
+                    <th>Factura</th>
                     <th>Total USD</th><th>$ Fiscal</th><th>IVA $UY</th>
                     <th>Pagado $UY</th><th>TC pago</th><th>Estado</th><th>IVA</th><th></th>
                   </tr>
