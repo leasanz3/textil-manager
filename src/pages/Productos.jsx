@@ -275,8 +275,8 @@ export default function Productos({ onMenuClick }) {
     planchado_pares: [],
     notas: '',
     tipo_cambio: '',
-    costo_confeccion: '', costo_corte: '', costo_elasticos: '',
-    costo_estampado_frente: '', costo_estampado_espalda: '', costo_otros: '',
+    estampados: [],
+    costo_confeccion: '', costo_corte: '', costo_elasticos: '', costo_otros: '',
   }
   const [form, setForm]             = useState(emptyForm)
   const [nuevaPieza, setNuevaPieza] = useState({ nombre: '', mult: '1', tela_rol: 'tela1' })
@@ -284,6 +284,7 @@ export default function Productos({ onMenuClick }) {
   const [nuevoAvio, setNuevoAvio]   = useState({ nombre: '', unit: 'cm', todos: '', ancho: '' })
   const [nuevaTerm, setNuevaTerm]   = useState('')
   const [nuevoPar, setNuevoPar]     = useState({ piezaA: '', piezaB: '' })
+  const [nuevoEstampado, setNuevoEstampado] = useState({ nombre: '', tipo: 'estampado', precio: '' })
 
   useEffect(() => { fetchAll() }, [])
 
@@ -444,8 +445,7 @@ export default function Productos({ onMenuClick }) {
       costo_confeccion:        p.costo_confeccion        != null ? String(p.costo_confeccion)        : '',
       costo_corte:             p.costo_corte             != null ? String(p.costo_corte)             : '',
       costo_elasticos:         p.costo_elasticos         != null ? String(p.costo_elasticos)         : '',
-      costo_estampado_frente:  p.costo_estampado_frente  != null ? String(p.costo_estampado_frente)  : '',
-      costo_estampado_espalda: p.costo_estampado_espalda != null ? String(p.costo_estampado_espalda) : '',
+      estampados:              p.estampados              || [],
       costo_otros:             p.costo_otros             != null ? String(p.costo_otros)             : '',
     })
     setModal(true)
@@ -685,8 +685,7 @@ export default function Productos({ onMenuClick }) {
       costo_confeccion:         parseFloat(form.costo_confeccion)        || 0,
       costo_corte:              parseFloat(form.costo_corte)             || 0,
       costo_elasticos:          parseFloat(form.costo_elasticos)         || 0,
-      costo_estampado_frente:   parseFloat(form.costo_estampado_frente)  || 0,
-      costo_estampado_espalda:  parseFloat(form.costo_estampado_espalda) || 0,
+      estampados:               (form.estampados || []).map(e => ({ ...e, precio: parseFloat(e.precio) || 0 })),
       costo_otros:              parseFloat(form.costo_otros)             || 0,
     }
     if (editing) {
@@ -731,8 +730,7 @@ export default function Productos({ onMenuClick }) {
       costo_confeccion:        vistaFicha.costo_confeccion        != null ? String(vistaFicha.costo_confeccion)        : '',
       costo_corte:             vistaFicha.costo_corte             != null ? String(vistaFicha.costo_corte)             : '',
       costo_elasticos:         vistaFicha.costo_elasticos         != null ? String(vistaFicha.costo_elasticos)         : '',
-      costo_estampado_frente:  vistaFicha.costo_estampado_frente  != null ? String(vistaFicha.costo_estampado_frente)  : '',
-      costo_estampado_espalda: vistaFicha.costo_estampado_espalda != null ? String(vistaFicha.costo_estampado_espalda) : '',
+      estampados:              (vistaFicha.estampados || []).map(e => ({ ...e, precio: e.precio != null ? String(e.precio) : '' })),
       costo_otros:             vistaFicha.costo_otros             != null ? String(vistaFicha.costo_otros)             : '',
     })
     setEditandoCostos(true)
@@ -754,8 +752,7 @@ export default function Productos({ onMenuClick }) {
       costo_confeccion:        parseFloat(costosDraft.costo_confeccion)        || 0,
       costo_corte:             parseFloat(costosDraft.costo_corte)             || 0,
       costo_elasticos:         parseFloat(costosDraft.costo_elasticos)         || 0,
-      costo_estampado_frente:  parseFloat(costosDraft.costo_estampado_frente)  || 0,
-      costo_estampado_espalda: parseFloat(costosDraft.costo_estampado_espalda) || 0,
+      estampados:              (costosDraft.estampados || []).map(e => ({ ...e, precio: parseFloat(e.precio) || 0 })),
       costo_otros:             parseFloat(costosDraft.costo_otros)             || 0,
     }
     await supabase.from('productos').update(datos).eq('id', vistaFicha.id)
@@ -910,24 +907,35 @@ export default function Productos({ onMenuClick }) {
                 ].map(([rol, id, consumo]) => id ? (() => {
                   const tc = fichaTelasCosto.find(t => t.id === Number(id))
                   const fmtM = n => n != null ? Number(n).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : null
-                  const costoFila = tc?.precioMetro != null && consumo != null ? tc.precioMetro * parseFloat(consumo) : null
+                  const toNum = v => (v != null && v !== '' && !isNaN(parseFloat(v))) ? parseFloat(v) : null
+                  const tipoCambio = toNum(vistaFicha.tipo_cambio)
+                  const esUSD = tc?.moneda === 'USD'
+                  const costoBase = tc?.precioMetro != null && consumo != null ? tc.precioMetro * parseFloat(consumo) : null
+                  const costoFila = costoBase == null ? null
+                    : esUSD ? (tipoCambio != null ? costoBase * tipoCambio : null)
+                    : costoBase
                   return (
                     <div key={rol} style={{ display: 'flex', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--border)', alignItems: 'center', flexWrap: 'wrap' }}>
                       <span style={{ fontWeight: 700, minWidth: 70, color: 'var(--text2)', fontSize: 13 }}>{rol}</span>
-                      <span style={{ fontWeight: 600, fontSize: 14, flex: 2 }}>{telaLabel(id)}</span>
+                      <span style={{ fontWeight: 600, fontSize: 14, flex: 2 }}>
+                        {telaLabel(id)}
+                        {esUSD && <span style={{ marginLeft: 6, fontSize: 10, color: '#1a6b3a', fontWeight: 700, background: '#e6f4ea', borderRadius: 4, padding: '1px 4px' }}>U$D</span>}
+                      </span>
                       <span style={{ fontSize: 13, minWidth: 60, color: consumo != null ? 'inherit' : 'var(--text2)' }}>
                         {consumo != null ? `${fmtM(consumo)} m` : <span style={{ fontStyle: 'italic' }}>sin consumo</span>}
                       </span>
                       {tc?.precioMetro != null && (
                         <span style={{ fontSize: 12, color: 'var(--text2)' }}>
-                          ${Number(tc.precioMetro).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/m
+                          {esUSD ? 'U$D' : '$'} {Number(tc.precioMetro).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/m
                         </span>
                       )}
-                      {costoFila != null && (
+                      {costoFila != null ? (
                         <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--accent)' }}>
                           = ${Number(costoFila).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </span>
-                      )}
+                      ) : costoBase != null && esUSD ? (
+                        <span style={{ fontSize: 12, color: '#c87000', fontStyle: 'italic' }}>⚠ falta T/C</span>
+                      ) : null}
                     </div>
                   )
                 })() : null)}
@@ -1019,16 +1027,31 @@ export default function Productos({ onMenuClick }) {
                 ) : null
               })()}
 
+              {/* Estampados y bordados */}
+              {(vistaFicha.estampados || []).length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1 }}>🎨 Estampados y bordados</div>
+                  {(vistaFicha.estampados || []).map((e, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 12, padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 13, alignItems: 'center' }}>
+                      <span style={{ flex: 1 }}>{e.nombre}</span>
+                      <span style={{ fontSize: 11, color: '#555', background: '#eee', borderRadius: 4, padding: '1px 6px' }}>{e.tipo === 'bordado' ? '🪡 bordado' : '🎨 estampado'}</span>
+                      {e.precio != null && <span style={{ fontWeight: 700, color: 'var(--accent)' }}>${Number(e.precio).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* 💰 Costos */}
               {(() => {
                 const COSTO_KEYS = [
-                  { key: 'costo_confeccion',        label: 'Confección'        },
-                  { key: 'costo_corte',             label: 'Corte'             },
-                  { key: 'costo_elasticos',         label: 'Elásticos y avíos' },
-                  { key: 'costo_estampado_frente',  label: 'Estampado frente'  },
-                  { key: 'costo_estampado_espalda', label: 'Estampado espalda' },
-                  { key: 'costo_otros',             label: 'Otros costos'      },
+                  { key: 'costo_confeccion',  label: 'Confección'        },
+                  { key: 'costo_corte',       label: 'Corte'             },
+                  { key: 'costo_elasticos',   label: 'Elásticos y avíos' },
+                  { key: 'costo_otros',       label: 'Otros costos'      },
                 ]
+                const estampadosConPrecio = editandoCostos
+                  ? (costosDraft.estampados || [])
+                  : (vistaFicha.estampados || [])
                 const TH  = { padding: '4px 8px', color: '#1a3a6b', background: 'linear-gradient(to bottom, #e8eef7, #c8d4e8)', fontSize: 11, border: '1px solid #c8d4e8', fontWeight: 700 }
                 const TD  = { padding: '5px 8px', border: '1px solid #eee', fontSize: 12, verticalAlign: 'middle' }
                 const SEC = { padding: '3px 8px', background: '#f0f4f8', fontWeight: 700, color: '#1a3a6b', fontSize: 11, border: '1px solid #e0e8f0' }
@@ -1055,7 +1078,7 @@ export default function Productos({ onMenuClick }) {
                 const subtotalOtros = COSTO_KEYS.reduce((a, c) => {
                   const v = editandoCostos ? costosDraft[c.key] : vistaFicha[c.key]
                   return a + (parseFloat(v) || 0)
-                }, 0)
+                }, 0) + estampadosConPrecio.reduce((a, e) => a + (parseFloat(e.precio) || 0), 0)
                 const costoTotal = subtotalTelas + subtotalOtros
                 const fmtUYU  = n => '$ ' + Number(n || 0).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
                 const fmtUSD  = n => 'U$D ' + Number(n || 0).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -1186,6 +1209,40 @@ export default function Productos({ onMenuClick }) {
                             </tr>
                           )
                         })}
+
+                        {/* — Estampados / bordados — */}
+                        {estampadosConPrecio.length > 0 && (
+                          <>
+                            <tr><td colSpan={5} style={SEC}>🎨 Estampados y bordados</td></tr>
+                            {estampadosConPrecio.map((e, i) => (
+                              <tr key={i} onMouseEnter={ev => ev.currentTarget.style.background = '#ffffcc'} onMouseLeave={ev => ev.currentTarget.style.background = ''}>
+                                <td style={TD}>
+                                  {e.nombre}
+                                  <span style={{ marginLeft: 6, fontSize: 10, color: '#555', background: '#eee', borderRadius: 4, padding: '1px 4px' }}>
+                                    {e.tipo === 'bordado' ? '🪡' : '🎨'}
+                                  </span>
+                                </td>
+                                <td style={{ ...TD, textAlign: 'center' }}></td>
+                                <td style={TD}></td>
+                                <td style={{ ...TD, textAlign: 'right', fontWeight: editandoCostos ? 400 : 700 }}>
+                                  {editandoCostos ? (
+                                    <input
+                                      type="number"
+                                      value={e.precio || ''}
+                                      onChange={ev => setCostosDraft(d => ({
+                                        ...d,
+                                        estampados: (d.estampados || []).map((x, j) => j === i ? { ...x, precio: ev.target.value } : x)
+                                      }))}
+                                      placeholder="0"
+                                      style={{ width: 80, textAlign: 'right', fontSize: 11 }}
+                                    />
+                                  ) : fmtUYU(e.precio || 0)}
+                                </td>
+                                <td style={{ ...TD, color: '#888', fontStyle: 'italic', fontSize: 10 }}>—</td>
+                              </tr>
+                            ))}
+                          </>
+                        )}
 
                         {/* — Total — */}
                         <tr style={{ background: 'linear-gradient(to bottom, #e8eef7, #c8d4e8)' }}>
@@ -1533,12 +1590,10 @@ export default function Productos({ onMenuClick }) {
                 <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 10 }}>💰 Costos por unidad</div>
                 <div className="form-grid">
                   {[
-                    ['costo_confeccion',        'Confección'],
-                    ['costo_corte',             'Corte'],
-                    ['costo_elasticos',         'Elásticos y avíos'],
-                    ['costo_estampado_frente',  'Estampado frente'],
-                    ['costo_estampado_espalda', 'Estampado espalda'],
-                    ['costo_otros',             'Otros'],
+                    ['costo_confeccion', 'Confección'],
+                    ['costo_corte',      'Corte'],
+                    ['costo_elasticos',  'Elásticos y avíos'],
+                    ['costo_otros',      'Otros'],
                   ].map(([key, label]) => (
                     <div key={key} className="form-group">
                       <label>{label}</label>
@@ -1550,6 +1605,58 @@ export default function Productos({ onMenuClick }) {
                       />
                     </div>
                   ))}
+                </div>
+
+                {/* Estampados / bordados */}
+                <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+                  <div style={{ fontWeight: 600, fontSize: 11, marginBottom: 6, color: 'var(--text2)' }}>🎨 Estampados y bordados</div>
+                  {form.estampados.map((e, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6, fontSize: 12 }}>
+                      <span style={{ flex: 2 }}>{e.nombre}</span>
+                      <span style={{ fontSize: 10, color: '#555', background: '#eee', borderRadius: 4, padding: '1px 5px', whiteSpace: 'nowrap' }}>
+                        {e.tipo === 'bordado' ? '🪡 bordado' : '🎨 estampado'}
+                      </span>
+                      <input
+                        type="number"
+                        value={e.precio != null ? e.precio : ''}
+                        onChange={ev => setForm(f => ({ ...f, estampados: f.estampados.map((x, j) => j === i ? { ...x, precio: ev.target.value } : x) }))}
+                        placeholder="$ 0"
+                        style={{ width: 80, textAlign: 'right', fontSize: 11 }}
+                      />
+                      <button className="btn btn-danger btn-sm" onClick={() => setForm(f => ({ ...f, estampados: f.estampados.filter((_, j) => j !== i) }))}>✕</button>
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', gap: 6, marginTop: 6, alignItems: 'center' }}>
+                    <input
+                      value={nuevoEstampado.nombre}
+                      onChange={e => setNuevoEstampado(f => ({ ...f, nombre: e.target.value }))}
+                      placeholder="ej: Estampado frente"
+                      style={{ flex: 2 }}
+                    />
+                    <select
+                      value={nuevoEstampado.tipo}
+                      onChange={e => setNuevoEstampado(f => ({ ...f, tipo: e.target.value }))}
+                      style={{ width: 120 }}
+                    >
+                      <option value="estampado">🎨 Estampado</option>
+                      <option value="bordado">🪡 Bordado</option>
+                    </select>
+                    <input
+                      type="number"
+                      value={nuevoEstampado.precio}
+                      onChange={e => setNuevoEstampado(f => ({ ...f, precio: e.target.value }))}
+                      placeholder="$ 0"
+                      style={{ width: 70, textAlign: 'right' }}
+                    />
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => {
+                        if (!nuevoEstampado.nombre) return
+                        setForm(f => ({ ...f, estampados: [...f.estampados, { nombre: nuevoEstampado.nombre, tipo: nuevoEstampado.tipo, precio: parseFloat(nuevoEstampado.precio) || 0 }] }))
+                        setNuevoEstampado({ nombre: '', tipo: 'estampado', precio: '' })
+                      }}
+                    >+ Agregar</button>
+                  </div>
                 </div>
               </div>
 
