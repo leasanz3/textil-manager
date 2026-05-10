@@ -274,6 +274,7 @@ export default function Productos({ onMenuClick }) {
     terminaciones_extra: [],
     planchado_pares: [],
     notas: '',
+    tipo_cambio: '',
     costo_confeccion: '', costo_corte: '', costo_elasticos: '',
     costo_estampado_frente: '', costo_estampado_espalda: '', costo_otros: '',
   }
@@ -297,18 +298,19 @@ export default function Productos({ onMenuClick }) {
       .concat((prod.telas_extra || []).map(te => te.tela_id))
       .filter(Boolean).map(Number)
 
-    // Map tela_id -> consumo (m/prenda) from the product
+    // Map tela_id -> consumo (m/prenda) from the product. Use explicit null check — never derive from catalog.
+    const toConsumo = v => (v != null && v !== '' && !isNaN(parseFloat(v))) ? parseFloat(v) : null
     const consumoMap = {}
-    if (prod.tela1_id) consumoMap[Number(prod.tela1_id)] = parseFloat(prod.tela1_consumo) || null
-    if (prod.tela2_id) consumoMap[Number(prod.tela2_id)] = parseFloat(prod.tela2_consumo) || null
-    if (prod.rib_id)   consumoMap[Number(prod.rib_id)]   = parseFloat(prod.rib_consumo)   || null
+    if (prod.tela1_id) consumoMap[Number(prod.tela1_id)] = toConsumo(prod.tela1_consumo)
+    if (prod.tela2_id) consumoMap[Number(prod.tela2_id)] = toConsumo(prod.tela2_consumo)
+    if (prod.rib_id)   consumoMap[Number(prod.rib_id)]   = toConsumo(prod.rib_consumo)
     ;(prod.telas_extra || []).forEach(te => {
-      if (te.tela_id) consumoMap[Number(te.tela_id)] = parseFloat(te.consumo) || null
+      if (te.tela_id) consumoMap[Number(te.tela_id)] = toConsumo(te.consumo)
     })
 
     const [{ data: telasD }, { data: rends }, { data: cots }] = await Promise.all([
       ids.length > 0
-        ? supabase.from('telas').select('id, tipo, color, precio, rendimiento, unidad').in('id', ids)
+        ? supabase.from('telas').select('id, tipo, color, precio, rendimiento, unidad, moneda').in('id', ids)
         : Promise.resolve({ data: [] }),
       ids.length > 0
         ? supabase.from('rendimientos_tela').select('tela_id, rendimiento').in('tela_id', ids)
@@ -438,6 +440,7 @@ export default function Productos({ onMenuClick }) {
       terminaciones_extra: p.terminaciones_extra || [],
       planchado_pares:    p.planchado_pares    || [],
       notas:              p.notas              || '',
+      tipo_cambio:             p.tipo_cambio             != null ? String(p.tipo_cambio)             : '',
       costo_confeccion:        p.costo_confeccion        != null ? String(p.costo_confeccion)        : '',
       costo_corte:             p.costo_corte             != null ? String(p.costo_corte)             : '',
       costo_elasticos:         p.costo_elasticos         != null ? String(p.costo_elasticos)         : '',
@@ -678,6 +681,7 @@ export default function Productos({ onMenuClick }) {
       terminaciones_extra: form.terminaciones_extra,
       planchado_pares:     form.planchado_pares,
       notas:               form.notas || null,
+      tipo_cambio:              parseFloat(form.tipo_cambio) || null,
       costo_confeccion:         parseFloat(form.costo_confeccion)        || 0,
       costo_corte:              parseFloat(form.costo_corte)             || 0,
       costo_elasticos:          parseFloat(form.costo_elasticos)         || 0,
@@ -723,6 +727,7 @@ export default function Productos({ onMenuClick }) {
     })
     setCostosDraft({
       consumos,
+      tipo_cambio:             vistaFicha.tipo_cambio             != null ? String(vistaFicha.tipo_cambio)             : '',
       costo_confeccion:        vistaFicha.costo_confeccion        != null ? String(vistaFicha.costo_confeccion)        : '',
       costo_corte:             vistaFicha.costo_corte             != null ? String(vistaFicha.costo_corte)             : '',
       costo_elasticos:         vistaFicha.costo_elasticos         != null ? String(vistaFicha.costo_elasticos)         : '',
@@ -736,14 +741,16 @@ export default function Productos({ onMenuClick }) {
   async function guardarCostos() {
     setSavingCostos(true)
     const c = costosDraft.consumos || {}
+    const toC = v => (v != null && v !== '' && !isNaN(parseFloat(v))) ? parseFloat(v) : null
     const datos = {
-      tela1_consumo:       vistaFicha.tela1_id != null ? (parseFloat(c[vistaFicha.tela1_id]) || null) : vistaFicha.tela1_consumo,
-      tela2_consumo:       vistaFicha.tela2_id != null ? (parseFloat(c[vistaFicha.tela2_id]) || null) : vistaFicha.tela2_consumo,
-      rib_consumo:         vistaFicha.rib_id   != null ? (parseFloat(c[vistaFicha.rib_id])   || null) : vistaFicha.rib_consumo,
+      tela1_consumo:       vistaFicha.tela1_id != null ? toC(c[vistaFicha.tela1_id]) : vistaFicha.tela1_consumo,
+      tela2_consumo:       vistaFicha.tela2_id != null ? toC(c[vistaFicha.tela2_id]) : vistaFicha.tela2_consumo,
+      rib_consumo:         vistaFicha.rib_id   != null ? toC(c[vistaFicha.rib_id])   : vistaFicha.rib_consumo,
       telas_extra:         (vistaFicha.telas_extra || []).map(te => ({
         ...te,
-        consumo: parseFloat(c[Number(te.tela_id)]) || null,
+        consumo: toC(c[Number(te.tela_id)]),
       })),
+      tipo_cambio:             parseFloat(costosDraft.tipo_cambio)             || null,
       costo_confeccion:        parseFloat(costosDraft.costo_confeccion)        || 0,
       costo_corte:             parseFloat(costosDraft.costo_corte)             || 0,
       costo_elasticos:         parseFloat(costosDraft.costo_elasticos)         || 0,
@@ -1014,7 +1021,6 @@ export default function Productos({ onMenuClick }) {
 
               {/* 💰 Costos */}
               {(() => {
-                const fmtC = n => '$' + Number(n || 0).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
                 const COSTO_KEYS = [
                   { key: 'costo_confeccion',        label: 'Confección'        },
                   { key: 'costo_corte',             label: 'Corte'             },
@@ -1027,21 +1033,32 @@ export default function Productos({ onMenuClick }) {
                 const TD  = { padding: '5px 8px', border: '1px solid #eee', fontSize: 12, verticalAlign: 'middle' }
                 const SEC = { padding: '3px 8px', background: '#f0f4f8', fontWeight: 700, color: '#1a3a6b', fontSize: 11, border: '1px solid #e0e8f0' }
 
-                // In edit mode: resolve consumo from draft; in read mode: from fichaTelasCosto
+                // In edit mode: resolve consumo/tipoCambio from draft; in read mode: from saved product
+                const toNum = v => (v != null && v !== '' && !isNaN(parseFloat(v))) ? parseFloat(v) : null
+                const tipoCambio = toNum(editandoCostos ? costosDraft.tipo_cambio : vistaFicha.tipo_cambio)
+                const hayUSD = fichaTelasCosto.some(t => t.moneda === 'USD')
+
                 const telasConCosto = fichaTelasCosto.map(t => {
                   const consumo = editandoCostos
-                    ? (parseFloat((costosDraft.consumos || {})[t.id]) || null)
+                    ? toNum((costosDraft.consumos || {})[t.id])
                     : t.consumo
-                  const costo = (consumo != null && t.precioMetro != null) ? t.precioMetro * consumo : null
-                  return { ...t, consumoDraft: consumo, costoDraft: costo }
+                  const esUSD = t.moneda === 'USD'
+                  // costo in UYU: for USD telas multiply by tipoCambio; if no tipoCambio, costo is null
+                  const costoBase = (consumo != null && t.precioMetro != null) ? t.precioMetro * consumo : null
+                  const costoUYU = costoBase == null ? null
+                    : esUSD ? (tipoCambio != null ? costoBase * tipoCambio : null)
+                    : costoBase
+                  return { ...t, consumoDraft: consumo, esUSD, costoBase, costoUYU }
                 })
 
-                const subtotalTelas = telasConCosto.reduce((a, t) => a + (t.costoDraft ?? 0), 0)
+                const subtotalTelas = telasConCosto.reduce((a, t) => a + (t.costoUYU ?? 0), 0)
                 const subtotalOtros = COSTO_KEYS.reduce((a, c) => {
                   const v = editandoCostos ? costosDraft[c.key] : vistaFicha[c.key]
                   return a + (parseFloat(v) || 0)
                 }, 0)
                 const costoTotal = subtotalTelas + subtotalOtros
+                const fmtUYU  = n => '$ ' + Number(n || 0).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                const fmtUSD  = n => 'U$D ' + Number(n || 0).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
                 return (
                   <div style={{ marginBottom: 20 }}>
@@ -1057,13 +1074,39 @@ export default function Productos({ onMenuClick }) {
                           </div>
                       }
                     </div>
+
+                    {/* Tipo de cambio — solo visible si hay telas en USD */}
+                    {(hayUSD || editandoCostos) && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 12 }}>
+                        <span style={{ color: 'var(--text2)' }}>Tipo de cambio:</span>
+                        {editandoCostos ? (
+                          <>
+                            <strong>$</strong>
+                            <input
+                              type="number"
+                              value={costosDraft.tipo_cambio || ''}
+                              onChange={e => setCostosDraft(d => ({ ...d, tipo_cambio: e.target.value }))}
+                              placeholder="ej: 43.50"
+                              style={{ width: 90, fontSize: 12 }}
+                            />
+                            <span style={{ color: 'var(--text2)' }}>/ U$D</span>
+                            {!hayUSD && <span style={{ fontSize: 11, color: 'var(--text2)', fontStyle: 'italic' }}>— ninguna tela en USD, no afecta el cálculo</span>}
+                          </>
+                        ) : tipoCambio != null ? (
+                          <strong>${tipoCambio.toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / U$D</strong>
+                        ) : (
+                          <span style={{ color: '#c87000', fontStyle: 'italic' }}>⚠ No definido — necesario para calcular telas en U$D</span>
+                        )}
+                      </div>
+                    )}
+
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: 'Tahoma, Arial, sans-serif' }}>
                       <thead>
                         <tr>
                           <th style={{ ...TH, textAlign: 'left', width: '28%' }}>Tela / ítem</th>
                           <th style={{ ...TH, textAlign: 'center', width: '16%' }}>Consumo</th>
                           <th style={{ ...TH, textAlign: 'right', width: '16%' }}>Precio/m</th>
-                          <th style={{ ...TH, textAlign: 'right', width: '16%' }}>Costo</th>
+                          <th style={{ ...TH, textAlign: 'right', width: '16%' }}>Costo ($)</th>
                           <th style={{ ...TH, textAlign: 'left',  width: '24%' }}>Ref. catálogo</th>
                         </tr>
                       </thead>
@@ -1074,7 +1117,10 @@ export default function Productos({ onMenuClick }) {
                           <tr><td colSpan={5} style={{ ...TD, color: '#888', fontStyle: 'italic' }}>Sin telas con datos de precio</td></tr>
                         ) : telasConCosto.map(t => (
                           <tr key={t.id} onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'} onMouseLeave={e => e.currentTarget.style.background = ''}>
-                            <td style={TD}>{t.tipo}{t.color ? ` · ${t.color}` : ''}</td>
+                            <td style={TD}>
+                              {t.tipo}{t.color ? ` · ${t.color}` : ''}
+                              {t.esUSD && <span style={{ marginLeft: 4, fontSize: 10, color: '#1a6b3a', fontWeight: 700, background: '#e6f4ea', borderRadius: 4, padding: '1px 4px' }}>U$D</span>}
+                            </td>
                             <td style={{ ...TD, textAlign: 'center' }}>
                               {editandoCostos ? (
                                 <input
@@ -1091,10 +1137,16 @@ export default function Productos({ onMenuClick }) {
                               )}
                             </td>
                             <td style={{ ...TD, textAlign: 'right', color: '#555' }}>
-                              {t.precioMetro != null ? fmtC(t.precioMetro) : '—'}
+                              {t.precioMetro != null
+                                ? (t.esUSD ? fmtUSD(t.precioMetro) : fmtUYU(t.precioMetro))
+                                : '—'}
                             </td>
                             <td style={{ ...TD, textAlign: 'right', fontWeight: 700 }}>
-                              {t.costoDraft != null ? fmtC(t.costoDraft) : '—'}
+                              {t.costoUYU != null
+                                ? fmtUYU(t.costoUYU)
+                                : t.costoBase != null && t.esUSD
+                                  ? <span style={{ color: '#c87000', fontStyle: 'italic', fontWeight: 400 }}>⚠ falta T/C</span>
+                                  : '—'}
                             </td>
                             <td style={{ ...TD, color: '#888', fontStyle: 'italic', fontSize: 10 }}>
                               {t.rendimiento != null ? `rend: ${Number(t.rendimiento).toFixed(2)} m/kg` : '—'}
@@ -1103,7 +1155,7 @@ export default function Productos({ onMenuClick }) {
                         ))}
                         <tr style={{ background: '#f4f8f0' }}>
                           <td colSpan={3} style={{ ...TD, fontWeight: 700 }}>Subtotal telas</td>
-                          <td style={{ ...TD, textAlign: 'right', fontWeight: 700 }}>{fmtC(subtotalTelas)}</td>
+                          <td style={{ ...TD, textAlign: 'right', fontWeight: 700 }}>{fmtUYU(subtotalTelas)}</td>
                           <td style={TD}></td>
                         </tr>
 
@@ -1126,10 +1178,10 @@ export default function Productos({ onMenuClick }) {
                                     placeholder="0"
                                     style={{ width: 80, textAlign: 'right', fontSize: 11 }}
                                   />
-                                ) : fmtC(val)}
+                                ) : fmtUYU(val)}
                               </td>
                               <td style={{ ...TD, color: '#888', fontStyle: 'italic', fontSize: 10 }}>
-                                {refCot ? `prom. ${fmtC(refCot.promedio)} (${refCot.count})` : '—'}
+                                {refCot ? `prom. ${fmtUYU(refCot.promedio)} (${refCot.count})` : '—'}
                               </td>
                             </tr>
                           )
@@ -1138,7 +1190,7 @@ export default function Productos({ onMenuClick }) {
                         {/* — Total — */}
                         <tr style={{ background: 'linear-gradient(to bottom, #e8eef7, #c8d4e8)' }}>
                           <td colSpan={3} style={{ padding: 8, fontWeight: 700, fontSize: 13, color: '#1a3a6b', border: '1px solid #6b83a8' }}>COSTO TOTAL</td>
-                          <td style={{ padding: 8, textAlign: 'right', fontWeight: 700, fontSize: 15, color: '#1a3a6b', border: '1px solid #6b83a8' }}>{fmtC(costoTotal)}</td>
+                          <td style={{ padding: 8, textAlign: 'right', fontWeight: 700, fontSize: 15, color: '#1a3a6b', border: '1px solid #6b83a8' }}>{fmtUYU(costoTotal)}</td>
                           <td style={{ border: '1px solid #6b83a8' }}></td>
                         </tr>
                       </tbody>
