@@ -240,6 +240,9 @@ export default function Productos({ onMenuClick }) {
   const [saving, setSaving]         = useState(false)
   const [fichaTelasCosto, setFichaTelasCosto] = useState([])
   const [fichaRefCot,     setFichaRefCot]     = useState({})
+  const [editandoCostos,  setEditandoCostos]  = useState(false)
+  const [costosDraft,     setCostosDraft]     = useState({})
+  const [savingCostos,    setSavingCostos]    = useState(false)
   const [filterProvTela, setFilterProvTela]   = useState('')
   const [filterProvTela2, setFilterProvTela2] = useState('')
   const [filterProvRib, setFilterProvRib]     = useState('')
@@ -284,6 +287,7 @@ export default function Productos({ onMenuClick }) {
   useEffect(() => { fetchAll() }, [])
 
   useEffect(() => {
+    setEditandoCostos(false)
     if (vistaFicha) loadFichaCostos(vistaFicha)
     else { setFichaTelasCosto([]); setFichaRefCot({}) }
   }, [vistaFicha?.id])
@@ -703,6 +707,61 @@ export default function Productos({ onMenuClick }) {
     fetchAll()
   }
 
+  // ── Costos inline ────────────────────────────────────────────────────────────
+
+  function abrirEditarCostos() {
+    const consumos = {}
+    if (vistaFicha.tela1_id != null && vistaFicha.tela1_consumo != null)
+      consumos[vistaFicha.tela1_id] = String(vistaFicha.tela1_consumo)
+    if (vistaFicha.tela2_id != null && vistaFicha.tela2_consumo != null)
+      consumos[vistaFicha.tela2_id] = String(vistaFicha.tela2_consumo)
+    if (vistaFicha.rib_id   != null && vistaFicha.rib_consumo   != null)
+      consumos[vistaFicha.rib_id]   = String(vistaFicha.rib_consumo)
+    ;(vistaFicha.telas_extra || []).forEach(te => {
+      if (te.tela_id != null && te.consumo != null)
+        consumos[Number(te.tela_id)] = String(te.consumo)
+    })
+    setCostosDraft({
+      consumos,
+      costo_confeccion:        vistaFicha.costo_confeccion        != null ? String(vistaFicha.costo_confeccion)        : '',
+      costo_corte:             vistaFicha.costo_corte             != null ? String(vistaFicha.costo_corte)             : '',
+      costo_elasticos:         vistaFicha.costo_elasticos         != null ? String(vistaFicha.costo_elasticos)         : '',
+      costo_estampado_frente:  vistaFicha.costo_estampado_frente  != null ? String(vistaFicha.costo_estampado_frente)  : '',
+      costo_estampado_espalda: vistaFicha.costo_estampado_espalda != null ? String(vistaFicha.costo_estampado_espalda) : '',
+      costo_otros:             vistaFicha.costo_otros             != null ? String(vistaFicha.costo_otros)             : '',
+    })
+    setEditandoCostos(true)
+  }
+
+  async function guardarCostos() {
+    setSavingCostos(true)
+    const c = costosDraft.consumos || {}
+    const datos = {
+      tela1_consumo:       vistaFicha.tela1_id != null ? (parseFloat(c[vistaFicha.tela1_id]) || null) : vistaFicha.tela1_consumo,
+      tela2_consumo:       vistaFicha.tela2_id != null ? (parseFloat(c[vistaFicha.tela2_id]) || null) : vistaFicha.tela2_consumo,
+      rib_consumo:         vistaFicha.rib_id   != null ? (parseFloat(c[vistaFicha.rib_id])   || null) : vistaFicha.rib_consumo,
+      telas_extra:         (vistaFicha.telas_extra || []).map(te => ({
+        ...te,
+        consumo: parseFloat(c[Number(te.tela_id)]) || null,
+      })),
+      costo_confeccion:        parseFloat(costosDraft.costo_confeccion)        || 0,
+      costo_corte:             parseFloat(costosDraft.costo_corte)             || 0,
+      costo_elasticos:         parseFloat(costosDraft.costo_elasticos)         || 0,
+      costo_estampado_frente:  parseFloat(costosDraft.costo_estampado_frente)  || 0,
+      costo_estampado_espalda: parseFloat(costosDraft.costo_estampado_espalda) || 0,
+      costo_otros:             parseFloat(costosDraft.costo_otros)             || 0,
+    }
+    await supabase.from('productos').update(datos).eq('id', vistaFicha.id)
+    const { data } = await supabase.from('productos').select('*').eq('id', vistaFicha.id).single()
+    if (data) {
+      setVistaFicha(data)
+      setProductos(prev => prev.map(p => p.id === data.id ? data : p))
+      loadFichaCostos(data)
+    }
+    setSavingCostos(false)
+    setEditandoCostos(false)
+  }
+
   // ── Cómputos render ───────────────────────────────────────────────────────────
 
   const filtered      = productos.filter(p => !search || p.nombre?.toLowerCase().includes(search.toLowerCase()) || p.codigo?.toLowerCase().includes(search.toLowerCase()))
@@ -955,83 +1014,124 @@ export default function Productos({ onMenuClick }) {
 
               {/* 💰 Costos */}
               {(() => {
-                const fmtC = n => n != null ? '$' + Number(n).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '$0,00'
-                const EDIT_KEYS = [
-                  { key: 'costo_confeccion',        label: 'Confección',        sec: 'conf' },
-                  { key: 'costo_corte',             label: 'Corte',             sec: 'conf' },
-                  { key: 'costo_elasticos',         label: 'Elásticos y avíos', sec: 'elas' },
-                  { key: 'costo_estampado_frente',  label: 'Estampado frente',  sec: 'est'  },
-                  { key: 'costo_estampado_espalda', label: 'Estampado espalda', sec: 'est'  },
-                  { key: 'costo_otros',             label: 'Otros costos',      sec: 'otros'},
+                const fmtC = n => '$' + Number(n || 0).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                const COSTO_KEYS = [
+                  { key: 'costo_confeccion',        label: 'Confección'        },
+                  { key: 'costo_corte',             label: 'Corte'             },
+                  { key: 'costo_elasticos',         label: 'Elásticos y avíos' },
+                  { key: 'costo_estampado_frente',  label: 'Estampado frente'  },
+                  { key: 'costo_estampado_espalda', label: 'Estampado espalda' },
+                  { key: 'costo_otros',             label: 'Otros costos'      },
                 ]
-                const subtotalTelas = fichaTelasCosto.reduce((a, t) => a + (t.costo ?? 0), 0)
-                const costoTotal    = subtotalTelas + EDIT_KEYS.reduce((a, c) => a + (parseFloat(vistaFicha[c.key]) || 0), 0)
                 const TH  = { padding: '4px 8px', color: '#1a3a6b', background: 'linear-gradient(to bottom, #e8eef7, #c8d4e8)', fontSize: 11, border: '1px solid #c8d4e8', fontWeight: 700 }
                 const TD  = { padding: '5px 8px', border: '1px solid #eee', fontSize: 12, verticalAlign: 'middle' }
                 const SEC = { padding: '3px 8px', background: '#f0f4f8', fontWeight: 700, color: '#1a3a6b', fontSize: 11, border: '1px solid #e0e8f0' }
-                const SECCIONES = [
-                  { label: '✂ Confección y corte', keys: ['costo_confeccion','costo_corte'] },
-                  { label: '🧵 Elásticos y avíos',  keys: ['costo_elasticos'] },
-                  { label: '🖨 Estampado',           keys: ['costo_estampado_frente','costo_estampado_espalda'] },
-                  { label: 'Otros',                  keys: ['costo_otros'] },
-                ]
+
+                // In edit mode: resolve consumo from draft; in read mode: from fichaTelasCosto
+                const telasConCosto = fichaTelasCosto.map(t => {
+                  const consumo = editandoCostos
+                    ? (parseFloat((costosDraft.consumos || {})[t.id]) || null)
+                    : t.consumo
+                  const costo = (consumo != null && t.precioMetro != null) ? t.precioMetro * consumo : null
+                  return { ...t, consumoDraft: consumo, costoDraft: costo }
+                })
+
+                const subtotalTelas = telasConCosto.reduce((a, t) => a + (t.costoDraft ?? 0), 0)
+                const subtotalOtros = COSTO_KEYS.reduce((a, c) => {
+                  const v = editandoCostos ? costosDraft[c.key] : vistaFicha[c.key]
+                  return a + (parseFloat(v) || 0)
+                }, 0)
+                const costoTotal = subtotalTelas + subtotalOtros
+
                 return (
                   <div style={{ marginBottom: 20 }}>
-                    <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1 }}>💰 Costos</div>
+                    <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>💰 Costos</span>
+                      {!editandoCostos
+                        ? <button className="btn btn-secondary btn-sm" onClick={abrirEditarCostos}>✏ Editar costos</button>
+                        : <div style={{ display: 'flex', gap: 6 }}>
+                            <button className="btn btn-secondary btn-sm" onClick={() => setEditandoCostos(false)}>Cancelar</button>
+                            <button className="btn btn-primary btn-sm" onClick={guardarCostos} disabled={savingCostos}>
+                              {savingCostos ? 'Guardando...' : '✔ Guardar costos'}
+                            </button>
+                          </div>
+                      }
+                    </div>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: 'Tahoma, Arial, sans-serif' }}>
                       <thead>
                         <tr>
-                          <th style={{ ...TH, textAlign: 'left', width: '34%' }}>Ítem</th>
-                          <th style={{ ...TH, textAlign: 'right', width: '22%' }}>Valor</th>
-                          <th style={{ ...TH, textAlign: 'left',  width: '28%' }}>Ref. promedio</th>
-                          <th style={{ ...TH, textAlign: 'right', width: '16%' }}>Calculado</th>
+                          <th style={{ ...TH, textAlign: 'left', width: '28%' }}>Tela / ítem</th>
+                          <th style={{ ...TH, textAlign: 'center', width: '16%' }}>Consumo</th>
+                          <th style={{ ...TH, textAlign: 'right', width: '16%' }}>Precio/m</th>
+                          <th style={{ ...TH, textAlign: 'right', width: '16%' }}>Costo</th>
+                          <th style={{ ...TH, textAlign: 'left',  width: '24%' }}>Ref. catálogo</th>
                         </tr>
                       </thead>
                       <tbody>
                         {/* — Telas — */}
-                        <tr><td colSpan={4} style={SEC}>🧶 Telas</td></tr>
-                        {fichaTelasCosto.length === 0 ? (
-                          <tr><td colSpan={4} style={{ ...TD, color: '#888', fontStyle: 'italic' }}>Sin telas con datos de precio</td></tr>
-                        ) : fichaTelasCosto.map(t => (
+                        <tr><td colSpan={5} style={SEC}>🧶 Telas</td></tr>
+                        {telasConCosto.length === 0 ? (
+                          <tr><td colSpan={5} style={{ ...TD, color: '#888', fontStyle: 'italic' }}>Sin telas con datos de precio</td></tr>
+                        ) : telasConCosto.map(t => (
                           <tr key={t.id} onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'} onMouseLeave={e => e.currentTarget.style.background = ''}>
                             <td style={TD}>{t.tipo}{t.color ? ` · ${t.color}` : ''}</td>
-                            <td style={{ ...TD, textAlign: 'right', color: '#555', fontSize: 11 }}>
-                              {t.consumo != null
-                                ? <>consumo: {Number(t.consumo).toFixed(2)} m</>
-                                : <span style={{ color: '#c87000' }}>⚠ Sin consumo — completar en la ficha</span>}
+                            <td style={{ ...TD, textAlign: 'center' }}>
+                              {editandoCostos ? (
+                                <input
+                                  type="number"
+                                  value={(costosDraft.consumos || {})[t.id] || ''}
+                                  onChange={e => setCostosDraft(d => ({ ...d, consumos: { ...(d.consumos || {}), [t.id]: e.target.value } }))}
+                                  placeholder="m/prenda"
+                                  style={{ width: 70, textAlign: 'right', fontSize: 11 }}
+                                />
+                              ) : (
+                                t.consumoDraft != null
+                                  ? <span style={{ fontWeight: 600 }}>{Number(t.consumoDraft).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m</span>
+                                  : <span style={{ color: '#c87000', fontStyle: 'italic' }}>— sin consumo</span>
+                              )}
                             </td>
-                            <td style={{ ...TD, color: '#888', fontStyle: 'italic', fontSize: 11 }}>
-                              {t.rendimiento != null
-                                ? `rend. catálogo: ${Number(t.rendimiento).toFixed(2)} m/kg (ref.)`
-                                : '—'}
+                            <td style={{ ...TD, textAlign: 'right', color: '#555' }}>
+                              {t.precioMetro != null ? fmtC(t.precioMetro) : '—'}
                             </td>
                             <td style={{ ...TD, textAlign: 'right', fontWeight: 700 }}>
-                              {t.costo != null ? fmtC(t.costo) : '—'}
+                              {t.costoDraft != null ? fmtC(t.costoDraft) : '—'}
+                            </td>
+                            <td style={{ ...TD, color: '#888', fontStyle: 'italic', fontSize: 10 }}>
+                              {t.rendimiento != null ? `rend: ${Number(t.rendimiento).toFixed(2)} m/kg` : '—'}
                             </td>
                           </tr>
                         ))}
                         <tr style={{ background: '#f4f8f0' }}>
                           <td colSpan={3} style={{ ...TD, fontWeight: 700 }}>Subtotal telas</td>
                           <td style={{ ...TD, textAlign: 'right', fontWeight: 700 }}>{fmtC(subtotalTelas)}</td>
+                          <td style={TD}></td>
                         </tr>
 
-                        {/* — Secciones editables — */}
-                        {SECCIONES.map(sec => {
-                          const keyMap = Object.fromEntries(EDIT_KEYS.map(e => [e.key, e.label]))
+                        {/* — Otros costos — */}
+                        <tr><td colSpan={5} style={SEC}>✂ Confección / Estampado / Otros</td></tr>
+                        {COSTO_KEYS.map(({ key, label }) => {
+                          const val = editandoCostos ? costosDraft[key] : (vistaFicha[key] || 0)
+                          const refCot = fichaRefCot[key]
                           return (
-                            <React.Fragment key={sec.label}>
-                              <tr><td colSpan={4} style={SEC}>{sec.label}</td></tr>
-                              {sec.keys.map(k => (
-                                <tr key={k} onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'} onMouseLeave={e => e.currentTarget.style.background = ''}>
-                                  <td style={TD}>{keyMap[k]}</td>
-                                  <td style={{ ...TD, textAlign: 'right', fontWeight: 700 }}>{fmtC(vistaFicha[k] || 0)}</td>
-                                  <td style={{ ...TD, color: '#888', fontStyle: 'italic' }}>
-                                    {fichaRefCot[k] ? `prom. ${fmtC(fichaRefCot[k].promedio)} (${fichaRefCot[k].count} cotiz.)` : '—'}
-                                  </td>
-                                  <td style={TD}></td>
-                                </tr>
-                              ))}
-                            </React.Fragment>
+                            <tr key={key} onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'} onMouseLeave={e => e.currentTarget.style.background = ''}>
+                              <td style={TD}>{label}</td>
+                              <td style={{ ...TD, textAlign: 'center' }}></td>
+                              <td style={TD}></td>
+                              <td style={{ ...TD, textAlign: 'right', fontWeight: editandoCostos ? 400 : 700 }}>
+                                {editandoCostos ? (
+                                  <input
+                                    type="number"
+                                    value={val}
+                                    onChange={e => setCostosDraft(d => ({ ...d, [key]: e.target.value }))}
+                                    placeholder="0"
+                                    style={{ width: 80, textAlign: 'right', fontSize: 11 }}
+                                  />
+                                ) : fmtC(val)}
+                              </td>
+                              <td style={{ ...TD, color: '#888', fontStyle: 'italic', fontSize: 10 }}>
+                                {refCot ? `prom. ${fmtC(refCot.promedio)} (${refCot.count})` : '—'}
+                              </td>
+                            </tr>
                           )
                         })}
 
@@ -1039,6 +1139,7 @@ export default function Productos({ onMenuClick }) {
                         <tr style={{ background: 'linear-gradient(to bottom, #e8eef7, #c8d4e8)' }}>
                           <td colSpan={3} style={{ padding: 8, fontWeight: 700, fontSize: 13, color: '#1a3a6b', border: '1px solid #6b83a8' }}>COSTO TOTAL</td>
                           <td style={{ padding: 8, textAlign: 'right', fontWeight: 700, fontSize: 15, color: '#1a3a6b', border: '1px solid #6b83a8' }}>{fmtC(costoTotal)}</td>
+                          <td style={{ border: '1px solid #6b83a8' }}></td>
                         </tr>
                       </tbody>
                     </table>
