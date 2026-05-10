@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 
 const fmtNum = (n) => n != null ? Number(n).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
 
-export default function CatalogoTelas({ onMenuClick }) {
+export default function CatalogoTelas({ onMenuClick, onNavigate }) {
   const [telas, setTelas] = useState([])
   const [proveedores, setProveedores] = useState([])
   const [loading, setLoading] = useState(true)
@@ -12,6 +12,7 @@ export default function CatalogoTelas({ onMenuClick }) {
   const [modal, setModal] = useState(false)
   const [editing, setEditing] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [productosUsandoTela, setProductosUsandoTela] = useState([])
 
   const emptyForm = {
     tipo: '', codigo: '', color: '', proveedor_id: '',
@@ -36,6 +37,7 @@ export default function CatalogoTelas({ onMenuClick }) {
   function openNew(provId = '') {
     setEditing(null)
     setForm({ ...emptyForm, proveedor_id: provId })
+    setProductosUsandoTela([])
     setModal(true)
   }
 
@@ -52,7 +54,21 @@ export default function CatalogoTelas({ onMenuClick }) {
       moneda_ref: t.moneda || 'USD',
       notas: t.notas || ''
     })
+    setProductosUsandoTela([])
+    fetchProductosUsandoTela(t.id)
     setModal(true)
+  }
+
+  async function fetchProductosUsandoTela(telaId) {
+    // Search across all fields where this tela_id might appear
+    const { data } = await supabase
+      .from('productos')
+      .select('id, nombre, cliente_id, tela1_id, tela2_id, rib_id, telas_extra')
+    const todos = (data || []).filter(p => {
+      if (p.tela1_id === telaId || p.tela2_id === telaId || p.rib_id === telaId) return true
+      return (p.telas_extra || []).some(te => Number(te.tela_id) === telaId)
+    })
+    setProductosUsandoTela(todos)
   }
 
   async function handleSave() {
@@ -271,6 +287,26 @@ export default function CatalogoTelas({ onMenuClick }) {
                 <label>Notas</label>
                 <input value={form.notas} onChange={e => setF('notas', e.target.value)} placeholder="Composición, ancho, observaciones..." />
               </div>
+
+              {editing && (
+                <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 14 }}>
+                  <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8 }}>📦 Productos que usan esta tela</div>
+                  {productosUsandoTela.length === 0 ? (
+                    <div style={{ fontSize: 12, color: 'var(--text2)', fontStyle: 'italic' }}>Ningún producto usa esta tela aún.</div>
+                  ) : (
+                    productosUsandoTela.map(p => (
+                      <div
+                        key={p.id}
+                        style={{ display: 'flex', gap: 10, padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 12, alignItems: 'center', cursor: onNavigate ? 'pointer' : 'default' }}
+                        onClick={() => onNavigate && onNavigate('productos', p.id)}
+                      >
+                        <span style={{ fontWeight: 600, flex: 1 }}>{p.nombre}</span>
+                        {onNavigate && <span style={{ color: 'var(--accent)', fontSize: 11 }}>Ver →</span>}
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setModal(false)}>Cancelar</button>
