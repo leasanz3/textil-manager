@@ -297,13 +297,14 @@ export default function Productos({ onMenuClick }) {
       .concat((prod.telas_extra || []).map(te => te.tela_id))
       .filter(Boolean).map(Number)
 
-    // Map tela_id -> consumo (m/prenda) from the product
+    // Map tela_id -> consumo (m/prenda) from the product. Use explicit null check — never derive from catalog.
+    const toConsumo = v => (v != null && v !== '' && !isNaN(parseFloat(v))) ? parseFloat(v) : null
     const consumoMap = {}
-    if (prod.tela1_id) consumoMap[Number(prod.tela1_id)] = parseFloat(prod.tela1_consumo) || null
-    if (prod.tela2_id) consumoMap[Number(prod.tela2_id)] = parseFloat(prod.tela2_consumo) || null
-    if (prod.rib_id)   consumoMap[Number(prod.rib_id)]   = parseFloat(prod.rib_consumo)   || null
+    if (prod.tela1_id) consumoMap[Number(prod.tela1_id)] = toConsumo(prod.tela1_consumo)
+    if (prod.tela2_id) consumoMap[Number(prod.tela2_id)] = toConsumo(prod.tela2_consumo)
+    if (prod.rib_id)   consumoMap[Number(prod.rib_id)]   = toConsumo(prod.rib_consumo)
     ;(prod.telas_extra || []).forEach(te => {
-      if (te.tela_id) consumoMap[Number(te.tela_id)] = parseFloat(te.consumo) || null
+      if (te.tela_id) consumoMap[Number(te.tela_id)] = toConsumo(te.consumo)
     })
 
     const [{ data: telasD }, { data: rends }, { data: cots }] = await Promise.all([
@@ -736,13 +737,14 @@ export default function Productos({ onMenuClick }) {
   async function guardarCostos() {
     setSavingCostos(true)
     const c = costosDraft.consumos || {}
+    const toC = v => (v != null && v !== '' && !isNaN(parseFloat(v))) ? parseFloat(v) : null
     const datos = {
-      tela1_consumo:       vistaFicha.tela1_id != null ? (parseFloat(c[vistaFicha.tela1_id]) || null) : vistaFicha.tela1_consumo,
-      tela2_consumo:       vistaFicha.tela2_id != null ? (parseFloat(c[vistaFicha.tela2_id]) || null) : vistaFicha.tela2_consumo,
-      rib_consumo:         vistaFicha.rib_id   != null ? (parseFloat(c[vistaFicha.rib_id])   || null) : vistaFicha.rib_consumo,
+      tela1_consumo:       vistaFicha.tela1_id != null ? toC(c[vistaFicha.tela1_id]) : vistaFicha.tela1_consumo,
+      tela2_consumo:       vistaFicha.tela2_id != null ? toC(c[vistaFicha.tela2_id]) : vistaFicha.tela2_consumo,
+      rib_consumo:         vistaFicha.rib_id   != null ? toC(c[vistaFicha.rib_id])   : vistaFicha.rib_consumo,
       telas_extra:         (vistaFicha.telas_extra || []).map(te => ({
         ...te,
-        consumo: parseFloat(c[Number(te.tela_id)]) || null,
+        consumo: toC(c[Number(te.tela_id)]),
       })),
       costo_confeccion:        parseFloat(costosDraft.costo_confeccion)        || 0,
       costo_corte:             parseFloat(costosDraft.costo_corte)             || 0,
@@ -1028,9 +1030,10 @@ export default function Productos({ onMenuClick }) {
                 const SEC = { padding: '3px 8px', background: '#f0f4f8', fontWeight: 700, color: '#1a3a6b', fontSize: 11, border: '1px solid #e0e8f0' }
 
                 // In edit mode: resolve consumo from draft; in read mode: from fichaTelasCosto
+                const toNum = v => (v != null && v !== '' && !isNaN(parseFloat(v))) ? parseFloat(v) : null
                 const telasConCosto = fichaTelasCosto.map(t => {
                   const consumo = editandoCostos
-                    ? (parseFloat((costosDraft.consumos || {})[t.id]) || null)
+                    ? toNum((costosDraft.consumos || {})[t.id])
                     : t.consumo
                   const costo = (consumo != null && t.precioMetro != null) ? t.precioMetro * consumo : null
                   return { ...t, consumoDraft: consumo, costoDraft: costo }
