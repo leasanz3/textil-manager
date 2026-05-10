@@ -256,6 +256,7 @@ export default function Productos({ onMenuClick }) {
     cliente_id: null,
     molde: '',
     tela1_id: '', tela2_id: '', rib_id: '',
+    tela1_consumo: '', tela2_consumo: '', rib_consumo: '',
     telas_extra:  [],
     entretela_id: '',
     piezas: [],
@@ -292,9 +293,18 @@ export default function Productos({ onMenuClick }) {
       .concat((prod.telas_extra || []).map(te => te.tela_id))
       .filter(Boolean).map(Number)
 
+    // Map tela_id -> consumo (m/prenda) from the product
+    const consumoMap = {}
+    if (prod.tela1_id) consumoMap[Number(prod.tela1_id)] = parseFloat(prod.tela1_consumo) || null
+    if (prod.tela2_id) consumoMap[Number(prod.tela2_id)] = parseFloat(prod.tela2_consumo) || null
+    if (prod.rib_id)   consumoMap[Number(prod.rib_id)]   = parseFloat(prod.rib_consumo)   || null
+    ;(prod.telas_extra || []).forEach(te => {
+      if (te.tela_id) consumoMap[Number(te.tela_id)] = parseFloat(te.consumo) || null
+    })
+
     const [{ data: telasD }, { data: rends }, { data: cots }] = await Promise.all([
       ids.length > 0
-        ? supabase.from('telas').select('id, tipo, color, precio, rendimiento').in('id', ids)
+        ? supabase.from('telas').select('id, tipo, color, precio, rendimiento, unidad').in('id', ids)
         : Promise.resolve({ data: [] }),
       ids.length > 0
         ? supabase.from('rendimientos_tela').select('tela_id, rendimiento').in('tela_id', ids)
@@ -312,14 +322,24 @@ export default function Productos({ onMenuClick }) {
       rendRealMap[r.tela_id].push(parseFloat(r.rendimiento))
     })
 
-    setFichaTelasCosto((telasD || []).map(t => ({
-      ...t,
-      costo:        (parseFloat(t.precio) || 0) * (parseFloat(t.rendimiento) || 0),
-      rendReal:     rendRealMap[t.id]?.length > 0
-                      ? rendRealMap[t.id].reduce((a, b) => a + b, 0) / rendRealMap[t.id].length
-                      : null,
-      rendRealCount: rendRealMap[t.id]?.length || 0,
-    })))
+    setFichaTelasCosto((telasD || []).map(t => {
+      const consumo = consumoMap[t.id] ?? null
+      // precio/m: if unit=kg divide by rendimiento, if unit=m use precio directly
+      const precioMetro = t.unidad === 'kg'
+        ? (t.rendimiento ? (parseFloat(t.precio) || 0) / parseFloat(t.rendimiento) : null)
+        : (parseFloat(t.precio) || null)
+      const costo = (consumo != null && precioMetro != null) ? precioMetro * consumo : null
+      return {
+        ...t,
+        consumo,
+        precioMetro,
+        costo,
+        rendReal:     rendRealMap[t.id]?.length > 0
+                        ? rendRealMap[t.id].reduce((a, b) => a + b, 0) / rendRealMap[t.id].length
+                        : null,
+        rendRealCount: rendRealMap[t.id]?.length || 0,
+      }
+    }))
 
     // Promedios de cotizaciones por campo
     const REF_KEYS = ['costo_confeccion','costo_corte','costo_elasticos','costo_estampado_frente','costo_estampado_espalda','costo_otros']
@@ -398,6 +418,9 @@ export default function Productos({ onMenuClick }) {
       tela1_id:           p.tela1_id           || '',
       tela2_id:           p.tela2_id           || '',
       rib_id:             p.rib_id             || '',
+      tela1_consumo:      p.tela1_consumo      != null ? String(p.tela1_consumo) : '',
+      tela2_consumo:      p.tela2_consumo      != null ? String(p.tela2_consumo) : '',
+      rib_consumo:        p.rib_consumo        != null ? String(p.rib_consumo)   : '',
       telas_extra:        (p.telas_extra || []).map(te => {
         const t = telas.find(x => x.id === parseInt(te.tela_id))
         return { ...te, prov_id: t?.proveedor_id ? String(t.proveedor_id) : '' }
@@ -438,6 +461,9 @@ export default function Productos({ onMenuClick }) {
       tela1_id:           base.tela1_id     || '',
       tela2_id:           base.tela2_id     || '',
       rib_id:             base.rib_id       || '',
+      tela1_consumo:      base.tela1_consumo != null ? String(base.tela1_consumo) : '',
+      tela2_consumo:      base.tela2_consumo != null ? String(base.tela2_consumo) : '',
+      rib_consumo:        base.rib_consumo   != null ? String(base.rib_consumo)   : '',
       telas_extra:        (base.telas_extra || []).map(te => {
         const t = telas.find(x => x.id === parseInt(te.tela_id))
         return { ...te, prov_id: t?.proveedor_id ? String(t.proveedor_id) : '' }
@@ -635,7 +661,10 @@ export default function Productos({ onMenuClick }) {
       tela1_id:            parseInt(form.tela1_id) || null,
       tela2_id:            parseInt(form.tela2_id) || null,
       rib_id:              parseInt(form.rib_id) || null,
-      telas_extra:         form.telas_extra.map(({ label, tela_id }) => ({ label, tela_id: parseInt(tela_id) || null })),
+      tela1_consumo:       parseFloat(form.tela1_consumo) || null,
+      tela2_consumo:       parseFloat(form.tela2_consumo) || null,
+      rib_consumo:         parseFloat(form.rib_consumo) || null,
+      telas_extra:         form.telas_extra.map(({ label, tela_id, consumo }) => ({ label, tela_id: parseInt(tela_id) || null, consumo: parseFloat(consumo) || null })),
       entretela_id:        parseInt(form.entretela_id) || null,
       piezas:              form.piezas,
       procesos:            form.procesos,
@@ -808,16 +837,34 @@ export default function Productos({ onMenuClick }) {
               <div style={{ marginBottom: 20 }}>
                 <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1 }}>🧶 Telas</div>
                 {[
-                  ['Tela 1', vistaFicha.tela1_id],
-                  ['Tela 2', vistaFicha.tela2_id],
-                  ...((vistaFicha.telas_extra || []).map((te, i) => [te.label || `Tela ${i + 3}`, te.tela_id])),
-                  ['RIB', vistaFicha.rib_id],
-                ].map(([rol, id]) => id ? (
-                  <div key={rol} style={{ display: 'flex', gap: 16, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-                    <span style={{ fontWeight: 700, minWidth: 70, color: 'var(--text2)', fontSize: 14 }}>{rol}</span>
-                    <span style={{ fontWeight: 600, fontSize: 15 }}>{telaLabel(id)}</span>
-                  </div>
-                ) : null)}
+                  ['Tela 1', vistaFicha.tela1_id, vistaFicha.tela1_consumo],
+                  ['Tela 2', vistaFicha.tela2_id, vistaFicha.tela2_consumo],
+                  ...((vistaFicha.telas_extra || []).map((te, i) => [te.label || `Tela ${i + 3}`, te.tela_id, te.consumo])),
+                  ['RIB', vistaFicha.rib_id, vistaFicha.rib_consumo],
+                ].map(([rol, id, consumo]) => id ? (() => {
+                  const tc = fichaTelasCosto.find(t => t.id === Number(id))
+                  const fmtM = n => n != null ? Number(n).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : null
+                  const costoFila = tc?.precioMetro != null && consumo != null ? tc.precioMetro * parseFloat(consumo) : null
+                  return (
+                    <div key={rol} style={{ display: 'flex', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--border)', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 700, minWidth: 70, color: 'var(--text2)', fontSize: 13 }}>{rol}</span>
+                      <span style={{ fontWeight: 600, fontSize: 14, flex: 2 }}>{telaLabel(id)}</span>
+                      <span style={{ fontSize: 13, minWidth: 60, color: consumo != null ? 'inherit' : 'var(--text2)' }}>
+                        {consumo != null ? `${fmtM(consumo)} m` : <span style={{ fontStyle: 'italic' }}>sin consumo</span>}
+                      </span>
+                      {tc?.precioMetro != null && (
+                        <span style={{ fontSize: 12, color: 'var(--text2)' }}>
+                          ${Number(tc.precioMetro).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/m
+                        </span>
+                      )}
+                      {costoFila != null && (
+                        <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--accent)' }}>
+                          = ${Number(costoFila).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                      )}
+                    </div>
+                  )
+                })() : null)}
                 {vistaFicha.entretela_id ? (
                   <div style={{ display: 'flex', gap: 16, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
                     <span style={{ fontWeight: 700, minWidth: 70, color: 'var(--text2)', fontSize: 14 }}>Entretela</span>
@@ -917,7 +964,7 @@ export default function Productos({ onMenuClick }) {
                   { key: 'costo_estampado_espalda', label: 'Estampado espalda', sec: 'est'  },
                   { key: 'costo_otros',             label: 'Otros costos',      sec: 'otros'},
                 ]
-                const subtotalTelas = fichaTelasCosto.reduce((a, t) => a + (t.costo || 0), 0)
+                const subtotalTelas = fichaTelasCosto.reduce((a, t) => a + (t.costo ?? 0), 0)
                 const costoTotal    = subtotalTelas + EDIT_KEYS.reduce((a, c) => a + (parseFloat(vistaFicha[c.key]) || 0), 0)
                 const TH  = { padding: '4px 8px', color: '#1a3a6b', background: 'linear-gradient(to bottom, #e8eef7, #c8d4e8)', fontSize: 11, border: '1px solid #c8d4e8', fontWeight: 700 }
                 const TD  = { padding: '5px 8px', border: '1px solid #eee', fontSize: 12, verticalAlign: 'middle' }
@@ -949,15 +996,17 @@ export default function Productos({ onMenuClick }) {
                           <tr key={t.id} onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'} onMouseLeave={e => e.currentTarget.style.background = ''}>
                             <td style={TD}>{t.tipo}{t.color ? ` · ${t.color}` : ''}</td>
                             <td style={{ ...TD, textAlign: 'right', color: '#555', fontSize: 11 }}>
-                              {t.rendimiento != null
-                                ? <>${Number(t.precio||0).toFixed(2)} × {Number(t.rendimiento).toFixed(2)} m/kg</>
-                                : <span style={{ color: '#c87000' }}>⚠ Sin rendimiento — completar en catálogo</span>}
+                              {t.consumo != null
+                                ? <>consumo: {Number(t.consumo).toFixed(2)} m</>
+                                : <span style={{ color: '#c87000' }}>⚠ Sin consumo — completar en la ficha</span>}
                             </td>
-                            <td style={{ ...TD, color: '#888', fontStyle: 'italic' }}>
-                              {t.rendReal != null ? `real: ${Number(t.rendReal).toFixed(2)} m/kg (${t.rendRealCount} reg.)` : '—'}
+                            <td style={{ ...TD, color: '#888', fontStyle: 'italic', fontSize: 11 }}>
+                              {t.rendimiento != null
+                                ? `rend. catálogo: ${Number(t.rendimiento).toFixed(2)} m/kg (ref.)`
+                                : '—'}
                             </td>
                             <td style={{ ...TD, textAlign: 'right', fontWeight: 700 }}>
-                              {t.rendimiento != null ? fmtC(t.costo) : '—'}
+                              {t.costo != null ? fmtC(t.costo) : '—'}
                             </td>
                           </tr>
                         ))}
@@ -1077,9 +1126,9 @@ export default function Productos({ onMenuClick }) {
 
                 {/* Tela 1 */}
                 {[
-                  { label: 'Tela 1', field: 'tela1_id', prov: filterProvTela,  setProv: setFilterProvTela  },
-                  { label: 'Tela 2', field: 'tela2_id', prov: filterProvTela2, setProv: setFilterProvTela2 },
-                ].map(({ label, field, prov, setProv }) => (
+                  { label: 'Tela 1', field: 'tela1_id', conField: 'tela1_consumo', prov: filterProvTela,  setProv: setFilterProvTela  },
+                  { label: 'Tela 2', field: 'tela2_id', conField: 'tela2_consumo', prov: filterProvTela2, setProv: setFilterProvTela2 },
+                ].map(({ label, field, conField, prov, setProv }) => (
                   <div key={field} style={{ marginBottom: 10 }}>
                     <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>{label}</div>
                     <div style={{ display: 'flex', gap: 6 }}>
@@ -1093,6 +1142,15 @@ export default function Productos({ onMenuClick }) {
                           <option key={t.id} value={t.id}>{t.tipo}{t.color ? ` · ${t.color}` : ''}</option>
                         ))}
                       </select>
+                      <input
+                        type="number"
+                        value={form[conField]}
+                        onChange={e => setForm(f => ({ ...f, [conField]: e.target.value }))}
+                        placeholder="m/prenda"
+                        style={{ width: 80 }}
+                        title="Consumo en metros por prenda"
+                      />
+                      <span style={{ fontSize: 11, color: 'var(--text2)', alignSelf: 'center' }}>m</span>
                     </div>
                   </div>
                 ))}
@@ -1123,6 +1181,15 @@ export default function Productos({ onMenuClick }) {
                           <option key={t.id} value={t.id}>{t.tipo}{t.color ? ` · ${t.color}` : ''}</option>
                         ))}
                       </select>
+                      <input
+                        type="number"
+                        value={te.consumo || ''}
+                        onChange={e => updateTelaExtra(i, { consumo: e.target.value })}
+                        placeholder="m/prenda"
+                        style={{ width: 80 }}
+                        title="Consumo en metros por prenda"
+                      />
+                      <span style={{ fontSize: 11, color: 'var(--text2)', alignSelf: 'center' }}>m</span>
                     </div>
                   </div>
                 ))}
@@ -1145,6 +1212,15 @@ export default function Productos({ onMenuClick }) {
                         <option key={t.id} value={t.id}>{t.tipo}{t.color ? ` · ${t.color}` : ''}</option>
                       ))}
                     </select>
+                    <input
+                      type="number"
+                      value={form.rib_consumo}
+                      onChange={e => setForm(f => ({ ...f, rib_consumo: e.target.value }))}
+                      placeholder="m/prenda"
+                      style={{ width: 80 }}
+                      title="Consumo en metros por prenda"
+                    />
+                    <span style={{ fontSize: 11, color: 'var(--text2)', alignSelf: 'center' }}>m</span>
                   </div>
                 </div>
 
