@@ -264,6 +264,28 @@ export default function Pedidos({ onMenuClick }) {
   const [savingContacto, setSavingContacto] = useState(false)
   const [errorContacto, setErrorContacto]   = useState('')
 
+  // ── Modal de entrega (registro en cuenta corriente) ────────────────────────
+  const [modalEntrega, setModalEntrega]     = useState(false)
+  const [entregaPedido, setEntregaPedido]   = useState(null) // pedido que se está entregando
+  const [savingEntrega, setSavingEntrega]   = useState(false)
+  const emptyEntrega = {
+    monto: '',
+    facturacion_tipo: 'normal',
+    descuento_pct: '0',
+    monto_con_factura: '',
+    descuento_sin_factura_pct: '0',
+    monto_sin_factura: '',
+    total_cobrar: '',
+    forma_pago: 'efectivo',
+    cheque_numero: '',
+    cheque_banco: '',
+    cheque_fecha_cobro: '',
+    cheque_titular: '',
+    observacion: '',
+  }
+  const [entregaForm, setEntregaForm] = useState(emptyEntrega)
+  const setEF = (k, v) => setEntregaForm(f => ({ ...f, [k]: v }))
+
   // ── Form state ─────────────────────────────────────────────────────────────
   const emptyForm = {
     cliente:      '',
@@ -458,17 +480,69 @@ export default function Pedidos({ onMenuClick }) {
 
   // ── Acciones de lista ──────────────────────────────────────────────────────
 
+  function abrirModalEntrega(p, e) {
+    e.stopPropagation()
+    setEntregaPedido(p)
+    setEntregaForm(emptyEntrega)
+    setModalEntrega(true)
+  }
+
+  async function confirmarEntrega() {
+    if (!entregaPedido) return
+    setSavingEntrega(true)
+
+    // 1. Actualizar etapa del pedido
+    await supabase.from('pedidos').update({ etapa_actual: 'entrega' }).eq('id', entregaPedido.id)
+
+    // 2. Registrar en cuenta corriente si hay monto
+    const monto = parseFloat(entregaForm.monto)
+    if (monto > 0 && entregaPedido.cliente_id) {
+      const { data: { user } } = await supabase.auth.getUser()
+      // Buscar datos de facturación del contacto si no se completó en el form
+      let ft = entregaForm.facturacion_tipo
+      const totalCobrar = parseFloat(entregaForm.total_cobrar) || monto
+      const registro = {
+        contacto_id: entregaPedido.cliente_id,
+        pedido_id: entregaPedido.id,
+        tipo: 'cobro',
+        fecha: new Date().toISOString().split('T')[0],
+        monto,
+        descuento_pct: parseFloat(entregaForm.descuento_pct) || 0,
+        monto_con_factura: ft === 'parcial' ? (parseFloat(entregaForm.monto_con_factura) || 0) : null,
+        monto_sin_factura: ft === 'parcial' ? (parseFloat(entregaForm.monto_sin_factura) || 0) : null,
+        descuento_sin_factura_pct: ft === 'parcial' ? (parseFloat(entregaForm.descuento_sin_factura_pct) || 0) : null,
+        total_cobrar: totalCobrar,
+        forma_pago: entregaForm.forma_pago,
+        cheque_numero: entregaForm.cheque_numero || null,
+        cheque_banco: entregaForm.cheque_banco || null,
+        cheque_fecha_cobro: entregaForm.cheque_fecha_cobro || null,
+        cheque_titular: entregaForm.cheque_titular || null,
+        observacion: entregaForm.observacion || null,
+        user_id: user?.id,
+      }
+      await supabase.from('cuenta_corriente').insert(registro)
+    }
+
+    setSavingEntrega(false)
+    setModalEntrega(false)
+    setEntregaPedido(null)
+    fetchPedidos()
+  }
+
   async function avanzarEtapa(p, e) {
     e.stopPropagation()
     const actual = normalizeEtapa(p.etapa_actual)
     const idx = FLUJO_ETAPAS.indexOf(actual)
     if (idx === -1 || idx >= FLUJO_ETAPAS.length - 1) return
-    await supabase.from('pedidos').update({ etapa_actual: FLUJO_ETAPAS[idx + 1] }).eq('id', p.id)
+    const siguiente = FLUJO_ETAPAS[idx + 1]
+    if (siguiente === 'entrega') { abrirModalEntrega(p, e); return }
+    await supabase.from('pedidos').update({ etapa_actual: siguiente }).eq('id', p.id)
     fetchPedidos()
   }
 
   async function cambiarEtapa(p, nuevaEtapa, e) {
     e.stopPropagation()
+    if (nuevaEtapa === 'entrega') { abrirModalEntrega(p, e); return }
     await supabase.from('pedidos').update({ etapa_actual: nuevaEtapa }).eq('id', p.id)
     fetchPedidos()
   }
@@ -481,6 +555,27 @@ export default function Pedidos({ onMenuClick }) {
     if (vistaFicha?.id === p.id) setVistaFicha(null)
     fetchPedidos()
   }
+
+  // Recalcular total a cobrar del form de entrega
+  useEffect(() => {
+    const m = parseFloat(entregaForm.monto) || 0
+    if (entregaForm.facturacion_tipo === 'normal') {
+      const d = parseFloat(entregaForm.descuento_pct) || 0
+      const total = m * (1 - d / 100)
+      setEntregaForm(f => ({ ...f, total_cobrar: m > 0 ? total.toFixed(2) : '' }))
+    } else {
+      const conFact = parseFloat(entregaForm.monto_con_factura) || 0
+      const dSin = parseFloat(entregaForm.descuento_sin_factura_pct) || 0
+      const sinFact = m - conFact
+      const totalSin = sinFact * (1 - dSin / 100)
+      const total = conFact + totalSin
+      setEntregaForm(f => ({
+        ...f,
+        monto_sin_factura: sinFact >= 0 ? sinFact.toFixed(2) : '0',
+        total_cobrar: total > 0 ? total.toFixed(2) : '',
+      }))
+    }
+  }, [entregaForm.monto, entregaForm.descuento_pct, entregaForm.monto_con_factura, entregaForm.descuento_sin_factura_pct, entregaForm.facturacion_tipo])
 
   // ── Filtros ────────────────────────────────────────────────────────────────
 
@@ -883,6 +978,144 @@ export default function Pedidos({ onMenuClick }) {
               <button className="btn btn-secondary" onClick={() => setModalProducto(false)}>Cancelar</button>
               <button className="btn btn-primary" onClick={guardarNuevoProducto} disabled={savingProducto}>
                 {savingProducto ? 'Guardando...' : '✔ Guardar y seleccionar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal de entrega / registro de cobro ── */}
+      {modalEntrega && entregaPedido && (
+        <div className="modal-overlay" style={{ zIndex: 200 }} onClick={() => setModalEntrega(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
+            <div className="modal-header">
+              <h3>🚚 Confirmar entrega</h3>
+              <button className="close-btn" onClick={() => setModalEntrega(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <p style={{ fontSize: 13, marginBottom: 12, color: 'var(--text2)' }}>
+                Pedido de <strong style={{ color: 'var(--text)' }}>{entregaPedido.cliente}</strong>
+                {' — '}
+                {entregaPedido.items?.length > 0 ? entregaPedido.items[0].producto : entregaPedido.producto}
+              </p>
+
+              <div className="form-group">
+                <label>Monto a cobrar <span style={{ color: 'var(--text2)', fontWeight: 400 }}>(opcional — dejá vacío si no se registra cobro)</span></label>
+                <input
+                  type="number" min="0" step="0.01"
+                  value={entregaForm.monto}
+                  onChange={e => setEF('monto', e.target.value)}
+                  placeholder="0.00" autoFocus
+                />
+              </div>
+
+              {parseFloat(entregaForm.monto) > 0 && (
+                <>
+                  <div className="form-group">
+                    <label>Tipo de facturación</label>
+                    <select value={entregaForm.facturacion_tipo} onChange={e => setEF('facturacion_tipo', e.target.value)}>
+                      <option value="normal">Normal (con descuento)</option>
+                      <option value="parcial">Parcial con IVA</option>
+                    </select>
+                  </div>
+
+                  {entregaForm.facturacion_tipo === 'normal' ? (
+                    <div className="form-group">
+                      <label>Descuento (%)</label>
+                      <input
+                        type="number" min="0" max="100" step="0.1"
+                        value={entregaForm.descuento_pct}
+                        onChange={e => setEF('descuento_pct', e.target.value)}
+                        placeholder="0"
+                      />
+                    </div>
+                  ) : (
+                    <div className="form-grid">
+                      <div className="form-group">
+                        <label>Monto con factura ($)</label>
+                        <input
+                          type="number" min="0" step="0.01"
+                          value={entregaForm.monto_con_factura}
+                          onChange={e => setEF('monto_con_factura', e.target.value)}
+                          placeholder="0.00"
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>Monto sin factura ($)</label>
+                        <input
+                          type="number" readOnly
+                          value={entregaForm.monto_sin_factura}
+                          style={{ background: 'var(--bg2)' }}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>Dto. sin factura (%)</label>
+                        <input
+                          type="number" min="0" max="100" step="0.1"
+                          value={entregaForm.descuento_sin_factura_pct}
+                          onChange={e => setEF('descuento_sin_factura_pct', e.target.value)}
+                          placeholder="0"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="form-group">
+                    <label>Total a cobrar</label>
+                    <input
+                      type="number" readOnly
+                      value={entregaForm.total_cobrar}
+                      style={{ background: 'var(--bg2)', fontWeight: 700, color: '#1a7a1a' }}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label>Forma de pago</label>
+                    <select value={entregaForm.forma_pago} onChange={e => setEF('forma_pago', e.target.value)}>
+                      <option value="efectivo">Efectivo</option>
+                      <option value="transferencia">Transferencia</option>
+                      <option value="cheque">Cheque</option>
+                      <option value="otro">Otro</option>
+                    </select>
+                  </div>
+
+                  {entregaForm.forma_pago === 'cheque' && (
+                    <div className="form-grid">
+                      <div className="form-group">
+                        <label>N° cheque</label>
+                        <input value={entregaForm.cheque_numero} onChange={e => setEF('cheque_numero', e.target.value)} placeholder="123456" />
+                      </div>
+                      <div className="form-group">
+                        <label>Banco</label>
+                        <input value={entregaForm.cheque_banco} onChange={e => setEF('cheque_banco', e.target.value)} placeholder="Ej: BROU" />
+                      </div>
+                      <div className="form-group">
+                        <label>Fecha cobro cheque</label>
+                        <input type="date" value={entregaForm.cheque_fecha_cobro} onChange={e => setEF('cheque_fecha_cobro', e.target.value)} />
+                      </div>
+                      <div className="form-group">
+                        <label>Titular</label>
+                        <input value={entregaForm.cheque_titular} onChange={e => setEF('cheque_titular', e.target.value)} placeholder="Nombre del titular" />
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              <div className="form-group">
+                <label>Observación</label>
+                <textarea
+                  value={entregaForm.observacion}
+                  onChange={e => setEF('observacion', e.target.value)}
+                  placeholder="Notas sobre la entrega..."
+                  style={{ height: 55 }}
+                />
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setModalEntrega(false)}>Cancelar</button>
+              <button className="btn btn-primary" onClick={confirmarEntrega} disabled={savingEntrega}>
+                {savingEntrega ? 'Guardando...' : '🚚 Confirmar entrega'}
               </button>
             </div>
           </div>

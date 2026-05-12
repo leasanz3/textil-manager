@@ -22,6 +22,29 @@ function TipoBadge({ tipo }) {
   )
 }
 
+function MapButtons({ direccion }) {
+  if (!direccion) return null
+  const q = encodeURIComponent(direccion)
+  return (
+    <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+      <a
+        href={`https://www.google.com/maps/search/?api=1&query=${q}`}
+        target="_blank" rel="noreferrer"
+        style={{ fontSize: 11, color: '#fff', background: '#4285F4', padding: '2px 8px', borderRadius: 2, textDecoration: 'none', fontWeight: 600 }}
+      >
+        📍 Google Maps
+      </a>
+      <a
+        href={`https://waze.com/ul?q=${q}&navigate=yes`}
+        target="_blank" rel="noreferrer"
+        style={{ fontSize: 11, color: '#fff', background: '#33CCFF', padding: '2px 8px', borderRadius: 2, textDecoration: 'none', fontWeight: 600 }}
+      >
+        🚗 Waze
+      </a>
+    </div>
+  )
+}
+
 export default function Contactos({ onMenuClick }) {
   const [contactos, setContactos]   = useState([])
   const [loading, setLoading]       = useState(true)
@@ -32,7 +55,7 @@ export default function Contactos({ onMenuClick }) {
   const [vistaFicha, setVistaFicha] = useState(null)
   const [saving, setSaving]         = useState(false)
 
-  const emptyForm = { nombre: '', tipo: 'Cliente', telefono: '', email: '', notas: '' }
+  const emptyForm = { nombre: '', tipo: 'Cliente', telefono: '', email: '', direccion: '', notas: '', facturacion_tipo: 'normal', facturacion_pct_con_factura: '100', facturacion_descuento_sin_factura: '0' }
   const [form, setForm] = useState(emptyForm)
   const setF = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
@@ -58,7 +81,11 @@ export default function Contactos({ onMenuClick }) {
       tipo:      c.tipo      || 'Cliente',
       telefono:  c.telefono  || '',
       email:     c.email     || '',
+      direccion: c.direccion || '',
       notas:     c.notas     || '',
+      facturacion_tipo:                 c.facturacion_tipo                  || 'normal',
+      facturacion_pct_con_factura:      c.facturacion_pct_con_factura != null ? String(c.facturacion_pct_con_factura) : '100',
+      facturacion_descuento_sin_factura: c.facturacion_descuento_sin_factura != null ? String(c.facturacion_descuento_sin_factura) : '0',
     })
     setModal(true)
   }
@@ -67,19 +94,25 @@ export default function Contactos({ onMenuClick }) {
     if (!form.nombre.trim()) return alert('El nombre es obligatorio')
     setSaving(true)
     const datos = {
-      nombre:   form.nombre.trim(),
-      tipo:     form.tipo,
-      telefono: form.telefono.trim() || null,
-      email:    form.email.trim()    || null,
-      notas:    form.notas.trim()    || null,
+      nombre:    form.nombre.trim(),
+      tipo:      form.tipo,
+      telefono:  form.telefono.trim()  || null,
+      email:     form.email.trim()     || null,
+      direccion: form.direccion.trim() || null,
+      notas:     form.notas.trim()     || null,
+      facturacion_tipo:                  form.tipo === 'Cliente' ? (form.facturacion_tipo || 'normal') : null,
+      facturacion_pct_con_factura:       form.tipo === 'Cliente' ? (parseFloat(form.facturacion_pct_con_factura) || 100) : null,
+      facturacion_descuento_sin_factura: form.tipo === 'Cliente' ? (parseFloat(form.facturacion_descuento_sin_factura) || 0) : null,
     }
+    let error
     if (editing) {
-      await supabase.from('contactos').update(datos).eq('id', editing)
-      setVistaFicha(prev => prev?.id === editing ? { ...prev, ...datos } : prev)
+      ;({ error } = await supabase.from('contactos').update(datos).eq('id', editing))
+      if (!error) setVistaFicha(prev => prev?.id === editing ? { ...prev, ...datos } : prev)
     } else {
-      await supabase.from('contactos').insert(datos)
+      ;({ error } = await supabase.from('contactos').insert(datos))
     }
     setSaving(false)
+    if (error) { alert('Error al guardar: ' + error.message); return }
     setModal(false)
     fetchAll()
   }
@@ -94,7 +127,7 @@ export default function Contactos({ onMenuClick }) {
 
   const filtered = contactos.filter(c => {
     const q  = search.toLowerCase()
-    const ms = !q || c.nombre?.toLowerCase().includes(q) || c.email?.toLowerCase().includes(q) || c.telefono?.includes(q)
+    const ms = !q || c.nombre?.toLowerCase().includes(q) || c.email?.toLowerCase().includes(q) || c.telefono?.includes(q) || c.direccion?.toLowerCase().includes(q)
     const mt = !filterTipo || c.tipo === filterTipo
     return ms && mt
   })
@@ -130,7 +163,7 @@ export default function Contactos({ onMenuClick }) {
           <div className="table-toolbar">
             <div className="search-input" style={{ flex: 1, maxWidth: 260 }}>
               <input
-                placeholder="Buscar nombre, email, teléfono..."
+                placeholder="Buscar nombre, email, dirección..."
                 value={search}
                 onChange={e => setSearch(e.target.value)}
               />
@@ -157,7 +190,7 @@ export default function Contactos({ onMenuClick }) {
                     <th>Nombre</th>
                     <th>Tipo</th>
                     <th>Teléfono</th>
-                    <th>Email</th>
+                    <th>Dirección</th>
                     <th>Notas</th>
                     <th></th>
                   </tr>
@@ -172,8 +205,10 @@ export default function Contactos({ onMenuClick }) {
                       <td><strong>{c.nombre}</strong></td>
                       <td><TipoBadge tipo={c.tipo} /></td>
                       <td>{c.telefono || '—'}</td>
-                      <td style={{ fontSize: 12 }}>{c.email || '—'}</td>
-                      <td style={{ fontSize: 11, color: 'var(--text2)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <td style={{ fontSize: 11, color: 'var(--text2)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {c.direccion || '—'}
+                      </td>
+                      <td style={{ fontSize: 11, color: 'var(--text2)', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {c.notas || '—'}
                       </td>
                       <td onClick={e => handleDelete(c.id, e)}>
@@ -214,6 +249,13 @@ export default function Contactos({ onMenuClick }) {
                   <a href={`mailto:${vistaFicha.email}`} style={{ color: 'var(--accent)' }}>{vistaFicha.email}</a>
                 </div>
               )}
+              {vistaFicha.direccion && (
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Dirección</div>
+                  <div>{vistaFicha.direccion}</div>
+                  <MapButtons direccion={vistaFicha.direccion} />
+                </div>
+              )}
               {vistaFicha.notas && (
                 <div>
                   <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Notas</div>
@@ -242,7 +284,6 @@ export default function Contactos({ onMenuClick }) {
                     onChange={e => setF('nombre', e.target.value)}
                     placeholder="Nombre completo"
                     autoFocus
-                    onKeyDown={e => e.key === 'Enter' && handleSave()}
                   />
                 </div>
                 <div className="form-group">
@@ -270,14 +311,65 @@ export default function Contactos({ onMenuClick }) {
                 </div>
               </div>
               <div className="form-group">
+                <label>Dirección</label>
+                <input
+                  value={form.direccion}
+                  onChange={e => setF('direccion', e.target.value)}
+                  placeholder="ej: Av. 18 de Julio 1234, Montevideo"
+                />
+                {form.direccion && (
+                  <div style={{ marginTop: 6 }}>
+                    <MapButtons direccion={form.direccion} />
+                  </div>
+                )}
+              </div>
+              <div className="form-group">
                 <label>Notas</label>
                 <textarea
                   value={form.notas}
                   onChange={e => setF('notas', e.target.value)}
                   placeholder="Observaciones, condiciones de trabajo, referencias..."
-                  style={{ height: 80 }}
+                  style={{ height: 70 }}
                 />
               </div>
+
+              {/* Facturación — solo para Clientes */}
+              {form.tipo === 'Cliente' && (
+                <div style={{ borderTop: '1px solid var(--border)', marginTop: 12, paddingTop: 12 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text2)', letterSpacing: 0.5, marginBottom: 8 }}>
+                    💳 Facturación
+                  </div>
+                  <div className="form-group">
+                    <label>Tipo de facturación</label>
+                    <select value={form.facturacion_tipo} onChange={e => setF('facturacion_tipo', e.target.value)}>
+                      <option value="normal">Normal (con descuento global)</option>
+                      <option value="parcial">Parcial con IVA</option>
+                    </select>
+                  </div>
+                  {form.facturacion_tipo === 'parcial' && (
+                    <div className="form-grid">
+                      <div className="form-group">
+                        <label>Monto con factura (% del total)</label>
+                        <input
+                          type="number" min="0" max="100" step="1"
+                          value={form.facturacion_pct_con_factura}
+                          onChange={e => setF('facturacion_pct_con_factura', e.target.value)}
+                          placeholder="100"
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>Dto. sin factura (%)</label>
+                        <input
+                          type="number" min="0" max="100" step="0.1"
+                          value={form.facturacion_descuento_sin_factura}
+                          onChange={e => setF('facturacion_descuento_sin_factura', e.target.value)}
+                          placeholder="0"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setModal(false)}>Cancelar</button>
