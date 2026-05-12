@@ -276,6 +276,7 @@ export default function Productos({ onMenuClick }) {
     notas: '',
     tipo_cambio: '',
     estampados: [],
+    precio_venta: '',
     costo_confeccion: '', costo_corte: '', costo_elasticos: '', costo_otros: '',
   }
   const [form, setForm]             = useState(emptyForm)
@@ -446,6 +447,7 @@ export default function Productos({ onMenuClick }) {
       costo_corte:             p.costo_corte             != null ? String(p.costo_corte)             : '',
       costo_elasticos:         p.costo_elasticos         != null ? String(p.costo_elasticos)         : '',
       estampados:              p.estampados              || [],
+      precio_venta:            p.precio_venta            != null ? String(p.precio_venta)            : '',
       costo_otros:             p.costo_otros             != null ? String(p.costo_otros)             : '',
     })
     setModal(true)
@@ -686,6 +688,7 @@ export default function Productos({ onMenuClick }) {
       costo_corte:              parseFloat(form.costo_corte)             || 0,
       costo_elasticos:          parseFloat(form.costo_elasticos)         || 0,
       estampados:               (form.estampados || []).map(e => ({ ...e, precio: parseFloat(e.precio) || 0 })),
+      precio_venta:             parseFloat(form.precio_venta) || null,
       costo_otros:              parseFloat(form.costo_otros)             || 0,
     }
     if (editing) {
@@ -855,6 +858,15 @@ export default function Productos({ onMenuClick }) {
               </div>
             </div>
             <div style={{ padding: 16 }}>
+
+              {/* Precio de venta */}
+              <div style={{ marginBottom: 14, fontSize: 13, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ color: 'var(--text2)' }}>Precio de venta:</span>
+                {vistaFicha.precio_venta != null
+                  ? <strong style={{ color: 'var(--success)', fontSize: 15 }}>$ {Number(vistaFicha.precio_venta).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                  : <span style={{ color: 'var(--text2)', fontStyle: 'italic' }}>— sin precio base</span>
+                }
+              </div>
 
               {/* Molde y avíos vinculados */}
               {(vistaFicha.molde || vistaFicha.avios_ids?.length > 0) && (
@@ -1250,6 +1262,29 @@ export default function Productos({ onMenuClick }) {
                           <td style={{ padding: 8, textAlign: 'right', fontWeight: 700, fontSize: 15, color: '#1a3a6b', border: '1px solid #6b83a8' }}>{fmtUYU(costoTotal)}</td>
                           <td style={{ border: '1px solid #6b83a8' }}></td>
                         </tr>
+
+                        {/* — Precio de venta + margen — */}
+                        {(() => {
+                          const pv = parseFloat(vistaFicha.precio_venta)
+                          if (!pv) return (
+                            <tr>
+                              <td colSpan={5} style={{ ...TD, color: '#888', fontStyle: 'italic' }}>
+                                💲 Precio de venta: — sin precio base
+                              </td>
+                            </tr>
+                          )
+                          const margen = costoTotal > 0 ? ((pv - costoTotal) / costoTotal) * 100 : null
+                          const margenColor = margen == null ? '#888' : margen >= 0 ? '#1a7a1a' : '#c06060'
+                          return (
+                            <tr style={{ background: '#f0f8f0' }}>
+                              <td colSpan={3} style={{ ...TD, fontWeight: 700 }}>💲 Precio de venta</td>
+                              <td style={{ ...TD, textAlign: 'right', fontWeight: 700, color: '#1a5a1a', fontSize: 13 }}>{fmtUYU(pv)}</td>
+                              <td style={{ ...TD, fontWeight: 700, color: margenColor }}>
+                                {margen != null ? `${margen >= 0 ? '+' : ''}${margen.toFixed(1)}% margen` : '—'}
+                              </td>
+                            </tr>
+                          )
+                        })()}
                       </tbody>
                     </table>
                   </div>
@@ -1583,6 +1618,17 @@ export default function Productos({ onMenuClick }) {
                   <input value={nuevaTerm} onChange={e => setNuevaTerm(e.target.value)} placeholder="ej: Planchado cartera con entretela" style={{ flex: 1 }} onKeyDown={e => e.key === 'Enter' && agregarTerminacion()} />
                   <button className="btn btn-secondary btn-sm" onClick={agregarTerminacion}>+ Agregar</button>
                 </div>
+              </div>
+
+              {/* Precio de venta */}
+              <div className="form-group">
+                <label>💲 Precio de venta $</label>
+                <input
+                  type="number"
+                  value={form.precio_venta}
+                  onChange={e => setForm(f => ({ ...f, precio_venta: e.target.value }))}
+                  placeholder="ej: 1500"
+                />
               </div>
 
               {/* Costos */}

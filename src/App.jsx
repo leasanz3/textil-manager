@@ -6,7 +6,7 @@ import Sidebar from './components/Sidebar'
 import Pedidos from './pages/Pedidos'
 import Productos from './pages/Productos'
 import Produccion from './pages/Produccion'
-import { Contactos } from './pages/Telas'
+import Contactos from './pages/Contactos'
 import CatalogoTelas from './pages/CatalogoTelas'
 import ComprasTela from './pages/ComprasTela'
 import StockTela from './pages/StockTela'
@@ -21,6 +21,7 @@ import Tareas from './pages/Tareas'
 import Diario from './pages/Diario'
 import Home from './pages/Home'
 import Cotizacion from './pages/Cotizacion'
+import CuentaCorriente from './pages/CuentaCorriente'
 
 export default function App() {
   const [session, setSession] = useState(undefined) // undefined = cargando
@@ -69,6 +70,7 @@ export default function App() {
             <Route path="/compras" element={<Compras onMenuClick={menu} />} />
             <Route path="/cotizacion" element={<Cotizacion onMenuClick={menu} />} />
             <Route path="/iva" element={<IVA onMenuClick={menu} />} />
+            <Route path="/cuenta-corriente" element={<CuentaCorriente onMenuClick={menu} />} />
             <Route path="/contactos" element={<Contactos onMenuClick={menu} />} />
             <Route path="/diario" element={<Diario onMenuClick={menu} />} />
             <Route path="/bitacora" element={<Navigate to="/diario" replace />} />
