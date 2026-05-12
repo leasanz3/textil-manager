@@ -4,14 +4,25 @@ import { supabase } from '../lib/supabase'
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
 const ETAPAS = [
-  { id: 'corte',     label: 'Corte',      color: 'badge-yellow' },
-  { id: 'taller',    label: 'Taller',     color: 'badge-blue'   },
-  { id: 'estampado', label: 'Estampado',  color: 'badge-red'    },
-  { id: 'bordado',   label: 'Bordado',    color: 'badge-blue'   },
-  { id: 'sublimado', label: 'Sublimado',  color: 'badge-green'  },
-  { id: 'entrega',   label: 'Entregado',  color: 'badge-green'  },
-  { id: 'cancelado', label: 'Cancelado',  color: 'badge-gray'   },
+  { id: 'recibido',      label: 'Pedido recibido', color: '#888888' },
+  { id: 'presupuestado', label: 'Presupuestado',   color: '#8060c0' },
+  { id: 'confirmado',    label: 'Confirmado',      color: '#2060a8' },
+  { id: 'compra_tela',   label: 'Compra de tela',  color: '#c8a040' },
+  { id: 'corte',         label: 'Corte',           color: '#d48a00' },
+  { id: 'taller',        label: 'Taller',          color: '#2a7a2a' },
+  { id: 'entrega',       label: 'Entrega',         color: '#1a5a1a' },
+  { id: 'cancelado',     label: 'Cancelado',       color: '#c06060' },
 ]
+
+// Etapas viejas que ya no existen → mapear a la más cercana
+const ETAPA_MAP_LEGACY = {
+  estampado:  'taller',
+  bordado:    'taller',
+  sublimado:  'taller',
+  planchado:  'taller',
+  ojal_boton: 'taller',
+}
+const normalizeEtapa = id => ETAPA_MAP_LEGACY[id] || id
 
 const TABLAS = {
   adulto:   { label: 'Adulto',         talles: ['XS', 'S', 'M', 'L', 'XL', 'XXL'] },
@@ -20,7 +31,7 @@ const TABLAS = {
   mallaesp: { label: 'Malla Especial', talles: ['54', '56', '58'] },
 }
 
-const FLUJO_ETAPAS = ['corte', 'taller', 'estampado', 'sublimado', 'bordado', 'entrega']
+const FLUJO_ETAPAS = ['recibido', 'presupuestado', 'confirmado', 'compra_tela', 'corte', 'taller', 'entrega']
 
 function inferirTabla(talles) {
   if (!talles) return 'adulto'
@@ -257,7 +268,7 @@ export default function Pedidos({ onMenuClick }) {
   const emptyForm = {
     cliente:      '',
     cliente_id:   null,
-    etapa_actual: 'corte',
+    etapa_actual: 'recibido',
     fecha_pedido: '',
     fecha:        '',
     items: [{ producto: '', producto_id: null, tabla: 'adulto', talles: {} }],
@@ -297,7 +308,7 @@ export default function Pedidos({ onMenuClick }) {
     setForm({
       cliente:      p.cliente      || '',
       cliente_id:   null,
-      etapa_actual: p.etapa_actual || 'corte',
+      etapa_actual: normalizeEtapa(p.etapa_actual || 'recibido'),
       fecha_pedido: p.fecha_pedido || '',
       fecha:        p.fecha        || '',
       items: p.items && p.items.length > 0
@@ -449,7 +460,8 @@ export default function Pedidos({ onMenuClick }) {
 
   async function avanzarEtapa(p, e) {
     e.stopPropagation()
-    const idx = FLUJO_ETAPAS.indexOf(p.etapa_actual)
+    const actual = normalizeEtapa(p.etapa_actual)
+    const idx = FLUJO_ETAPAS.indexOf(actual)
     if (idx === -1 || idx >= FLUJO_ETAPAS.length - 1) return
     await supabase.from('pedidos').update({ etapa_actual: FLUJO_ETAPAS[idx + 1] }).eq('id', p.id)
     fetchPedidos()
@@ -476,12 +488,12 @@ export default function Pedidos({ onMenuClick }) {
     const q = search.toLowerCase()
     const itemsMatch = (p.items || []).some(it => it.producto?.toLowerCase().includes(q))
     const matchSearch = !q || p.producto?.toLowerCase().includes(q) || p.cliente?.toLowerCase().includes(q) || itemsMatch
-    const matchEtapa  = !filtroEtapa || p.etapa_actual === filtroEtapa
+    const matchEtapa  = !filtroEtapa || normalizeEtapa(p.etapa_actual) === filtroEtapa
     return matchSearch && matchEtapa
   })
 
   const enProduccion = pedidos.filter(p => p.etapa_actual !== 'entrega' && p.etapa_actual !== 'cancelado').length
-  const etapaInfo = (id) => ETAPAS.find(e => e.id === id) || { label: id, color: 'badge-gray' }
+  const etapaInfo = (id) => ETAPAS.find(e => e.id === normalizeEtapa(id)) || { label: id, color: '#888' }
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -568,7 +580,7 @@ export default function Pedidos({ onMenuClick }) {
                 <tbody>
                   {filtered.map(p => {
                     const ei = etapaInfo(p.etapa_actual)
-                    const puedeAvanzar = FLUJO_ETAPAS.indexOf(p.etapa_actual) < FLUJO_ETAPAS.length - 1
+                    const puedeAvanzar = FLUJO_ETAPAS.indexOf(normalizeEtapa(p.etapa_actual)) < FLUJO_ETAPAS.length - 1
                     const items = p.items && p.items.length > 0 ? p.items : null
                     return (
                       <tr key={p.id} onClick={() => setVistaFicha(vistaFicha?.id === p.id ? null : p)} style={{ cursor: 'pointer' }}>
@@ -581,10 +593,9 @@ export default function Pedidos({ onMenuClick }) {
                         <td>{p.cliente}</td>
                         <td onClick={e => e.stopPropagation()}>
                           <select
-                            value={p.etapa_actual || ''}
+                            value={normalizeEtapa(p.etapa_actual) || ''}
                             onChange={e => cambiarEtapa(p, e.target.value, e)}
-                            className={`badge ${ei.color}`}
-                            style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 11, fontWeight: 600, padding: '2px 4px', appearance: 'auto' }}
+                            style={{ background: ei.color + '22', color: ei.color, border: `1px solid ${ei.color}88`, cursor: 'pointer', fontSize: 11, fontWeight: 700, padding: '2px 4px', appearance: 'auto', borderRadius: 2 }}
                           >
                             {ETAPAS.map(e => <option key={e.id} value={e.id}>{e.label}</option>)}
                           </select>
@@ -654,7 +665,7 @@ export default function Pedidos({ onMenuClick }) {
                   </div>
                   <div>
                     <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3 }}>Etapa</div>
-                    <span className={`badge ${ei.color}`}>{ei.label}</span>
+                    <span style={{ background: ei.color + '22', color: ei.color, border: `1px solid ${ei.color}88`, padding: '2px 8px', fontSize: 11, fontWeight: 700, borderRadius: 2 }}>{ei.label}</span>
                   </div>
                   <div>
                     <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3 }}>Total</div>

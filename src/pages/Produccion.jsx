@@ -4,14 +4,9 @@ import { supabase } from '../lib/supabase'
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
 const ETAPAS = [
-  { id: 'corte',      label: 'Corte',        icon: '✂',  tipo: ['otro', 'taller'],  color: '' },
-  { id: 'taller',     label: 'Taller',       icon: '🧵', tipo: ['taller'],           color: '' },
-  { id: 'estampado',  label: 'Estampado',    icon: '🎨', tipo: ['estampador'],       color: 'gold' },
-  { id: 'bordado',    label: 'Bordado',      icon: '🪡', tipo: ['bordador'],         color: '' },
-  { id: 'sublimado',  label: 'Sublimado',    icon: '✨', tipo: ['sublimador'],       color: 'gold' },
-  { id: 'planchado',  label: 'Planchado',    icon: '🔥', tipo: ['otro', 'taller'],  color: '' },
-  { id: 'ojal_boton', label: 'Ojal y botón', icon: '🪢', tipo: ['otro', 'taller'],  color: '' },
-  { id: 'entrega',    label: 'Entrega',      icon: '📦', tipo: [],                   color: 'green' },
+  { id: 'corte',   label: 'Corte',   icon: '✂',  tipo: ['otro', 'taller'], color: '' },
+  { id: 'taller',  label: 'Taller',  icon: '🧵', tipo: ['taller'],         color: '' },
+  { id: 'entrega', label: 'Entrega', icon: '📦', tipo: [],                  color: 'green' },
 ]
 
 const ETAPA_BY_ID   = Object.fromEntries(ETAPAS.map(e => [e.id, e]))
@@ -43,7 +38,7 @@ function tallesOrdenados(tallesObj) {
     .filter(t => (tallesObj || {})[t] > 0)
     .map(t => [t, tallesObj[t]])
 }
-const FLUJO_DEFAULT = ['corte', 'taller', 'estampado', 'bordado', 'sublimado', 'planchado', 'ojal_boton', 'entrega']
+const FLUJO_DEFAULT = ['recibido', 'presupuestado', 'confirmado', 'compra_tela', 'corte', 'taller', 'entrega']
 
 const TABLAS = {
   adulto:   { label: 'Adulto',         talles: ['XS', 'S', 'M', 'L', 'XL', 'XXL'] },
