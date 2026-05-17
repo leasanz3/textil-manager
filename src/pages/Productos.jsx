@@ -277,6 +277,7 @@ export default function Productos({ onMenuClick }) {
     tipo_cambio: '',
     estampados: [],
     precio_venta: '',
+    cara_uso: '',
     costo_confeccion: '', costo_corte: '', costo_elasticos: '', costo_otros: '',
   }
   const [form, setForm]             = useState(emptyForm)
@@ -448,6 +449,7 @@ export default function Productos({ onMenuClick }) {
       costo_elasticos:         p.costo_elasticos         != null ? String(p.costo_elasticos)         : '',
       estampados:              p.estampados              || [],
       precio_venta:            p.precio_venta            != null ? String(p.precio_venta)            : '',
+      cara_uso:                p.cara_uso                || '',
       costo_otros:             p.costo_otros             != null ? String(p.costo_otros)             : '',
     })
     setModal(true)
@@ -689,6 +691,7 @@ export default function Productos({ onMenuClick }) {
       costo_elasticos:          parseFloat(form.costo_elasticos)         || 0,
       estampados:               (form.estampados || []).map(e => ({ ...e, precio: parseFloat(e.precio) || 0 })),
       precio_venta:             parseFloat(form.precio_venta) || null,
+      cara_uso:                 form.cara_uso.trim() || null,
       costo_otros:              parseFloat(form.costo_otros)             || 0,
     }
     if (editing) {
@@ -859,13 +862,25 @@ export default function Productos({ onMenuClick }) {
             </div>
             <div style={{ padding: 16 }}>
 
-              {/* Precio de venta */}
-              <div style={{ marginBottom: 14, fontSize: 13, display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ color: 'var(--text2)' }}>Precio de venta:</span>
-                {vistaFicha.precio_venta != null
-                  ? <strong style={{ color: 'var(--success)', fontSize: 15 }}>$ {Number(vistaFicha.precio_venta).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
-                  : <span style={{ color: 'var(--text2)', fontStyle: 'italic' }}>— sin precio base</span>
-                }
+              {/* Precio de venta + cara de uso */}
+              <div style={{ marginBottom: 14, fontSize: 13, display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ color: 'var(--text2)' }}>Precio de venta:</span>
+                  {vistaFicha.precio_venta != null
+                    ? <strong style={{ color: 'var(--success)', fontSize: 15 }}>$ {Number(vistaFicha.precio_venta).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                    : <span style={{ color: 'var(--text2)', fontStyle: 'italic' }}>— sin precio base</span>
+                  }
+                </div>
+                {vistaFicha.cara_uso && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ color: 'var(--text2)' }}>Cara de uso:</span>
+                    <span style={{
+                      background: '#8060c022', color: '#8060c0',
+                      border: '1px solid #8060c088',
+                      padding: '1px 8px', fontSize: 11, fontWeight: 700, borderRadius: 2,
+                    }}>{vistaFicha.cara_uso}</span>
+                  </div>
+                )}
               </div>
 
               {/* Molde y avíos vinculados */}
@@ -1620,15 +1635,25 @@ export default function Productos({ onMenuClick }) {
                 </div>
               </div>
 
-              {/* Precio de venta */}
-              <div className="form-group">
-                <label>💲 Precio de venta $</label>
-                <input
-                  type="number"
-                  value={form.precio_venta}
-                  onChange={e => setForm(f => ({ ...f, precio_venta: e.target.value }))}
-                  placeholder="ej: 1500"
-                />
+              {/* Precio de venta + cara de uso */}
+              <div className="form-grid">
+                <div className="form-group">
+                  <label>💲 Precio de venta $</label>
+                  <input
+                    type="number"
+                    value={form.precio_venta}
+                    onChange={e => setForm(f => ({ ...f, precio_venta: e.target.value }))}
+                    placeholder="ej: 1500"
+                  />
+                </div>
+                <div className="form-group">
+                  <label>✂ Cara de uso</label>
+                  <input
+                    value={form.cara_uso}
+                    onChange={e => setForm(f => ({ ...f, cara_uso: e.target.value }))}
+                    placeholder="ej: Revés, Textura, Derecho..."
+                  />
+                </div>
               </div>
 
               {/* Costos */}

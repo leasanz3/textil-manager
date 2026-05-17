@@ -22,6 +22,7 @@ import Diario from './pages/Diario'
 import Home from './pages/Home'
 import Cotizacion from './pages/Cotizacion'
 import CuentaCorriente from './pages/CuentaCorriente'
+import Corte from './pages/Corte'
 
 export default function App() {
   const [session, setSession] = useState(undefined) // undefined = cargando
@@ -71,6 +72,7 @@ export default function App() {
             <Route path="/cotizacion" element={<Cotizacion onMenuClick={menu} />} />
             <Route path="/iva" element={<IVA onMenuClick={menu} />} />
             <Route path="/cuenta-corriente" element={<CuentaCorriente onMenuClick={menu} />} />
+            <Route path="/corte" element={<Corte onMenuClick={menu} />} />
             <Route path="/contactos" element={<Contactos onMenuClick={menu} />} />
             <Route path="/diario" element={<Diario onMenuClick={menu} />} />
             <Route path="/bitacora" element={<Navigate to="/diario" replace />} />

@@ -10,6 +10,7 @@ const NAV = [
   { path: '/pedidos',      icon: '📋', label: 'Pedidos' },
   { path: '/productos',    icon: '📦', label: 'Productos' },
   { path: '/produccion',   icon: '🏭', label: 'Producción' },
+  { path: '/corte',        icon: '✂',  label: 'Corte' },
   { section: 'Telas' },
   { path: '/telas/catalogo', icon: '🧶', label: 'Catálogo' },
   { path: '/telas/compras',  icon: '🛒', label: 'Compras' },
