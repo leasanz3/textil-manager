@@ -145,14 +145,19 @@ function TablaPorPar({ marcadaId, productoId, talles, piezas, pares, ajustes, on
   async function saveCell(pieza, talle, val) {
     const v = parseFloat(val) || 0
     const ex = piezas.find(p => p.pieza === pieza && p.talle === talle)
-    if (ex) await supabase.from('cortes_piezas').update({ por_par: v }).eq('id', ex.id)
-    else    await supabase.from('cortes_piezas').insert({ marcada_id: marcadaId, producto_id: productoId, pieza, talle, por_par: v })
+    if (ex) {
+      await supabase.from('cortes_piezas').update({ por_par: v }).eq('id', ex.id)
+    } else {
+      const { data: { user } } = await supabase.auth.getUser()
+      await supabase.from('cortes_piezas').insert({ marcada_id: marcadaId, producto_id: productoId, pieza, talle, por_par: v, user_id: user?.id })
+    }
     onReload()
   }
 
   async function addPieza() {
     if (!newPieza.trim()) return
-    const rows = talles.map(t => ({ marcada_id: marcadaId, producto_id: productoId, pieza: newPieza.trim(), talle: t, por_par: 0 }))
+    const { data: { user } } = await supabase.auth.getUser()
+    const rows = talles.map(t => ({ marcada_id: marcadaId, producto_id: productoId, pieza: newPieza.trim(), talle: t, por_par: 0, user_id: user?.id }))
     await supabase.from('cortes_piezas').insert(rows)
     setNewPieza(''); setAddingPieza(false); onReload()
   }
@@ -281,12 +286,14 @@ function ModificacionesSection({ marcadaId, productoId, piezas, talles, ajustes,
   async function save() {
     if (!f.cantidad) return
     setSaving(true)
+    const { data: { user } } = await supabase.auth.getUser()
     await supabase.from('cortes_ajustes').insert({
       marcada_id: marcadaId, producto_id: productoId,
       de_pieza: f.de_pieza || null, a_pieza: f.a_pieza || null,
       de_talle: f.de_talle || null, a_talle: f.a_talle || null,
       cantidad: parseFloat(f.cantidad) || 0,
       nota: f.nota.trim() || null,
+      user_id: user?.id,
     })
     setSaving(false)
     setAdding(false)
@@ -435,7 +442,8 @@ function MarcadaBlock({ marcada, num, allPiezas, allAjustes, onDeleteMarcada, on
   async function addProd(p) {
     const exists = prods.some(x => x.producto_id === p.id)
     if (exists) { alert('Producto ya agregado'); return }
-    await supabase.from('cortes_marcadas_productos').insert({ marcada_id: marcada.id, producto_id: p.id })
+    const { data: { user } } = await supabase.auth.getUser()
+    await supabase.from('cortes_marcadas_productos').insert({ marcada_id: marcada.id, producto_id: p.id, user_id: user?.id })
     setProdQ(''); setProdRes([]); setAddingProd(false); onReload()
   }
 
@@ -754,14 +762,16 @@ export default function Corte({ onMenuClick }) {
   async function createSession() {
     setSaving(true)
     const sid = crypto.randomUUID()
+    const { data: { user } } = await supabase.auth.getUser()
     const { data: m, error } = await supabase
       .from('cortes_marcadas')
       .insert({ session_id: sid, tela_id: nTelaId||null, fecha: nFecha,
         metros: parseFloat(nMetros)||0, pliegues: parseFloat(nPP)||1,
-        total_pliegues: parseFloat(nTP)||0, nota: nNota.trim()||null })
+        total_pliegues: parseFloat(nTP)||0, nota: nNota.trim()||null,
+        user_id: user?.id })
       .select('id').single()
     if (error) { alert('Error: '+error.message); setSaving(false); return }
-    if (nProdId) await supabase.from('cortes_marcadas_productos').insert({ marcada_id: m.id, producto_id: nProdId })
+    if (nProdId) await supabase.from('cortes_marcadas_productos').insert({ marcada_id: m.id, producto_id: nProdId, user_id: user?.id })
     setSaving(false)
     setModalNew(false)
     resetNew()
@@ -780,15 +790,17 @@ export default function Corte({ onMenuClick }) {
   async function addTelaToSession() {
     if (!selectedSid) return
     setSaving(true)
+    const { data: { user } } = await supabase.auth.getUser()
     const refFecha = fichaData?.marcadas?.[0]?.fecha || today()
     const { data: m, error } = await supabase
       .from('cortes_marcadas')
       .insert({ session_id: selectedSid, tela_id: aTelaId||null, fecha: refFecha,
         metros: parseFloat(aMetros)||0, pliegues: parseFloat(aPP)||1,
-        total_pliegues: parseFloat(aTP)||0, nota: aNota.trim()||null })
+        total_pliegues: parseFloat(aTP)||0, nota: aNota.trim()||null,
+        user_id: user?.id })
       .select('id').single()
     if (error) { alert('Error: '+error.message); setSaving(false); return }
-    if (aProdId) await supabase.from('cortes_marcadas_productos').insert({ marcada_id: m.id, producto_id: aProdId })
+    if (aProdId) await supabase.from('cortes_marcadas_productos').insert({ marcada_id: m.id, producto_id: aProdId, user_id: user?.id })
     setSaving(false)
     setModalTela(false)
     setAMetros(''); setAPP('2'); setATP(''); setANota('')
@@ -826,7 +838,8 @@ export default function Corte({ onMenuClick }) {
     const mid = fichaData?.marcadas?.[0]?.id
     if (!mid) return
     if (fichaData.pedidos?.some(x => x.pedido_id === p.id)) { alert('Ya vinculado'); return }
-    await supabase.from('cortes_pedidos').insert({ marcada_id: mid, pedido_id: p.id })
+    const { data: { user } } = await supabase.auth.getUser()
+    await supabase.from('cortes_pedidos').insert({ marcada_id: mid, pedido_id: p.id, user_id: user?.id })
     setPedQ(''); setPedRes([]); reloadFicha()
   }
 
