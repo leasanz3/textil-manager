@@ -767,7 +767,7 @@ export default function Corte({ onMenuClick }) {
       .from('cortes_marcadas')
       .select(`id, session_id, fecha, created_at, metros, pliegues, total_pliegues, nota,
         telas(id, tipo, color),
-        cortes_marcadas_productos(id, producto_id, tela_rol, productos(id, nombre, tabla, cara_uso))`)
+        cortes_marcadas_productos!marcada_id(id, producto_id, tela_rol, productos(id, nombre, tabla, cara_uso))`)
       .order('created_at', { ascending:false })
     const bySession = {}
     for (const m of (data || [])) {
@@ -785,7 +785,7 @@ export default function Corte({ onMenuClick }) {
       .from('cortes_marcadas')
       .select(`id, session_id, fecha, created_at, metros, pliegues, total_pliegues, nota,
         telas(id, tipo, color),
-        cortes_marcadas_productos(id, producto_id, tela_rol,
+        cortes_marcadas_productos!marcada_id(id, producto_id, tela_rol,
           productos(id, nombre, tabla, cara_uso, piezas, tela1_id, tela2_id, rib_id))`)
       .eq('session_id', sid).order('created_at')
     if (!marcadas || marcadas.length === 0) {
@@ -793,7 +793,7 @@ export default function Corte({ onMenuClick }) {
         .from('cortes_marcadas')
         .select(`id, session_id, fecha, created_at, metros, pliegues, total_pliegues, nota,
           telas(id, tipo, color),
-          cortes_marcadas_productos(id, producto_id, tela_rol,
+          cortes_marcadas_productos!marcada_id(id, producto_id, tela_rol,
             productos(id, nombre, tabla, cara_uso, piezas, tela1_id, tela2_id, rib_id))`)
         .eq('id', sid)
       marcadas = single || []
