@@ -73,8 +73,8 @@ function calcMetrosTotal(m) {
 function buildResult(piezas, pares, ajustes) {
   const r = {}
   for (const p of piezas) {
-    if (!r[p.pieza]) r[p.pieza] = {}
-    r[p.pieza][p.talle] = (parseFloat(p.por_par) || 0) * pares
+    if (!r[p.pieza_nombre]) r[p.pieza_nombre] = {}
+    r[p.pieza_nombre][p.talle] = (parseFloat(p.cantidad) || 0) * pares
   }
   for (const a of (ajustes || [])) {
     if (a.de_pieza && a.a_pieza) {
@@ -126,10 +126,10 @@ function TablaPorPar({ marcadaId, productoId, talles, piezas, pares, ajustes, on
 
   const map = {}
   for (const p of piezas) {
-    if (!map[p.pieza]) map[p.pieza] = {}
-    map[p.pieza][p.talle] = parseFloat(p.por_par) || 0
+    if (!map[p.pieza_nombre]) map[p.pieza_nombre] = {}
+    map[p.pieza_nombre][p.talle] = parseFloat(p.cantidad) || 0
   }
-  const dbPiezaNames = [...new Set(piezas.map(p => p.pieza))]
+  const dbPiezaNames = [...new Set(piezas.map(p => p.pieza_nombre))]
   const dbSet        = new Set(dbPiezaNames)
   const pendingShown = pendingPiezas.filter(n => !dbSet.has(n))
   const piezaNames   = [...dbPiezaNames, ...pendingShown]
@@ -140,18 +140,17 @@ function TablaPorPar({ marcadaId, productoId, talles, piezas, pares, ajustes, on
   // Cuando llegan datos de DB, sacar de pending lo que ya está guardado
   useEffect(() => {
     if (pendingPiezas.length === 0) return
-    const inDB = new Set(piezas.map(p => p.pieza))
+    const inDB = new Set(piezas.map(p => p.pieza_nombre))
     setPendingPiezas(prev => prev.filter(n => !inDB.has(n)))
   }, [piezas]) // eslint-disable-line
 
   async function saveCell(pieza, talle, val) {
     const v  = parseFloat(val) || 0
-    const ex = piezas.find(p => p.pieza === pieza && p.talle === talle)
+    const ex = piezas.find(p => p.pieza_nombre === pieza && p.talle === talle)
     if (ex) {
-      await supabase.from('cortes_piezas').update({ por_par: v }).eq('id', ex.id)
+      await supabase.from('cortes_piezas').update({ cantidad: v }).eq('id', ex.id)
     } else {
-      const { data:{ user } } = await supabase.auth.getUser()
-      const { error } = await supabase.from('cortes_piezas').insert({ marcada_id:marcadaId, producto_id:productoId, pieza, talle, por_par:v, user_id:user?.id })
+      const { error } = await supabase.from('cortes_piezas').insert({ marcada_id:marcadaId, producto_id:productoId, pieza_nombre:pieza, talle, cantidad:v })
       if (error) { alert('Error guardando: ' + error.message); return }
     }
     onReload()
@@ -174,7 +173,7 @@ function TablaPorPar({ marcadaId, productoId, talles, piezas, pares, ajustes, on
       return
     }
     if (!window.confirm(`¿Eliminar pieza "${pieza}"?`)) return
-    await supabase.from('cortes_piezas').delete().eq('marcada_id', marcadaId).eq('producto_id', productoId).eq('pieza', pieza)
+    await supabase.from('cortes_piezas').delete().eq('marcada_id', marcadaId).eq('producto_id', productoId).eq('pieza_nombre', pieza)
     onReload()
   }
 
@@ -303,7 +302,7 @@ function ModificacionesSection({ marcadaId, productoId, piezas, talles, ajustes,
   const [saving, setSaving] = useState(false)
   const upd = (k, v) => setF(x => ({ ...x, [k]: v }))
 
-  const piezaNames = [...new Set(piezas.map(p => p.pieza))]
+  const piezaNames = [...new Set(piezas.map(p => p.pieza_nombre))]
   const mine       = ajustes.filter(a => a.marcada_id === marcadaId && a.producto_id === productoId)
 
   async function save() {
