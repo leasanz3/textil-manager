@@ -813,7 +813,7 @@ export default function Corte({ onMenuClick }) {
     const [pr, ar, ped] = await Promise.all([
       supabase.from('cortes_piezas').select('*').in('marcada_id', ids),
       supabase.from('cortes_ajustes').select('*').in('marcada_id', ids).order('created_at'),
-      supabase.from('cortes_pedidos').select('*, pedidos!pedido_id(id, numero, contactos(nombre))').in('marcada_id', ids),
+      supabase.from('cortes_pedidos').select('*, pedidos(id, numero, contactos(nombre))').in('marcada_id', ids),
     ])
     setFichaData({ session_id:sid, marcadas, piezas:pr.data||[], ajustes:ar.data||[], pedidos:ped.data||[] })
     setLoadingFicha(false)
