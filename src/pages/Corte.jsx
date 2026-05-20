@@ -68,7 +68,7 @@ function calcPares(m) {
   return pp > 0 ? tp / pp : 0
 }
 function calcMetrosTotal(m) {
-  return (parseFloat(m.metros) || 0) * (parseFloat(m.pliegues) || 1)
+  return (parseFloat(m.metros) || 0) * (parseFloat(m.total_pliegues) || 0)
 }
 function buildResult(piezas, pares, ajustes) {
   const r = {}
@@ -447,7 +447,7 @@ function MarcadaBlock({ marcada, num, allPiezas, allAjustes, onDeleteMarcada, on
   const telaId = marcada.telas?.id
   const prods  = marcada.cortes_marcadas_productos || []
   const pares  = (parseFloat(cfg.total_pliegues)||0) / (parseFloat(cfg.pliegues)||1)
-  const metrosT= (parseFloat(cfg.metros)||0) * (parseFloat(cfg.pliegues)||1)
+  const metrosT= (parseFloat(cfg.metros)||0) * (parseFloat(cfg.total_pliegues)||0)
 
   useEffect(() => {
     setCfg({
