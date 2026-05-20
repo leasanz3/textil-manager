@@ -142,7 +142,7 @@ function TablaPorPar({ marcadaId, productoId, talles, piezas, pares, ajustes, on
     if (pendingPiezas.length === 0) return
     const inDB = new Set(piezas.map(p => p.pieza))
     setPendingPiezas(prev => prev.filter(n => !inDB.has(n)))
-  }, [piezas]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [piezas]) // eslint-disable-line
 
   async function saveCell(pieza, talle, val) {
     const v  = parseFloat(val) || 0
