@@ -308,12 +308,11 @@ function ModificacionesSection({ marcadaId, productoId, piezas, talles, ajustes,
   async function save() {
     if (!f.cantidad) return
     setSaving(true)
-    const { data:{ user } } = await supabase.auth.getUser()
     await supabase.from('cortes_ajustes').insert({
       marcada_id:marcadaId, producto_id:productoId,
       de_pieza:f.de_pieza||null, a_pieza:f.a_pieza||null,
       de_talle:f.de_talle||null, a_talle:f.a_talle||null,
-      cantidad:parseFloat(f.cantidad)||0, nota:f.nota.trim()||null, user_id:user?.id,
+      cantidad:parseFloat(f.cantidad)||0, nota:f.nota.trim()||null,
     })
     setSaving(false); setAdding(false)
     setF({ de_pieza:'', a_pieza:'', de_talle:'', a_talle:'', cantidad:'', nota:'' })
