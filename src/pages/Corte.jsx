@@ -118,20 +118,31 @@ function AcList({ items, onPick, label }) {
 // ── TablaPorPar ───────────────────────────────────────────────────────────────
 
 function TablaPorPar({ marcadaId, productoId, talles, piezas, pares, ajustes, onReload, catalogPiezas }) {
-  const [editing,      setEditing]      = useState(null)
-  const [cellVal,      setCellVal]      = useState('')
-  const [newPieza,     setNewPieza]     = useState('')
-  const [addingCustom, setAddingCustom] = useState(false)
+  const [editing,       setEditing]       = useState(null)
+  const [cellVal,       setCellVal]       = useState('')
+  const [newPieza,      setNewPieza]      = useState('')
+  const [addingCustom,  setAddingCustom]  = useState(false)
+  const [pendingPiezas, setPendingPiezas] = useState([])
 
   const map = {}
   for (const p of piezas) {
     if (!map[p.pieza]) map[p.pieza] = {}
     map[p.pieza][p.talle] = parseFloat(p.por_par) || 0
   }
-  const piezaNames   = [...new Set(piezas.map(p => p.pieza))]
+  const dbPiezaNames = [...new Set(piezas.map(p => p.pieza))]
+  const dbSet        = new Set(dbPiezaNames)
+  const pendingShown = pendingPiezas.filter(n => !dbSet.has(n))
+  const piezaNames   = [...dbPiezaNames, ...pendingShown]
   const result       = buildResult(piezas, pares, ajustes)
   const addedNames   = new Set(piezaNames)
   const availableCat = (catalogPiezas || []).filter(p => !addedNames.has(p.nombre))
+
+  // Cuando llegan datos de DB, sacar de pending lo que ya está guardado
+  useEffect(() => {
+    if (pendingPiezas.length === 0) return
+    const inDB = new Set(piezas.map(p => p.pieza))
+    setPendingPiezas(prev => prev.filter(n => !inDB.has(n)))
+  }, [piezas]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function saveCell(pieza, talle, val) {
     const v  = parseFloat(val) || 0
@@ -140,27 +151,28 @@ function TablaPorPar({ marcadaId, productoId, talles, piezas, pares, ajustes, on
       await supabase.from('cortes_piezas').update({ por_par: v }).eq('id', ex.id)
     } else {
       const { data:{ user } } = await supabase.auth.getUser()
-      await supabase.from('cortes_piezas').insert({ marcada_id:marcadaId, producto_id:productoId, pieza, talle, por_par:v, user_id:user?.id })
+      const { error } = await supabase.from('cortes_piezas').insert({ marcada_id:marcadaId, producto_id:productoId, pieza, talle, por_par:v, user_id:user?.id })
+      if (error) { alert('Error guardando: ' + error.message); return }
     }
     onReload()
   }
 
-  async function addFromCatalog(cp) {
-    const { data:{ user } } = await supabase.auth.getUser()
-    const rows = talles.map(t => ({ marcada_id:marcadaId, producto_id:productoId, pieza:cp.nombre, talle:t, por_par:cp.mult||1, user_id:user?.id }))
-    await supabase.from('cortes_piezas').insert(rows)
-    onReload()
+  function addFromCatalog(cp) {
+    setPendingPiezas(prev => [...prev, cp.nombre])
   }
 
-  async function addCustomPieza() {
-    if (!newPieza.trim()) return
-    const { data:{ user } } = await supabase.auth.getUser()
-    const rows = talles.map(t => ({ marcada_id:marcadaId, producto_id:productoId, pieza:newPieza.trim(), talle:t, por_par:0, user_id:user?.id }))
-    await supabase.from('cortes_piezas').insert(rows)
-    setNewPieza(''); setAddingCustom(false); onReload()
+  function addCustomPieza() {
+    const name = newPieza.trim()
+    if (!name) return
+    setPendingPiezas(prev => [...prev, name])
+    setNewPieza(''); setAddingCustom(false)
   }
 
   async function deletePieza(pieza) {
+    if (pendingShown.includes(pieza)) {
+      setPendingPiezas(prev => prev.filter(n => n !== pieza))
+      return
+    }
     if (!window.confirm(`¿Eliminar pieza "${pieza}"?`)) return
     await supabase.from('cortes_piezas').delete().eq('marcada_id', marcadaId).eq('producto_id', productoId).eq('pieza', pieza)
     onReload()
