@@ -813,7 +813,7 @@ export default function Corte({ onMenuClick }) {
     const [pr, ar, ped] = await Promise.all([
       supabase.from('cortes_piezas').select('*').in('marcada_id', ids),
       supabase.from('cortes_ajustes').select('*').in('marcada_id', ids).order('created_at'),
-      supabase.from('cortes_pedidos').select('*, pedidos(id, numero, contactos(nombre))').in('marcada_id', ids),
+      supabase.from('cortes_pedidos').select('*, pedidos(id, cliente)').in('corte_id', ids),
     ])
     setFichaData({ session_id:sid, marcadas, piezas:pr.data||[], ajustes:ar.data||[], pedidos:ped.data||[] })
     setLoadingFicha(false)
@@ -859,7 +859,7 @@ export default function Corte({ onMenuClick }) {
     if (!window.confirm('¿Eliminar esta marcada y todos sus datos?')) return
     await supabase.from('cortes_piezas').delete().eq('marcada_id', mid)
     await supabase.from('cortes_ajustes').delete().eq('marcada_id', mid)
-    await supabase.from('cortes_pedidos').delete().eq('marcada_id', mid)
+    await supabase.from('cortes_pedidos').delete().eq('corte_id', mid)
     await supabase.from('cortes_marcadas_productos').delete().eq('marcada_id', mid)
     await supabase.from('cortes_marcadas').delete().eq('id', mid)
     reloadFicha()
@@ -870,7 +870,7 @@ export default function Corte({ onMenuClick }) {
     if (pedTimer.current) clearTimeout(pedTimer.current)
     if (!val.trim()) { setPedRes([]); return }
     pedTimer.current = setTimeout(async () => {
-      const { data } = await supabase.from('pedidos').select('id, numero, contactos(nombre)').ilike('numero', `%${val}%`).limit(6)
+      const { data } = await supabase.from('pedidos').select('id, cliente').ilike('cliente', `%${val}%`).limit(6)
       setPedRes(data || [])
     }, 300)
   }
@@ -878,8 +878,7 @@ export default function Corte({ onMenuClick }) {
     const mid = fichaData?.marcadas?.[0]?.id
     if (!mid) return
     if (fichaData.pedidos?.some(x => x.pedido_id === p.id)) { alert('Ya vinculado'); return }
-    const { data:{ user } } = await supabase.auth.getUser()
-    await supabase.from('cortes_pedidos').insert({ marcada_id:mid, pedido_id:p.id, user_id:user?.id })
+    await supabase.from('cortes_pedidos').insert({ corte_id:mid, pedido_id:p.id })
     setPedQ(''); setPedRes([]); reloadFicha()
   }
   async function unlinkPedido(id) { await supabase.from('cortes_pedidos').delete().eq('id', id); reloadFicha() }
@@ -995,7 +994,7 @@ export default function Corte({ onMenuClick }) {
                 {!fichaData.pedidos?.length && <span style={{ color:'#888', fontSize:10 }}>sin vincular</span>}
                 {fichaData.pedidos?.map(p => (
                   <span key={p.id} style={S.chipPed}>
-                    #{p.pedidos?.numero}{p.pedidos?.contactos?.nombre ? ` · ${p.pedidos.contactos.nombre}` : ''}
+                    #{p.pedidos?.id}{p.pedidos?.cliente ? ` · ${p.pedidos.cliente}` : ''}
                     <button style={{ border:'none', background:'none', cursor:'pointer', padding:0, color:'#a04040', fontWeight:700, fontFamily:F, fontSize:11 }} onClick={() => unlinkPedido(p.id)}>✕</button>
                   </span>
                 ))}
