@@ -306,15 +306,17 @@ function ModificacionesSection({ marcadaId, productoId, piezas, talles, ajustes,
   const mine       = ajustes.filter(a => a.marcada_id === marcadaId && a.producto_id === productoId)
 
   async function save() {
-    if (!f.cantidad) return
+    if (!f.cantidad || !f.de_talle || !f.a_talle) return
     setSaving(true)
-    await supabase.from('cortes_ajustes').insert({
+    const { error } = await supabase.from('cortes_ajustes').insert({
       marcada_id:marcadaId, producto_id:productoId,
       de_pieza:f.de_pieza||null, a_pieza:f.a_pieza||null,
-      de_talle:f.de_talle||null, a_talle:f.a_talle||null,
-      cantidad:parseFloat(f.cantidad)||0, nota:f.nota.trim()||null,
+      de_talle:f.de_talle, a_talle:f.a_talle,
+      cantidad:parseInt(f.cantidad)||0,
     })
-    setSaving(false); setAdding(false)
+    setSaving(false)
+    if (error) { alert('Error: ' + error.message); return }
+    setAdding(false)
     setF({ de_pieza:'', a_pieza:'', de_talle:'', a_talle:'', cantidad:'', nota:'' })
     onReload()
   }
