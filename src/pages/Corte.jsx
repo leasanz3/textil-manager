@@ -73,8 +73,8 @@ function calcMetrosTotal(m) {
 function buildResult(piezas, pares, ajustes) {
   const r = {}
   for (const p of piezas) {
-    if (!r[p.pieza]) r[p.pieza] = {}
-    r[p.pieza][p.talle] = (parseFloat(p.por_par) || 0) * pares
+    if (!r[p.pieza_nombre]) r[p.pieza_nombre] = {}
+    r[p.pieza_nombre][p.talle] = (parseFloat(p.cantidad) || 0) * pares
   }
   for (const a of (ajustes || [])) {
     if (a.de_pieza && a.a_pieza) {
@@ -118,51 +118,62 @@ function AcList({ items, onPick, label }) {
 // ── TablaPorPar ───────────────────────────────────────────────────────────────
 
 function TablaPorPar({ marcadaId, productoId, talles, piezas, pares, ajustes, onReload, catalogPiezas }) {
-  const [editing,      setEditing]      = useState(null)
-  const [cellVal,      setCellVal]      = useState('')
-  const [newPieza,     setNewPieza]     = useState('')
-  const [addingCustom, setAddingCustom] = useState(false)
+  const [editing,       setEditing]       = useState(null)
+  const [cellVal,       setCellVal]       = useState('')
+  const [newPieza,      setNewPieza]      = useState('')
+  const [addingCustom,  setAddingCustom]  = useState(false)
+  const [pendingPiezas, setPendingPiezas] = useState([])
 
   const map = {}
   for (const p of piezas) {
-    if (!map[p.pieza]) map[p.pieza] = {}
-    map[p.pieza][p.talle] = parseFloat(p.por_par) || 0
+    if (!map[p.pieza_nombre]) map[p.pieza_nombre] = {}
+    map[p.pieza_nombre][p.talle] = parseFloat(p.cantidad) || 0
   }
-  const piezaNames   = [...new Set(piezas.map(p => p.pieza))]
+  const dbPiezaNames = [...new Set(piezas.map(p => p.pieza_nombre))]
+  const dbSet        = new Set(dbPiezaNames)
+  const pendingShown = pendingPiezas.filter(n => !dbSet.has(n))
+  const piezaNames   = [...dbPiezaNames, ...pendingShown]
   const result       = buildResult(piezas, pares, ajustes)
   const addedNames   = new Set(piezaNames)
   const availableCat = (catalogPiezas || []).filter(p => !addedNames.has(p.nombre))
 
+  // Cuando llegan datos de DB, sacar de pending lo que ya está guardado
+  useEffect(() => {
+    if (pendingPiezas.length === 0) return
+    const inDB = new Set(piezas.map(p => p.pieza_nombre))
+    setPendingPiezas(prev => prev.filter(n => !inDB.has(n)))
+  }, [piezas]) // eslint-disable-line
+
   async function saveCell(pieza, talle, val) {
     const v  = parseFloat(val) || 0
-    const ex = piezas.find(p => p.pieza === pieza && p.talle === talle)
+    const ex = piezas.find(p => p.pieza_nombre === pieza && p.talle === talle)
     if (ex) {
-      await supabase.from('cortes_piezas').update({ por_par: v }).eq('id', ex.id)
+      await supabase.from('cortes_piezas').update({ cantidad: v }).eq('id', ex.id)
     } else {
-      const { data:{ user } } = await supabase.auth.getUser()
-      await supabase.from('cortes_piezas').insert({ marcada_id:marcadaId, producto_id:productoId, pieza, talle, por_par:v, user_id:user?.id })
+      const { error } = await supabase.from('cortes_piezas').insert({ marcada_id:marcadaId, producto_id:productoId, pieza_nombre:pieza, talle, cantidad:v })
+      if (error) { alert('Error guardando: ' + error.message); return }
     }
     onReload()
   }
 
-  async function addFromCatalog(cp) {
-    const { data:{ user } } = await supabase.auth.getUser()
-    const rows = talles.map(t => ({ marcada_id:marcadaId, producto_id:productoId, pieza:cp.nombre, talle:t, por_par:cp.mult||1, user_id:user?.id }))
-    await supabase.from('cortes_piezas').insert(rows)
-    onReload()
+  function addFromCatalog(cp) {
+    setPendingPiezas(prev => [...prev, cp.nombre])
   }
 
-  async function addCustomPieza() {
-    if (!newPieza.trim()) return
-    const { data:{ user } } = await supabase.auth.getUser()
-    const rows = talles.map(t => ({ marcada_id:marcadaId, producto_id:productoId, pieza:newPieza.trim(), talle:t, por_par:0, user_id:user?.id }))
-    await supabase.from('cortes_piezas').insert(rows)
-    setNewPieza(''); setAddingCustom(false); onReload()
+  function addCustomPieza() {
+    const name = newPieza.trim()
+    if (!name) return
+    setPendingPiezas(prev => [...prev, name])
+    setNewPieza(''); setAddingCustom(false)
   }
 
   async function deletePieza(pieza) {
+    if (pendingShown.includes(pieza)) {
+      setPendingPiezas(prev => prev.filter(n => n !== pieza))
+      return
+    }
     if (!window.confirm(`¿Eliminar pieza "${pieza}"?`)) return
-    await supabase.from('cortes_piezas').delete().eq('marcada_id', marcadaId).eq('producto_id', productoId).eq('pieza', pieza)
+    await supabase.from('cortes_piezas').delete().eq('marcada_id', marcadaId).eq('producto_id', productoId).eq('pieza_nombre', pieza)
     onReload()
   }
 
@@ -291,20 +302,21 @@ function ModificacionesSection({ marcadaId, productoId, piezas, talles, ajustes,
   const [saving, setSaving] = useState(false)
   const upd = (k, v) => setF(x => ({ ...x, [k]: v }))
 
-  const piezaNames = [...new Set(piezas.map(p => p.pieza))]
+  const piezaNames = [...new Set(piezas.map(p => p.pieza_nombre))]
   const mine       = ajustes.filter(a => a.marcada_id === marcadaId && a.producto_id === productoId)
 
   async function save() {
-    if (!f.cantidad) return
+    if (!f.cantidad || !f.de_talle || !f.a_talle) return
     setSaving(true)
-    const { data:{ user } } = await supabase.auth.getUser()
-    await supabase.from('cortes_ajustes').insert({
+    const { error } = await supabase.from('cortes_ajustes').insert({
       marcada_id:marcadaId, producto_id:productoId,
       de_pieza:f.de_pieza||null, a_pieza:f.a_pieza||null,
-      de_talle:f.de_talle||null, a_talle:f.a_talle||null,
-      cantidad:parseFloat(f.cantidad)||0, nota:f.nota.trim()||null, user_id:user?.id,
+      de_talle:f.de_talle, a_talle:f.a_talle,
+      cantidad:parseInt(f.cantidad)||0,
     })
-    setSaving(false); setAdding(false)
+    setSaving(false)
+    if (error) { alert('Error: ' + error.message); return }
+    setAdding(false)
     setF({ de_pieza:'', a_pieza:'', de_talle:'', a_talle:'', cantidad:'', nota:'' })
     onReload()
   }
@@ -803,7 +815,7 @@ export default function Corte({ onMenuClick }) {
     const [pr, ar, ped] = await Promise.all([
       supabase.from('cortes_piezas').select('*').in('marcada_id', ids),
       supabase.from('cortes_ajustes').select('*').in('marcada_id', ids).order('created_at'),
-      supabase.from('cortes_pedidos').select('*, pedidos!pedido_id(id, numero, contactos(nombre))').in('marcada_id', ids),
+      supabase.from('cortes_pedidos').select('*, pedidos(id, cliente)').in('corte_id', ids),
     ])
     setFichaData({ session_id:sid, marcadas, piezas:pr.data||[], ajustes:ar.data||[], pedidos:ped.data||[] })
     setLoadingFicha(false)
@@ -849,7 +861,7 @@ export default function Corte({ onMenuClick }) {
     if (!window.confirm('¿Eliminar esta marcada y todos sus datos?')) return
     await supabase.from('cortes_piezas').delete().eq('marcada_id', mid)
     await supabase.from('cortes_ajustes').delete().eq('marcada_id', mid)
-    await supabase.from('cortes_pedidos').delete().eq('marcada_id', mid)
+    await supabase.from('cortes_pedidos').delete().eq('corte_id', mid)
     await supabase.from('cortes_marcadas_productos').delete().eq('marcada_id', mid)
     await supabase.from('cortes_marcadas').delete().eq('id', mid)
     reloadFicha()
@@ -860,7 +872,7 @@ export default function Corte({ onMenuClick }) {
     if (pedTimer.current) clearTimeout(pedTimer.current)
     if (!val.trim()) { setPedRes([]); return }
     pedTimer.current = setTimeout(async () => {
-      const { data } = await supabase.from('pedidos').select('id, numero, contactos(nombre)').ilike('numero', `%${val}%`).limit(6)
+      const { data } = await supabase.from('pedidos').select('id, cliente').ilike('cliente', `%${val}%`).limit(6)
       setPedRes(data || [])
     }, 300)
   }
@@ -868,8 +880,7 @@ export default function Corte({ onMenuClick }) {
     const mid = fichaData?.marcadas?.[0]?.id
     if (!mid) return
     if (fichaData.pedidos?.some(x => x.pedido_id === p.id)) { alert('Ya vinculado'); return }
-    const { data:{ user } } = await supabase.auth.getUser()
-    await supabase.from('cortes_pedidos').insert({ marcada_id:mid, pedido_id:p.id, user_id:user?.id })
+    await supabase.from('cortes_pedidos').insert({ corte_id:mid, pedido_id:p.id })
     setPedQ(''); setPedRes([]); reloadFicha()
   }
   async function unlinkPedido(id) { await supabase.from('cortes_pedidos').delete().eq('id', id); reloadFicha() }
@@ -985,7 +996,7 @@ export default function Corte({ onMenuClick }) {
                 {!fichaData.pedidos?.length && <span style={{ color:'#888', fontSize:10 }}>sin vincular</span>}
                 {fichaData.pedidos?.map(p => (
                   <span key={p.id} style={S.chipPed}>
-                    #{p.pedidos?.numero}{p.pedidos?.contactos?.nombre ? ` · ${p.pedidos.contactos.nombre}` : ''}
+                    #{p.pedidos?.id}{p.pedidos?.cliente ? ` · ${p.pedidos.cliente}` : ''}
                     <button style={{ border:'none', background:'none', cursor:'pointer', padding:0, color:'#a04040', fontWeight:700, fontFamily:F, fontSize:11 }} onClick={() => unlinkPedido(p.id)}>✕</button>
                   </span>
                 ))}
