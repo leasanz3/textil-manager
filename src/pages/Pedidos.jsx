@@ -243,6 +243,8 @@ export default function Pedidos({ onMenuClick }) {
   const [saving, setSaving]           = useState(false)
   const [error, setError]             = useState('')
   const [vistaFicha, setVistaFicha]   = useState(null)
+  const [sortCol, setSortCol]         = useState('fecha_pedido')
+  const [sortDir, setSortDir]         = useState('desc')
 
   // ── Autocomplete cliente ───────────────────────────────────────────────────
   const [clienteQuery, setClienteQuery]               = useState('')
@@ -587,6 +589,24 @@ export default function Pedidos({ onMenuClick }) {
     return matchSearch && matchEtapa
   })
 
+  function toggleSort(col) {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortCol(col); setSortDir('asc') }
+  }
+
+  const sorted = [...filtered].sort((a, b) => {
+    let va, vb
+    if (sortCol === 'producto')    { va = (a.items?.[0]?.producto || a.producto || '').toLowerCase(); vb = (b.items?.[0]?.producto || b.producto || '').toLowerCase() }
+    if (sortCol === 'cliente')     { va = (a.cliente || '').toLowerCase(); vb = (b.cliente || '').toLowerCase() }
+    if (sortCol === 'etapa')       { va = a.etapa_actual || ''; vb = b.etapa_actual || '' }
+    if (sortCol === 'total')       { va = pedidoTotal(a); vb = pedidoTotal(b) }
+    if (sortCol === 'fecha_pedido'){ va = a.fecha_pedido || ''; vb = b.fecha_pedido || '' }
+    if (sortCol === 'fecha')       { va = a.fecha || ''; vb = b.fecha || '' }
+    if (va < vb) return sortDir === 'asc' ? -1 : 1
+    if (va > vb) return sortDir === 'asc' ?  1 : -1
+    return 0
+  })
+
   const enProduccion = pedidos.filter(p => p.etapa_actual !== 'entrega' && p.etapa_actual !== 'cancelado').length
   const etapaInfo = (id) => ETAPAS.find(e => e.id === normalizeEtapa(id)) || { label: id, color: '#888' }
 
@@ -662,23 +682,25 @@ export default function Pedidos({ onMenuClick }) {
               <table>
                 <thead>
                   <tr>
-                    <th>Producto</th>
-                    <th>Cliente</th>
-                    <th>Etapa</th>
-                    <th>Total</th>
-                    <th>Pedido</th>
-                    <th>Entrega</th>
+                    <th>#</th>
+                    <th onClick={() => toggleSort('producto')} style={{ cursor:'pointer', userSelect:'none', whiteSpace:'nowrap' }}>Producto {sortCol === 'producto' ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}</th>
+                    <th onClick={() => toggleSort('cliente')} style={{ cursor:'pointer', userSelect:'none', whiteSpace:'nowrap' }}>Cliente {sortCol === 'cliente' ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}</th>
+                    <th onClick={() => toggleSort('etapa')} style={{ cursor:'pointer', userSelect:'none', whiteSpace:'nowrap' }}>Etapa {sortCol === 'etapa' ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}</th>
+                    <th onClick={() => toggleSort('total')} style={{ cursor:'pointer', userSelect:'none', whiteSpace:'nowrap' }}>Total {sortCol === 'total' ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}</th>
+                    <th onClick={() => toggleSort('fecha_pedido')} style={{ cursor:'pointer', userSelect:'none', whiteSpace:'nowrap' }}>Pedido {sortCol === 'fecha_pedido' ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}</th>
+                    <th onClick={() => toggleSort('fecha')} style={{ cursor:'pointer', userSelect:'none', whiteSpace:'nowrap' }}>Entrega {sortCol === 'fecha' ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}</th>
                     <th>Detalle</th>
                     <th style={{ width: 140 }}>Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map(p => {
+                  {sorted.map(p => {
                     const ei = etapaInfo(p.etapa_actual)
                     const puedeAvanzar = FLUJO_ETAPAS.indexOf(normalizeEtapa(p.etapa_actual)) < FLUJO_ETAPAS.length - 1
                     const items = p.items && p.items.length > 0 ? p.items : null
                     return (
                       <tr key={p.id} onClick={() => setVistaFicha(vistaFicha?.id === p.id ? null : p)} style={{ cursor: 'pointer' }}>
+                        <td style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'monospace' }}>{String(p.id).slice(0, 8)}</td>
                         <td>
                           <strong>{items ? items[0].producto : p.producto}</strong>
                           {items && items.length > 1 && (
