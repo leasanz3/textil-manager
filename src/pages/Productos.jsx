@@ -246,6 +246,8 @@ export default function Productos({ onMenuClick }) {
   const [filterProvTela, setFilterProvTela]   = useState('')
   const [filterProvTela2, setFilterProvTela2] = useState('')
   const [filterProvRib, setFilterProvRib]     = useState('')
+  const [filterProvAvio, setFilterProvAvio]   = useState('')
+  const [nuevoAvioSelect, setNuevoAvioSelect] = useState({ prov_id: '', avio_id: '', cantidad: '' })
   const [clienteQuery, setClienteQuery]               = useState('')
   const [contactosResults, setContactosResults]       = useState([])
   const [showClienteDropdown, setShowClienteDropdown] = useState(false)
@@ -368,7 +370,7 @@ export default function Productos({ onMenuClick }) {
       supabase.from('productos').select('*').order('nombre'),
       supabase.from('telas').select('id, tipo, color, unidad, proveedor_id, proveedor').order('tipo'),
       supabase.from('proveedores').select('id, nombre').order('nombre'),
-      supabase.from('avios').select('id, nombre, tipo').order('nombre'),
+      supabase.from('avios').select('id, nombre, tipo, unidad, precio, proveedor_id').order('nombre'),
       supabase.from('contactos').select('id, nombre, tipo').order('nombre'),
     ])
     setProductos(p || [])
@@ -386,6 +388,12 @@ export default function Productos({ onMenuClick }) {
     return telas.filter(t => String(t.proveedor_id) === String(provId))
   }
 
+  function aviosFiltrados(provId) {
+    const base = avios.filter(a => a.tipo?.toLowerCase() !== 'entretela')
+    if (!provId) return base
+    return base.filter(a => String(a.proveedor_id) === String(provId))
+  }
+
   function telaLabel(id) {
     const t = telas.find(x => x.id === parseInt(id))
     return t ? `${t.tipo}${t.color ? ` · ${t.color}` : ''}` : '—'
@@ -401,7 +409,8 @@ export default function Productos({ onMenuClick }) {
   function openNew() {
     setEditing(null)
     setForm(emptyForm)
-    setFilterProvTela(''); setFilterProvTela2(''); setFilterProvRib('')
+    setFilterProvTela(''); setFilterProvTela2(''); setFilterProvRib(''); setFilterProvAvio('')
+    setNuevoAvioSelect({ prov_id: '', avio_id: '', cantidad: '' })
     setClienteQuery(''); setContactosResults([]); setShowClienteDropdown(false)
     setModal(true)
   }
@@ -414,6 +423,8 @@ export default function Productos({ onMenuClick }) {
     setFilterProvTela(t1?.proveedor_id  ? String(t1.proveedor_id)  : '')
     setFilterProvTela2(t2?.proveedor_id ? String(t2.proveedor_id)  : '')
     setFilterProvRib(rib?.proveedor_id  ? String(rib.proveedor_id) : '')
+    setFilterProvAvio('')
+    setNuevoAvioSelect({ prov_id: '', avio_id: '', cantidad: '' })
     const clienteDeProducto = contactos.find(c => c.id === p.cliente_id)
     setClienteQuery(clienteDeProducto?.nombre || '')
     setContactosResults([]); setShowClienteDropdown(false)
@@ -895,11 +906,16 @@ export default function Productos({ onMenuClick }) {
                   {vistaFicha.avios_ids?.length > 0 && (
                     <div>
                       <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Avíos</div>
-                      {vistaFicha.avios_ids.map((av, i) => (
-                        <span key={i} style={{ display: 'inline-block', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 12, padding: '2px 10px', fontSize: 11, marginRight: 6, marginBottom: 4 }}>
-                          🧷 {av.nombre}
-                        </span>
-                      ))}
+                      {vistaFicha.avios_ids.map((av, i) => {
+                        const cat = avios.find(a => a.id === av.avio_id)
+                        return (
+                          <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '5px 0', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
+                            <span style={{ fontWeight: 600, flex: 2 }}>🧷 {av.nombre}</span>
+                            {av.cantidad && <span style={{ color: 'var(--text2)' }}>{av.cantidad} {cat?.unidad || av.unidad || 'u.'}</span>}
+                            {cat?.precio != null && <span style={{ color: 'var(--accent)', fontSize: 11 }}>ref. ${Number(cat.precio).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
+                          </div>
+                        )
+                      })}
                     </div>
                   )}
                 </div>
@@ -1380,6 +1396,28 @@ export default function Productos({ onMenuClick }) {
                 </div>
               </div>
 
+              {/* Piezas de corte */}
+              <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12, marginBottom: 12 }}>
+                <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8 }}>✂ Piezas de corte <span style={{ fontSize: 10, color: 'var(--text2)', fontWeight: 400 }}>arrastrá para reordenar · clic ✏ para editar</span></div>
+                {form.piezas.map((p, i) => (
+                  <PiezaRow
+                    key={i} pieza={p} index={i} total={form.piezas.length} telaRoles={telaRoles}
+                    onEdit={editPieza} onDelete={deletePieza}
+                    onDragStart={handleDragStartPieza} onDragOver={() => {}} onDrop={handleDropPieza}
+                    onMoveUp={() => movePieza(i, i - 1)} onMoveDown={() => movePieza(i, i + 1)}
+                  />
+                ))}
+                <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                  <input value={nuevaPieza.nombre} onChange={e => setNuevaPieza(f => ({ ...f, nombre: e.target.value }))} placeholder="ej: Delantera" style={{ flex: 2, minWidth: 100 }} onKeyDown={e => e.key === 'Enter' && agregarPieza()} />
+                  <input value={nuevaPieza.mult} onChange={e => setNuevaPieza(f => ({ ...f, mult: e.target.value.replace(/[^0-9]/g, '') }))} style={{ width: 45 }} placeholder="1" />
+                  <span style={{ fontSize: 11, color: 'var(--text2)', alignSelf: 'center' }}>x prenda</span>
+                  <select value={nuevaPieza.tela_rol} onChange={e => setNuevaPieza(f => ({ ...f, tela_rol: e.target.value }))} style={{ width: 110 }}>
+                    {telaRoles.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                  </select>
+                  <button className="btn btn-secondary btn-sm" onClick={agregarPieza}>+ Agregar</button>
+                </div>
+              </div>
+
               {/* Telas */}
               <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12, marginBottom: 12 }}>
                 <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 10 }}>🧶 Telas del producto</div>
@@ -1496,28 +1534,6 @@ export default function Productos({ onMenuClick }) {
                 </div>
               </div>
 
-              {/* Piezas de corte */}
-              <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12, marginBottom: 12 }}>
-                <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8 }}>✂ Piezas de corte <span style={{ fontSize: 10, color: 'var(--text2)', fontWeight: 400 }}>arrastrá para reordenar · clic ✏ para editar</span></div>
-                {form.piezas.map((p, i) => (
-                  <PiezaRow
-                    key={i} pieza={p} index={i} total={form.piezas.length} telaRoles={telaRoles}
-                    onEdit={editPieza} onDelete={deletePieza}
-                    onDragStart={handleDragStartPieza} onDragOver={() => {}} onDrop={handleDropPieza}
-                    onMoveUp={() => movePieza(i, i - 1)} onMoveDown={() => movePieza(i, i + 1)}
-                  />
-                ))}
-                <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                  <input value={nuevaPieza.nombre} onChange={e => setNuevaPieza(f => ({ ...f, nombre: e.target.value }))} placeholder="ej: Delantera" style={{ flex: 2, minWidth: 100 }} onKeyDown={e => e.key === 'Enter' && agregarPieza()} />
-                  <input value={nuevaPieza.mult} onChange={e => setNuevaPieza(f => ({ ...f, mult: e.target.value.replace(/[^0-9]/g, '') }))} style={{ width: 45 }} placeholder="1" />
-                  <span style={{ fontSize: 11, color: 'var(--text2)', alignSelf: 'center' }}>x prenda</span>
-                  <select value={nuevaPieza.tela_rol} onChange={e => setNuevaPieza(f => ({ ...f, tela_rol: e.target.value }))} style={{ width: 110 }}>
-                    {telaRoles.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-                  </select>
-                  <button className="btn btn-secondary btn-sm" onClick={agregarPieza}>+ Agregar</button>
-                </div>
-              </div>
-
               {/* Planchado — solo si el producto tiene ese proceso */}
               {tienePlanchado && (
                 <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 12, marginBottom: 12 }}>
@@ -1554,18 +1570,60 @@ export default function Productos({ onMenuClick }) {
                 {form.avios_ids.length === 0 && (
                   <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 8 }}>No hay avíos vinculados aún.</div>
                 )}
-                {form.avios_ids.map((av, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, fontSize: 12, background: 'var(--bg2)', padding: '4px 8px', borderRadius: 'var(--radius)' }}>
-                    <span style={{ flex: 1, fontWeight: 600 }}>{av.nombre}</span>
-                    <button className="btn btn-danger btn-sm" onClick={() => setForm(f => ({ ...f, avios_ids: f.avios_ids.filter((_, j) => j !== i) }))}>✕</button>
-                  </div>
-                ))}
-                <AvioSearch
-                  onSelect={av => {
-                    if (form.avios_ids.find(a => a.avio_id === av.id)) return
-                    setForm(f => ({ ...f, avios_ids: [...f.avios_ids, { avio_id: av.id, nombre: av.nombre }] }))
-                  }}
-                />
+                {form.avios_ids.map((av, i) => {
+                  const cat = avios.find(a => a.id === av.avio_id)
+                  return (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, fontSize: 12, background: 'var(--bg2)', padding: '4px 8px', borderRadius: 'var(--radius)' }}>
+                      <span style={{ flex: 2, fontWeight: 600 }}>{av.nombre}</span>
+                      <input
+                        type="number"
+                        value={av.cantidad || ''}
+                        onChange={e => setForm(f => ({ ...f, avios_ids: f.avios_ids.map((x, j) => j === i ? { ...x, cantidad: e.target.value } : x) }))}
+                        placeholder="cant."
+                        style={{ width: 70 }}
+                      />
+                      <span style={{ fontSize: 11, color: 'var(--text2)', minWidth: 30 }}>{cat?.unidad || av.unidad || 'u.'}</span>
+                      <button className="btn btn-danger btn-sm" onClick={() => setForm(f => ({ ...f, avios_ids: f.avios_ids.filter((_, j) => j !== i) }))}>✕</button>
+                    </div>
+                  )
+                })}
+                <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                  <select
+                    value={nuevoAvioSelect.prov_id}
+                    onChange={e => setNuevoAvioSelect(f => ({ ...f, prov_id: e.target.value, avio_id: '' }))}
+                    style={{ width: 160 }}
+                  >
+                    <option value="">Todos los proveedores</option>
+                    {proveedores.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                  </select>
+                  <select
+                    value={nuevoAvioSelect.avio_id}
+                    onChange={e => setNuevoAvioSelect(f => ({ ...f, avio_id: e.target.value }))}
+                    style={{ flex: 1 }}
+                  >
+                    <option value="">— Seleccionar avío —</option>
+                    {aviosFiltrados(nuevoAvioSelect.prov_id).map(a => (
+                      <option key={a.id} value={a.id}>{a.nombre}{a.tipo ? ` · ${a.tipo}` : ''}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    value={nuevoAvioSelect.cantidad}
+                    onChange={e => setNuevoAvioSelect(f => ({ ...f, cantidad: e.target.value }))}
+                    placeholder="cant."
+                    style={{ width: 70 }}
+                  />
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => {
+                      if (!nuevoAvioSelect.avio_id) return
+                      if (form.avios_ids.find(a => a.avio_id === parseInt(nuevoAvioSelect.avio_id))) return
+                      const cat = avios.find(a => a.id === parseInt(nuevoAvioSelect.avio_id))
+                      setForm(f => ({ ...f, avios_ids: [...f.avios_ids, { avio_id: parseInt(nuevoAvioSelect.avio_id), nombre: cat?.nombre || '', cantidad: nuevoAvioSelect.cantidad, unidad: cat?.unidad || '' }] }))
+                      setNuevoAvioSelect(f => ({ ...f, avio_id: '', cantidad: '' }))
+                    }}
+                  >+ Agregar</button>
+                </div>
               </div>
 
               {/* Avíos con medidas */}
