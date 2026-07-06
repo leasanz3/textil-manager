@@ -988,6 +988,66 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
   const [nota, setNota]                   = useState(loteAbierto?.nota || '')
   const [saving, setSaving]               = useState(false)
 
+  // ── Cortes vinculados (solo en etapa corte) ────────────────────────────────
+  const [cortesVinc, setCortesVinc]   = useState([])
+  const [cortesQ, setCortesQ]         = useState('')
+  const [cortesRes, setCortesRes]     = useState([])
+  const cortesTimer                   = useRef(null)
+
+  useEffect(() => {
+    if (etapaId === 'corte' && pedido.id && pedido.id !== '__libre__') cargarCortesVinc()
+  }, [etapaId, pedido.id])
+
+  async function cargarCortesVinc() {
+    const { data } = await supabase
+      .from('cortes_pedidos')
+      .select('id, corte_id, cortes_marcadas!corte_id(id, fecha, nota, total_pliegues, pliegues, cortes_marcadas_productos!marcada_id(producto_id, productos!producto_id(nombre)))')
+      .eq('pedido_id', pedido.id)
+    setCortesVinc(data || [])
+  }
+
+  function onCortesSearch(val) {
+    setCortesQ(val)
+    if (cortesTimer.current) clearTimeout(cortesTimer.current)
+    if (!val.trim()) { setCortesRes([]); return }
+    cortesTimer.current = setTimeout(async () => {
+      const { data } = await supabase
+        .from('cortes_marcadas')
+        .select('id, fecha, nota, total_pliegues, pliegues, cortes_marcadas_productos!marcada_id(producto_id, productos!producto_id(nombre))')
+        .ilike('nota', `%${val.trim()}%`)
+        .order('fecha', { ascending: false })
+        .limit(8)
+      // También buscar por producto
+      const { data: byProd } = await supabase
+        .from('cortes_marcadas_productos')
+        .select('marcada_id, productos!producto_id(nombre), cortes_marcadas!marcada_id(id, fecha, nota, total_pliegues, pliegues)')
+        .ilike('productos.nombre', `%${val.trim()}%`)
+        .limit(8)
+      const extra = (byProd || []).map(r => r.cortes_marcadas).filter(Boolean)
+      const todos = [...(data || []), ...extra]
+      const uniq = Object.values(Object.fromEntries(todos.map(m => [m.id, m])))
+      const yaVinc = new Set(cortesVinc.map(v => v.corte_id))
+      setCortesRes(uniq.filter(m => !yaVinc.has(m.id)))
+    }, 300)
+  }
+
+  async function vincularCorte(marcada) {
+    const { data: { user } } = await supabase.auth.getUser()
+    await supabase.from('cortes_pedidos').insert({
+      corte_id: marcada.id,
+      pedido_id: pedido.id,
+      user_id: user?.id,
+    })
+    setCortesQ(''); setCortesRes([])
+    cargarCortesVinc()
+  }
+
+  async function desvincularCorte(cp) {
+    if (!window.confirm('¿Desvincular este corte del pedido?')) return
+    await supabase.from('cortes_pedidos').delete().eq('id', cp.id)
+    cargarCortesVinc()
+  }
+
   const contactosFiltrados = useMemo(() => {
     const tipos = eInfo.tipo
     if (!tipos.length) return contactos
@@ -1161,6 +1221,66 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
               </div>
             )
           })}
+
+          {/* Cortes vinculados — solo en etapa corte */}
+          {etapaId === 'corte' && !libreMode && (
+            <div className="groupbox" style={{ marginTop: 14 }}>
+              <div className="groupbox-title">✂ Cortes vinculados</div>
+
+              {cortesVinc.length > 0 && (
+                <div style={{ marginBottom: 10 }}>
+                  {cortesVinc.map(cp => {
+                    const m = cp.cortes_marcadas
+                    if (!m) return null
+                    const prods = m.cortes_marcadas_productos?.map(p => p.productos?.nombre).filter(Boolean).join(', ')
+                    return (
+                      <div key={cp.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 8px', background: '#f4f4ec', border: '1px solid #d0ccc0', marginBottom: 4, fontSize: 12 }}>
+                        <div>
+                          <strong>{m.fecha || '—'}</strong>
+                          {prods && <span style={{ color: 'var(--text2)', marginLeft: 6 }}>{prods}</span>}
+                          {m.nota && <span style={{ color: '#888', marginLeft: 6, fontStyle: 'italic' }}>{m.nota}</span>}
+                          <span style={{ color: 'var(--text2)', marginLeft: 6 }}>· {m.total_pliegues} pliegues</span>
+                        </div>
+                        <button className="btn btn-danger btn-sm" onClick={() => desvincularCorte(cp)}>✕</button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              <div style={{ position: 'relative' }}>
+                <input
+                  value={cortesQ}
+                  onChange={e => onCortesSearch(e.target.value)}
+                  onBlur={() => setTimeout(() => setCortesRes([]), 200)}
+                  placeholder="Buscar sesión de corte por nota o producto…"
+                  autoComplete="off"
+                  style={{ fontSize: 12 }}
+                />
+                {cortesRes.length > 0 && (
+                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200, background: 'var(--surface)', border: '1px solid var(--border)', boxShadow: '0 4px 16px rgba(0,0,0,0.18)', maxHeight: 220, overflowY: 'auto' }}>
+                    {cortesRes.map(m => {
+                      const prods = m.cortes_marcadas_productos?.map(p => p.productos?.nombre).filter(Boolean).join(', ')
+                      return (
+                        <div
+                          key={m.id}
+                          onMouseDown={() => vincularCorte(m)}
+                          style={{ padding: '7px 12px', cursor: 'pointer', fontSize: 12, borderBottom: '1px solid var(--border)' }}
+                          onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'}
+                          onMouseLeave={e => e.currentTarget.style.background = ''}
+                        >
+                          <strong>{m.fecha || '—'}</strong>
+                          {prods && <span style={{ color: 'var(--text2)', marginLeft: 8 }}>{prods}</span>}
+                          {m.nota && <span style={{ color: '#888', marginLeft: 8, fontStyle: 'italic' }}>{m.nota}</span>}
+                          <span style={{ color: 'var(--text2)', marginLeft: 8 }}>· {m.total_pliegues} pliegues</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {lotesCerrados.length > 0 && (
             <details style={{ marginTop: 12 }}>
