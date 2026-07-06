@@ -1142,7 +1142,8 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
     return acc
   }, [lotesCerrados, items])
 
-  async function guardar(avanzarDespues = false) {
+  // modo: 'progreso' | 'parcial' | 'avanzar'
+  async function guardar(modo = 'progreso') {
     setSaving(true)
     const responsable = contactos.find(c => c.id === responsableId)
 
@@ -1156,24 +1157,34 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
       iniciado_at:        fechaIngreso ? new Date(fechaIngreso).toISOString() : new Date().toISOString(),
     }
 
+    // Para 'parcial' y 'avanzar' cerramos el lote actual
+    const payloadFinal = (modo === 'parcial' || modo === 'avanzar')
+      ? { ...payload, completado_at: new Date().toISOString() }
+      : payload
+
     let err = null
     if (loteAbierto) {
-      const { error } = await supabase
-        .from('produccion_etapas')
-        .update(payload)
-        .eq('id', loteAbierto.id)
+      const { error } = await supabase.from('produccion_etapas').update(payloadFinal).eq('id', loteAbierto.id)
       err = error
     } else {
-      const { error } = await supabase
-        .from('produccion_etapas')
-        .insert({ ...payload, iniciado_at: new Date().toISOString() })
+      const { error } = await supabase.from('produccion_etapas').insert({ ...payloadFinal, iniciado_at: new Date().toISOString() })
       err = error
     }
 
     if (err) { alert('Error al guardar: ' + err.message); setSaving(false); return }
 
+    if (modo === 'parcial') {
+      // Abrir nuevo lote vacío en la misma etapa
+      await supabase.from('produccion_etapas').insert({
+        ...(libreMode ? {} : { pedido_id: pedido.id }),
+        etapa:       etapaId,
+        hechas:      items.map((it, idx) => ({ item_idx: idx, producto_id: it.producto_id || null, producto: it.producto || '', talles: {} })),
+        iniciado_at: new Date().toISOString(),
+      })
+    }
+
     setSaving(false)
-    if (avanzarDespues) onAvanzar()
+    if (modo === 'avanzar') onAvanzar()
     else { await onSaved(); onClose() }
   }
 
@@ -1363,10 +1374,13 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
 
         <div className="modal-footer">
           <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
-          <button className="btn btn-secondary" onClick={() => guardar(false)} disabled={saving}>
+          <button className="btn btn-secondary" onClick={() => guardar('progreso')} disabled={saving}>
             {saving ? 'Guardando…' : '💾 Guardar progreso'}
           </button>
-          <button className="btn btn-primary" onClick={() => guardar(true)} disabled={saving}>
+          <button className="btn btn-secondary" onClick={() => guardar('parcial')} disabled={saving} title="Cerrar esta entrega y abrir un nuevo lote en la misma etapa">
+            📦 Registrar entrega parcial
+          </button>
+          <button className="btn btn-primary" onClick={() => guardar('avanzar')} disabled={saving}>
             ✔ Cerrar lote y avanzar etapa
           </button>
         </div>
