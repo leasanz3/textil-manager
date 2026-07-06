@@ -1045,22 +1045,36 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
   const [saving, setSaving]               = useState(false)
 
   // ── Edición inline de lotes cerrados ──────────────────────────────────────
-  const [editLoteId, setEditLoteId]     = useState(null)
-  const [editFecha, setEditFecha]       = useState('')
-  const [editNota, setEditNota]         = useState('')
-  const [savingEdit, setSavingEdit]     = useState(false)
+  const [editLoteId, setEditLoteId]       = useState(null)
+  const [editFecha, setEditFecha]         = useState('')
+  const [editNota, setEditNota]           = useState('')
+  const [editLoteHechas, setEditLoteHechas] = useState([])
+  const [savingEdit, setSavingEdit]       = useState(false)
 
   function startEditLote(l) {
     setEditLoteId(l.id)
     setEditFecha(l.iniciado_at ? l.iniciado_at.split('T')[0] : '')
     setEditNota(l.nota || '')
+    setEditLoteHechas((l.hechas || []).map(h => ({ ...h, talles: { ...(h.talles || {}) } })))
+  }
+
+  function setEditTalle(hIdx, talle, val) {
+    setEditLoteHechas(s => s.map((h, i) => {
+      if (i !== hIdx) return h
+      const newT = { ...h.talles }
+      const n = parseInt(val) || 0
+      if (n > 0) newT[talle] = n
+      else delete newT[talle]
+      return { ...h, talles: newT }
+    }))
   }
 
   async function saveEditLote(loteId) {
     setSavingEdit(true)
     await supabase.from('produccion_etapas').update({
       iniciado_at: editFecha ? new Date(editFecha).toISOString() : null,
-      nota: editNota || null,
+      nota:        editNota || null,
+      hechas:      editLoteHechas,
     }).eq('id', loteId)
     setSavingEdit(false)
     setEditLoteId(null)
@@ -1290,11 +1304,29 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
                     <>Pedido: <strong style={{ color: 'var(--text)' }}>{totalNec} u.</strong>{' · '}</>
                   )}
                   {totalHist > 0 && (
-                    <>Anteriores: <strong style={{ color: 'var(--success)' }}>{totalHist} u.</strong>{' · '}</>
+                    <>Ya entregado: <strong style={{ color: 'var(--success)' }}>{totalHist} u.</strong>{' · '}</>
                   )}
                   Este lote: <strong style={{ color: 'var(--accent)' }}>{totalEsteLote} u.</strong>
                   {!libreMode && <> · Total: <strong>{totalAcum}/{totalNec}</strong></>}
                 </div>
+
+                {/* Pendiente por talle */}
+                {!libreMode && (() => {
+                  const pendPairs = (TABLAS[item.tabla || inferirTabla(item.talles)]?.talles || [])
+                    .map(t => [t, (item.talles[t] || 0) - (historico[idx][t] || 0)])
+                    .filter(([, v]) => v > 0)
+                  if (!pendPairs.length) return null
+                  return (
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: '#a04000', textTransform: 'uppercase', letterSpacing: 0.5 }}>Pendiente:</span>
+                      {pendPairs.map(([t, v]) => (
+                        <span key={t} style={{ border: '1px solid #e8c080', padding: '1px 6px', fontSize: 10, fontWeight: 700, background: '#fff8e0', color: '#a04000' }}>
+                          {t} {v}
+                        </span>
+                      ))}
+                    </div>
+                  )
+                })()}
 
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   {tallesPedido.map(t => {
@@ -1428,7 +1460,7 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
                           </>
                         )}
                       </div>
-                      {/* Detalle talles */}
+                      {/* Detalle talles (vista) */}
                       {!isEditing && (l.hechas || []).map((h, hIdx) => {
                         const pairs = tallesOrdenados(h.talles)
                         if (!pairs.length) return null
@@ -1440,6 +1472,33 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
                                 <span key={t} style={{ border: '1px solid #c8c4b8', padding: '1px 6px', fontSize: 10, background: '#fff', fontWeight: 700 }}>
                                   {t} <span style={{ color: '#1a5aa8' }}>{c}</span>
                                 </span>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      })}
+                      {/* Edición de talles */}
+                      {isEditing && editLoteHechas.map((h, hIdx) => {
+                        const itemRef  = items[h.item_idx] || items[hIdx]
+                        const tabla    = itemRef ? (itemRef.tabla || inferirTabla(itemRef.talles)) : 'adulto'
+                        const tallesShow = libreMode
+                          ? (TABLAS[tabla]?.talles || TABLAS.adulto.talles)
+                          : (TABLAS[tabla]?.talles || []).filter(t => (itemRef?.talles || {})[t] > 0)
+                        return (
+                          <div key={hIdx} style={{ padding: '8px 10px', borderTop: '1px solid #e0dcd0' }}>
+                            {items.length > 1 && <div style={{ fontWeight: 700, color: '#555', marginBottom: 4, fontSize: 11 }}>{h.producto}</div>}
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              {tallesShow.map(t => (
+                                <div key={t} style={{ textAlign: 'center' }}>
+                                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', marginBottom: 2 }}>{t}</div>
+                                  <input
+                                    type="number" min="0"
+                                    value={h.talles[t] || ''}
+                                    placeholder="0"
+                                    onChange={e => setEditTalle(hIdx, t, e.target.value)}
+                                    style={{ width: 52, textAlign: 'center', fontSize: 11 }}
+                                  />
+                                </div>
                               ))}
                             </div>
                           </div>
