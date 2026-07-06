@@ -790,48 +790,65 @@ function FaltaCortar({ productos: prodsMap }) {
 
       const pedidoIds = pedidosCorte.map(p => p.id)
 
-      // 2. Cortes vinculados a esos pedidos
+      // 2. Links cortes_pedidos
       const { data: cpRows } = await supabase
-        .from('cortes_pedidos')
-        .select('pedido_id, corte_id, cortes_marcadas!corte_id(id, pliegues, total_pliegues, fecha, nota)')
-        .in('pedido_id', pedidoIds)
+        .from('cortes_pedidos').select('pedido_id, corte_id').in('pedido_id', pedidoIds)
 
-      // Agrupar cortes por pedido
+      const allMarcadaIds = [...new Set((cpRows || []).map(cp => cp.corte_id).filter(Boolean))]
+
+      // 3. Fetch todo en paralelo (sin joins, más robusto)
+      const [{ data: marcadasData }, { data: todasPiezas }, { data: todosAjustes }, { data: mps }] = await Promise.all([
+        allMarcadaIds.length
+          ? supabase.from('cortes_marcadas').select('id, pliegues, total_pliegues, fecha, nota').in('id', allMarcadaIds)
+          : Promise.resolve({ data: [] }),
+        allMarcadaIds.length
+          ? supabase.from('cortes_piezas').select('marcada_id, producto_id, pieza_nombre, talle, cantidad').in('marcada_id', allMarcadaIds)
+          : Promise.resolve({ data: [] }),
+        allMarcadaIds.length
+          ? supabase.from('cortes_ajustes').select('marcada_id, producto_id, de_pieza, a_pieza, de_talle, a_talle, cantidad').in('marcada_id', allMarcadaIds)
+          : Promise.resolve({ data: [] }),
+        allMarcadaIds.length
+          ? supabase.from('cortes_marcadas_productos').select('marcada_id, producto_id').in('marcada_id', allMarcadaIds)
+          : Promise.resolve({ data: [] }),
+      ])
+
+      const marcadaById = Object.fromEntries((marcadasData || []).map(m => [m.id, m]))
+
+      // Agrupar cortes por pedido (usando marcadaById para los datos de la marcada)
       const cortesPorPedido = {}
       for (const cp of (cpRows || [])) {
         if (!cortesPorPedido[cp.pedido_id]) cortesPorPedido[cp.pedido_id] = []
-        if (cp.cortes_marcadas) cortesPorPedido[cp.pedido_id].push(cp.cortes_marcadas)
+        const m = marcadaById[cp.corte_id]
+        if (m) cortesPorPedido[cp.pedido_id].push(m)
       }
 
-      // 3. Para las marcadas vinculadas, traer piezas y ajustes
-      const allMarcadaIds = [...new Set((cpRows || []).map(cp => cp.corte_id))]
-
-      const [{ data: todasPiezas }, { data: todosAjustes }, { data: mps }] = await Promise.all([
-        allMarcadaIds.length ? supabase.from('cortes_piezas').select('*').in('marcada_id', allMarcadaIds) : Promise.resolve({ data: [] }),
-        allMarcadaIds.length ? supabase.from('cortes_ajustes').select('*').in('marcada_id', allMarcadaIds) : Promise.resolve({ data: [] }),
-        allMarcadaIds.length ? supabase.from('cortes_marcadas_productos').select('marcada_id, producto_id').in('marcada_id', allMarcadaIds) : Promise.resolve({ data: [] }),
-      ])
-
-      // 4. Calcular ya_cortado por pedido → producto_id → pieza → talle
+      // 4. Calcular ya_cortado por pedido
       const result = pedidosCorte.map(ped => {
-        const marcadas = cortesPorPedido[ped.id] || []
-        const yaCortado = {}   // { producto_id: { pieza: { talle: qty } } }
+        const marcadas  = cortesPorPedido[ped.id] || []
+        const yaCortado = {}
 
         for (const marcada of marcadas) {
           const tp    = parseFloat(marcada.total_pliegues) || 0
           const pp    = parseFloat(marcada.pliegues) || 1
           const pares = pp > 0 ? tp / pp : 0
-          const prodsEnMarcada = (mps || []).filter(mp => mp.marcada_id === marcada.id)
 
-          for (const mp of prodsEnMarcada) {
-            const piezas  = (todasPiezas || []).filter(p => p.marcada_id === marcada.id && p.producto_id === mp.producto_id)
-            const ajustes = (todosAjustes || []).filter(a => a.marcada_id === marcada.id && a.producto_id === mp.producto_id)
+          // Productos en esta marcada
+          const prodsEnMarcada = (mps || []).filter(mp => String(mp.marcada_id) === String(marcada.id))
+
+          // Si no hay entradas en cortes_marcadas_productos, usar las piezas directamente por marcada
+          const productosIds = prodsEnMarcada.length
+            ? prodsEnMarcada.map(mp => mp.producto_id)
+            : [...new Set((todasPiezas || []).filter(p => String(p.marcada_id) === String(marcada.id)).map(p => p.producto_id))]
+
+          for (const prodId of productosIds) {
+            const piezas  = (todasPiezas || []).filter(p => String(p.marcada_id) === String(marcada.id) && String(p.producto_id) === String(prodId))
+            const ajustes = (todosAjustes || []).filter(a => String(a.marcada_id) === String(marcada.id) && String(a.producto_id) === String(prodId))
             const res     = buildResultFC(piezas, pares, ajustes)
-            if (!yaCortado[mp.producto_id]) yaCortado[mp.producto_id] = {}
+            if (!yaCortado[prodId]) yaCortado[prodId] = {}
             for (const [pieza, tallesObj] of Object.entries(res)) {
-              if (!yaCortado[mp.producto_id][pieza]) yaCortado[mp.producto_id][pieza] = {}
+              if (!yaCortado[prodId][pieza]) yaCortado[prodId][pieza] = {}
               for (const [t, qty] of Object.entries(tallesObj)) {
-                yaCortado[mp.producto_id][pieza][t] = (yaCortado[mp.producto_id][pieza][t] || 0) + qty
+                yaCortado[prodId][pieza][t] = (yaCortado[prodId][pieza][t] || 0) + qty
               }
             }
           }
@@ -1039,11 +1056,22 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
   }, [etapaId, pedido.id])
 
   async function cargarCortesVinc() {
-    const { data } = await supabase
-      .from('cortes_pedidos')
-      .select('id, corte_id, cortes_marcadas!corte_id(id, fecha, nota, total_pliegues, pliegues, cortes_marcadas_productos!marcada_id(producto_id, productos!producto_id(nombre)))')
-      .eq('pedido_id', pedido.id)
-    setCortesVinc(data || [])
+    const { data: cp } = await supabase
+      .from('cortes_pedidos').select('id, corte_id').eq('pedido_id', pedido.id)
+    if (!cp?.length) { setCortesVinc([]); return }
+    const ids = cp.map(r => r.corte_id)
+    const { data: marcadas } = await supabase
+      .from('cortes_marcadas').select('id, fecha, nota, total_pliegues, pliegues').in('id', ids)
+    const { data: cmp } = await supabase
+      .from('cortes_marcadas_productos').select('marcada_id, producto_id, productos!producto_id(nombre)').in('marcada_id', ids)
+    setCortesVinc(cp.map(r => ({
+      id: r.id,
+      corte_id: r.corte_id,
+      cortes_marcadas: {
+        ...(marcadas || []).find(m => m.id === r.corte_id),
+        cortes_marcadas_productos: (cmp || []).filter(c => c.marcada_id === r.corte_id),
+      },
+    })))
   }
 
   async function cargarCortesSugeridos() {
