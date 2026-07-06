@@ -989,13 +989,14 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
   const [saving, setSaving]               = useState(false)
 
   // ── Cortes vinculados (solo en etapa corte) ────────────────────────────────
-  const [cortesVinc, setCortesVinc]   = useState([])
-  const [cortesQ, setCortesQ]         = useState('')
-  const [cortesRes, setCortesRes]     = useState([])
-  const cortesTimer                   = useRef(null)
+  const [cortesVinc, setCortesVinc]       = useState([])
+  const [cortesSugeridos, setCortesSugeridos] = useState([])
 
   useEffect(() => {
-    if (etapaId === 'corte' && pedido.id && pedido.id !== '__libre__') cargarCortesVinc()
+    if (etapaId === 'corte' && pedido.id && pedido.id !== '__libre__') {
+      cargarCortesVinc()
+      cargarCortesSugeridos()
+    }
   }, [etapaId, pedido.id])
 
   async function cargarCortesVinc() {
@@ -1006,46 +1007,37 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
     setCortesVinc(data || [])
   }
 
-  function onCortesSearch(val) {
-    setCortesQ(val)
-    if (cortesTimer.current) clearTimeout(cortesTimer.current)
-    if (!val.trim()) { setCortesRes([]); return }
-    cortesTimer.current = setTimeout(async () => {
-      const { data } = await supabase
-        .from('cortes_marcadas')
-        .select('id, fecha, nota, total_pliegues, pliegues, cortes_marcadas_productos!marcada_id(producto_id, productos!producto_id(nombre))')
-        .ilike('nota', `%${val.trim()}%`)
-        .order('fecha', { ascending: false })
-        .limit(8)
-      // También buscar por producto
-      const { data: byProd } = await supabase
-        .from('cortes_marcadas_productos')
-        .select('marcada_id, productos!producto_id(nombre), cortes_marcadas!marcada_id(id, fecha, nota, total_pliegues, pliegues)')
-        .ilike('productos.nombre', `%${val.trim()}%`)
-        .limit(8)
-      const extra = (byProd || []).map(r => r.cortes_marcadas).filter(Boolean)
-      const todos = [...(data || []), ...extra]
-      const uniq = Object.values(Object.fromEntries(todos.map(m => [m.id, m])))
-      const yaVinc = new Set(cortesVinc.map(v => v.corte_id))
-      setCortesRes(uniq.filter(m => !yaVinc.has(m.id)))
-    }, 300)
+  async function cargarCortesSugeridos() {
+    const prodIds = pedidoItems(pedido).map(it => it.producto_id).filter(Boolean)
+    if (!prodIds.length) return
+    const { data } = await supabase
+      .from('cortes_marcadas_productos')
+      .select('marcada_id, productos!producto_id(nombre), cortes_marcadas!marcada_id(id, fecha, nota, total_pliegues, pliegues)')
+      .in('producto_id', prodIds)
+    // Deduplicar por marcada_id
+    const vistos = new Set()
+    const uniq = []
+    for (const row of (data || [])) {
+      const m = row.cortes_marcadas
+      if (!m || vistos.has(m.id)) continue
+      vistos.add(m.id)
+      uniq.push({ ...m, _producto: row.productos?.nombre })
+    }
+    setCortesSugeridos(uniq.sort((a, b) => (b.fecha || '').localeCompare(a.fecha || '')))
   }
 
   async function vincularCorte(marcada) {
     const { data: { user } } = await supabase.auth.getUser()
-    await supabase.from('cortes_pedidos').insert({
-      corte_id: marcada.id,
-      pedido_id: pedido.id,
-      user_id: user?.id,
-    })
-    setCortesQ(''); setCortesRes([])
-    cargarCortesVinc()
+    await supabase.from('cortes_pedidos').insert({ corte_id: marcada.id, pedido_id: pedido.id, user_id: user?.id })
+    await cargarCortesVinc()
+    await cargarCortesSugeridos()
   }
 
   async function desvincularCorte(cp) {
     if (!window.confirm('¿Desvincular este corte del pedido?')) return
     await supabase.from('cortes_pedidos').delete().eq('id', cp.id)
-    cargarCortesVinc()
+    await cargarCortesVinc()
+    await cargarCortesSugeridos()
   }
 
   const contactosFiltrados = useMemo(() => {
@@ -1248,37 +1240,34 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
                 </div>
               )}
 
-              <div style={{ position: 'relative' }}>
-                <input
-                  value={cortesQ}
-                  onChange={e => onCortesSearch(e.target.value)}
-                  onBlur={() => setTimeout(() => setCortesRes([]), 200)}
-                  placeholder="Buscar sesión de corte por nota o producto…"
-                  autoComplete="off"
-                  style={{ fontSize: 12 }}
-                />
-                {cortesRes.length > 0 && (
-                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200, background: 'var(--surface)', border: '1px solid var(--border)', boxShadow: '0 4px 16px rgba(0,0,0,0.18)', maxHeight: 220, overflowY: 'auto' }}>
-                    {cortesRes.map(m => {
-                      const prods = m.cortes_marcadas_productos?.map(p => p.productos?.nombre).filter(Boolean).join(', ')
-                      return (
-                        <div
-                          key={m.id}
-                          onMouseDown={() => vincularCorte(m)}
-                          style={{ padding: '7px 12px', cursor: 'pointer', fontSize: 12, borderBottom: '1px solid var(--border)' }}
-                          onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'}
-                          onMouseLeave={e => e.currentTarget.style.background = ''}
-                        >
+              {(() => {
+                const yaVinc = new Set(cortesVinc.map(v => v.corte_id))
+                const disponibles = cortesSugeridos.filter(m => !yaVinc.has(m.id))
+                if (disponibles.length === 0) {
+                  return <div style={{ fontSize: 11, color: 'var(--text2)', fontStyle: 'italic' }}>No hay sesiones de corte con productos que coincidan.</div>
+                }
+                return (
+                  <div>
+                    <div style={{ fontSize: 10, color: 'var(--text2)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>
+                      Sesiones disponibles para vincular
+                    </div>
+                    {disponibles.map(m => (
+                      <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 8px', background: '#f8f8f4', border: '1px solid #d8d4c8', marginBottom: 3, fontSize: 12 }}
+                        onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'}
+                        onMouseLeave={e => e.currentTarget.style.background = '#f8f8f4'}
+                      >
+                        <div>
                           <strong>{m.fecha || '—'}</strong>
-                          {prods && <span style={{ color: 'var(--text2)', marginLeft: 8 }}>{prods}</span>}
+                          <span style={{ color: 'var(--text2)', marginLeft: 8 }}>{m._producto}</span>
                           {m.nota && <span style={{ color: '#888', marginLeft: 8, fontStyle: 'italic' }}>{m.nota}</span>}
                           <span style={{ color: 'var(--text2)', marginLeft: 8 }}>· {m.total_pliegues} pliegues</span>
                         </div>
-                      )
-                    })}
+                        <button className="btn btn-secondary btn-sm" onClick={() => vincularCorte(m)}>+ Vincular</button>
+                      </div>
+                    ))}
                   </div>
-                )}
-              </div>
+                )
+              })()}
             </div>
           )}
 
