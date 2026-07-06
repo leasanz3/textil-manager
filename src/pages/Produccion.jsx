@@ -105,8 +105,13 @@ export default function Produccion({ onMenuClick }) {
   const [lotesEtapa, setLotesEtapa] = useState([])
   const [loading, setLoading]       = useState(true)
 
-  const [etapaSel, setEtapaSel]     = useState('corte')
   const [pedidoOpen, setPedidoOpen] = useState(null)
+  const [sortCol, setSortCol]       = useState('fecha')
+  const [sortDir, setSortDir]       = useState('asc')
+  const [filterEtapa, setFilterEtapa] = useState('')
+  const [searchQ, setSearchQ]       = useState('')
+  // etapaSel: solo para fetch de lotes (se mantiene sincronizado con filterEtapa o carga todo)
+  const [etapaSel, setEtapaSel]     = useState(null)
 
   // ── Producción libre ──────────────────────────────────────────────────────
   const [showFaltaCortar, setShowFaltaCortar] = useState(false)
@@ -126,32 +131,29 @@ export default function Produccion({ onMenuClick }) {
   const prodTimer = useRef(null)
 
   useEffect(() => { fetchBase() }, [])
-  useEffect(() => { fetchLotesEtapa(etapaSel) }, [etapaSel])
 
   async function fetchBase() {
     setLoading(true)
-    const [ped, prods, cont] = await Promise.all([
+    const [ped, prods, cont, lotes] = await Promise.all([
       supabase.from('pedidos').select('*').order('created_at', { ascending: false }),
       supabase.from('productos').select('id, nombre, procesos, piezas, codigo'),
       supabase.from('contactos').select('*').order('nombre'),
+      supabase.from('produccion_etapas').select('*'),
     ])
     setPedidos(ped.data || [])
     setProductos(Object.fromEntries((prods.data || []).map(p => [p.id, p])))
     setContactos(cont.data || [])
+    setLotesEtapa(lotes.data || [])
     setLoading(false)
   }
 
-  async function fetchLotesEtapa(etapa) {
-    const { data } = await supabase
-      .from('produccion_etapas')
-      .select('*')
-      .eq('etapa', etapa)
+  async function fetchLotesEtapa() {
+    const { data } = await supabase.from('produccion_etapas').select('*')
     setLotesEtapa(data || [])
   }
 
   async function refetch() {
     await fetchBase()
-    if (etapaSel) await fetchLotesEtapa(etapaSel)
   }
 
   // ── Contadores por etapa ───────────────────────────────────────────────────
@@ -163,18 +165,6 @@ export default function Produccion({ onMenuClick }) {
     }
     return c
   }, [pedidos])
-
-  // ── Pedidos en la etapa seleccionada ──────────────────────────────────────
-  const pedidosEtapa = useMemo(() => {
-    return pedidos
-      .filter(p => p.etapa_actual === etapaSel)
-      .sort((a, b) => {
-        if (a.fecha && b.fecha) return a.fecha.localeCompare(b.fecha)
-        if (a.fecha) return -1
-        if (b.fecha) return 1
-        return 0
-      })
-  }, [pedidos, etapaSel])
 
   // ── Lotes libres (sin pedido) y mapa pedido_id → lotes ───────────────────
   const libresLotes = useMemo(() => lotesEtapa.filter(l => !l.pedido_id), [lotesEtapa])
@@ -188,6 +178,40 @@ export default function Produccion({ onMenuClick }) {
     }
     return m
   }, [lotesEtapa])
+
+  // ── Lista filtrada y ordenada ─────────────────────────────────────────────
+  const pedidosActivos = useMemo(() => {
+    return pedidos.filter(p => !['cancelado', 'recibido', 'presupuestado'].includes(p.etapa_actual))
+  }, [pedidos])
+
+  function toggleSort(col) {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortCol(col); setSortDir('asc') }
+  }
+
+  const listaSorted = useMemo(() => {
+    let base = pedidosActivos
+    if (filterEtapa) base = base.filter(p => p.etapa_actual === filterEtapa)
+    if (searchQ.trim()) {
+      const q = searchQ.toLowerCase()
+      base = base.filter(p =>
+        p.cliente?.toLowerCase().includes(q) ||
+        pedidoItems(p).some(it => it.producto?.toLowerCase().includes(q))
+      )
+    }
+    return [...base].sort((a, b) => {
+      let va, vb
+      if (sortCol === 'cliente')   { va = (a.cliente || '').toLowerCase(); vb = (b.cliente || '').toLowerCase() }
+      if (sortCol === 'producto')  { va = (pedidoItems(a)[0]?.producto || '').toLowerCase(); vb = (pedidoItems(b)[0]?.producto || '').toLowerCase() }
+      if (sortCol === 'etapa')     { va = a.etapa_actual || ''; vb = b.etapa_actual || '' }
+      if (sortCol === 'total')     { va = pedidoTotal(a); vb = pedidoTotal(b) }
+      if (sortCol === 'fecha')     { va = a.fecha || '9999'; vb = b.fecha || '9999' }
+      if (sortCol === 'progreso')  { va = pedidoTotal(a) > 0 ? sumarHechas(lotesPorPedido[a.id] || []) / pedidoTotal(a) : 0; vb = pedidoTotal(b) > 0 ? sumarHechas(lotesPorPedido[b.id] || []) / pedidoTotal(b) : 0 }
+      if (va < vb) return sortDir === 'asc' ? -1 : 1
+      if (va > vb) return sortDir === 'asc' ?  1 : -1
+      return 0
+    })
+  }, [pedidosActivos, filterEtapa, searchQ, sortCol, sortDir, lotesPorPedido])
 
   // ── Cambiar etapa directamente ────────────────────────────────────────────
   async function cambiarEtapa(pedidoId, nuevaEtapa) {
@@ -274,7 +298,6 @@ export default function Produccion({ onMenuClick }) {
     setLibreEtapa('corte'); setLibreNota('')
     setLibreProdId(''); setLibreProdNombre(''); setLibreProdQ(''); setLibreProdRes([])
     setLibresVinculados([]); setPedQ(''); setPedRes([])
-    setEtapaSel(libreEtapa)
     await refetch()
   }
 
@@ -294,6 +317,12 @@ export default function Produccion({ onMenuClick }) {
     await refetch()
   }
 
+  const thStyle = (col) => ({
+    cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap',
+    background: sortCol === col ? '#dde4f0' : undefined,
+  })
+  const sortInd = (col) => sortCol === col ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ' ↕'
+
   // ═══════════════════ Render ═══════════════════════════════════════════════
   return (
     <div>
@@ -302,110 +331,155 @@ export default function Produccion({ onMenuClick }) {
           <button className="mobile-menu-btn" onClick={onMenuClick}>☰</button>
           <h2>🏭 Producción</h2>
         </div>
-        <button className="btn btn-primary btn-sm" onClick={() => setModalLibre(true)}>+ Agregar producción</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowFaltaCortar(v => !v)}>
+            {showFaltaCortar ? '← Volver' : '🔍 Falta cortar'}
+          </button>
+          <button className="btn btn-primary btn-sm" onClick={() => setModalLibre(true)}>+ Agregar producción</button>
+        </div>
       </div>
 
       <div className="content">
         {loading ? (
           <div className="loading"><div className="spinner" /> Cargando…</div>
+        ) : showFaltaCortar ? (
+          <FaltaCortar productos={productos} />
         ) : (
           <>
-            {/* Tabs de etapas */}
-            <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid #003d7a', marginBottom: 12, flexWrap: 'wrap' }}>
-              {ETAPAS.map(e => {
-                const activa = !showFaltaCortar && etapaSel === e.id
-                return (
+            {/* Barra de filtros */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <input
+                value={searchQ}
+                onChange={e => setSearchQ(e.target.value)}
+                placeholder="Buscar cliente o producto…"
+                style={{ width: 220, fontSize: 12 }}
+              />
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button
+                  className="btn btn-sm"
+                  onClick={() => setFilterEtapa('')}
+                  style={{ fontWeight: !filterEtapa ? 700 : 400, background: !filterEtapa ? '#d8e4f4' : undefined }}
+                >
+                  Todos <span style={{ fontSize: 10, color: '#555' }}>({pedidosActivos.length})</span>
+                </button>
+                {ETAPAS.map(e => (
                   <button
                     key={e.id}
-                    onClick={() => { setEtapaSel(e.id); setPedidoOpen(null); setShowFaltaCortar(false) }}
-                    style={{
-                      padding: '5px 14px',
-                      fontFamily: 'Tahoma, sans-serif',
-                      fontSize: 11,
-                      fontWeight: 'bold',
-                      border: '1px solid #a8a8a8',
-                      borderBottom: activa ? '2px solid #ece9d8' : '1px solid #a8a8a8',
-                      background: activa ? '#ece9d8' : 'linear-gradient(to bottom, #f4f4ec, #d8d4c8)',
-                      color: activa ? '#003d7a' : '#555',
-                      cursor: 'pointer',
-                      marginBottom: activa ? -2 : 0,
-                      display: 'flex', gap: 6, alignItems: 'center',
-                    }}
+                    className="btn btn-sm"
+                    onClick={() => setFilterEtapa(f => f === e.id ? '' : e.id)}
+                    style={{ fontWeight: filterEtapa === e.id ? 700 : 400, background: filterEtapa === e.id ? '#d8e4f4' : undefined }}
                   >
-                    {e.icon} {e.label}
-                    <span style={{
-                      background: counts[e.id] > 0 ? '#003d7a' : '#d8d4c8',
-                      color: counts[e.id] > 0 ? '#fff' : '#888',
-                      padding: '0 5px',
-                      fontSize: 10,
-                      fontWeight: 'bold',
-                      minWidth: 18,
-                      textAlign: 'center',
-                    }}>
-                      {counts[e.id] || 0}
-                    </span>
+                    {e.icon} {e.label} <span style={{ fontSize: 10, color: '#555' }}>({counts[e.id] || 0})</span>
                   </button>
-                )
-              })}
-              <button
-                onClick={() => { setShowFaltaCortar(true); setPedidoOpen(null) }}
-                style={{
-                  padding: '5px 14px',
-                  fontFamily: 'Tahoma, sans-serif',
-                  fontSize: 11,
-                  fontWeight: 'bold',
-                  border: '1px solid #a8a8a8',
-                  borderBottom: showFaltaCortar ? '2px solid #ece9d8' : '1px solid #a8a8a8',
-                  background: showFaltaCortar ? '#ece9d8' : 'linear-gradient(to bottom, #f4f4ec, #d8d4c8)',
-                  color: showFaltaCortar ? '#003d7a' : '#555',
-                  cursor: 'pointer',
-                  marginBottom: showFaltaCortar ? -2 : 0,
-                  marginLeft: 8,
-                }}
-              >
-                🔍 Falta cortar
-              </button>
+                ))}
+              </div>
             </div>
 
-            {/* Contenido principal */}
-            {showFaltaCortar ? (
-              <FaltaCortar productos={productos} />
-            ) : pedidosEtapa.length === 0 && libresLotes.length === 0 ? (
+            {/* Tabla principal */}
+            {listaSorted.length === 0 ? (
               <div className="empty-state">
-                <div className="icon">{ETAPA_BY_ID[etapaSel]?.icon}</div>
-                <h3>No hay producción en {ETAPA_BY_ID[etapaSel]?.label?.toLowerCase()}</h3>
-                <p>Cuando un pedido o lote libre entre en esta etapa lo vas a ver acá.</p>
+                <div className="icon">🏭</div>
+                <h3>Sin resultados</h3>
+                <p>No hay pedidos en producción que coincidan con el filtro.</p>
               </div>
             ) : (
+              <div style={{ overflowX: 'auto', marginBottom: 16 }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th onClick={() => toggleSort('cliente')} style={thStyle('cliente')}>Cliente{sortInd('cliente')}</th>
+                      <th onClick={() => toggleSort('producto')} style={thStyle('producto')}>Producto{sortInd('producto')}</th>
+                      <th onClick={() => toggleSort('etapa')} style={thStyle('etapa')}>Etapa{sortInd('etapa')}</th>
+                      <th onClick={() => toggleSort('total')} style={thStyle('total')}>Total{sortInd('total')}</th>
+                      <th onClick={() => toggleSort('progreso')} style={thStyle('progreso')}>Progreso{sortInd('progreso')}</th>
+                      <th onClick={() => toggleSort('fecha')} style={thStyle('fecha')}>Entrega{sortInd('fecha')}</th>
+                      <th>Talles</th>
+                      <th style={{ width: 120 }}>Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {listaSorted.map(p => {
+                      const items    = pedidoItems(p)
+                      const total    = pedidoTotal(p)
+                      const lotes    = lotesPorPedido[p.id] || []
+                      const hechas   = sumarHechas(lotes)
+                      const avance   = total > 0 ? Math.min(100, Math.round((hechas / total) * 100)) : 0
+                      const venc     = p.fecha && p.fecha < new Date().toISOString().split('T')[0]
+                      const ei       = ETAPA_BY_ID[p.etapa_actual] || { label: p.etapa_actual, icon: '' }
+                      const abierto  = lotes.find(l => !l.completado_at)
+                      return (
+                        <tr key={p.id} style={{ cursor: 'pointer' }} onClick={() => setPedidoOpen(p.id)}>
+                          <td style={{ fontWeight: 600 }}>{p.cliente || '—'}</td>
+                          <td>
+                            {items[0]?.producto || '—'}
+                            {items.length > 1 && <span style={{ fontSize: 10, color: 'var(--text2)', marginLeft: 4 }}>+{items.length - 1}</span>}
+                          </td>
+                          <td>
+                            <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', display: 'inline-block', background: '#e8eef7', color: '#1a3a6b', border: '1px solid #c8d4e8' }}>
+                              {ei.icon} {ei.label}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'center' }}><strong>{total} u.</strong></td>
+                          <td style={{ minWidth: 110 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                              <div style={{ flex: 1, height: 6, background: '#e0ddd4', border: '1px solid #c8c4b8' }}>
+                                <div style={{ width: `${avance}%`, height: '100%', background: avance >= 100 ? 'var(--success)' : '#1a5aa8' }} />
+                              </div>
+                              <span style={{ fontSize: 10, color: 'var(--text2)', whiteSpace: 'nowrap' }}>{hechas}/{total}</span>
+                            </div>
+                            {abierto?.responsable_nombre && (
+                              <div style={{ fontSize: 10, color: 'var(--text2)', marginTop: 2 }}>👤 {abierto.responsable_nombre}</div>
+                            )}
+                          </td>
+                          <td style={{ color: venc ? 'var(--danger)' : undefined, fontWeight: venc ? 700 : undefined }}>
+                            {fmtFecha(p.fecha)}
+                          </td>
+                          <td style={{ fontSize: 11, color: 'var(--text2)' }}>
+                            {items.map((it, i) => (
+                              <div key={i}>
+                                {items.length > 1 && <span style={{ fontWeight: 600 }}>{it.producto}: </span>}
+                                {tallesOrdenados(it.talles).map(([t, c]) => `${t}:${c}`).join(' ')}
+                              </div>
+                            ))}
+                          </td>
+                          <td onClick={e => e.stopPropagation()}>
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              <button className="btn btn-secondary btn-sm" onClick={() => setPedidoOpen(p.id)}>📝 Asistente</button>
+                              <select
+                                value={p.etapa_actual || ''}
+                                onChange={e => cambiarEtapa(p.id, e.target.value)}
+                                style={{ fontSize: 11, padding: '2px 4px' }}
+                                title="Cambiar etapa"
+                              >
+                                {ETAPAS.map(e => <option key={e.id} value={e.id}>{e.icon} {e.label}</option>)}
+                                <option value="entrega">📦 Entrega</option>
+                              </select>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Lotes libres */}
+            {libresLotes.length > 0 && (
               <div style={{ marginBottom: 16 }}>
-                {pedidosEtapa.map(p => (
-                  <PedidoRow
-                    key={p.id}
-                    pedido={p}
-                    lotes={lotesPorPedido[p.id] || []}
-                    onOpen={() => setPedidoOpen(p.id)}
-                    onCambiarEtapa={(nuevaEtapa) => cambiarEtapa(p.id, nuevaEtapa)}
-                  />
+                <div style={{ fontSize: 10, color: 'var(--text2)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 0 6px' }}>
+                  Producción libre / stock
+                </div>
+                {libresLotes.map(l => (
+                  <LibreLoteRow key={l.id} lote={l} onOpen={() => setLibreOpen(l)} />
                 ))}
-                {libresLotes.length > 0 && (
-                  <>
-                    {pedidosEtapa.length > 0 && (
-                      <div style={{ fontSize: 10, color: 'var(--text2)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, padding: '10px 0 4px' }}>
-                        Producción libre / stock
-                      </div>
-                    )}
-                    {libresLotes.map(l => (
-                      <LibreLoteRow key={l.id} lote={l} onOpen={() => setLibreOpen(l)} />
-                    ))}
-                  </>
-                )}
               </div>
             )}
 
             {/* Stats */}
             <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(4,1fr)' }}>
               <div className="stat-card">
-                <div className="stat-value">{pedidos.filter(p => !['entrega', 'cancelado'].includes(p.etapa_actual)).length}</div>
+                <div className="stat-value">{pedidosActivos.length}</div>
                 <div className="stat-label">En producción</div>
               </div>
               <div className="stat-card">
@@ -414,13 +488,13 @@ export default function Produccion({ onMenuClick }) {
               </div>
               <div className="stat-card">
                 <div className="stat-value" style={{ color: 'var(--warning)' }}>
-                  {pedidos.filter(p => p.fecha && p.fecha < new Date().toISOString().split('T')[0] && !['entrega', 'cancelado'].includes(p.etapa_actual)).length}
+                  {pedidosActivos.filter(p => p.fecha && p.fecha < new Date().toISOString().split('T')[0]).length}
                 </div>
                 <div className="stat-label">Vencidos</div>
               </div>
               <div className="stat-card">
                 <div className="stat-value" style={{ color: 'var(--accent)' }}>
-                  {pedidos.filter(p => !['entrega', 'cancelado'].includes(p.etapa_actual)).reduce((a, p) => a + pedidoTotal(p), 0)}
+                  {pedidosActivos.reduce((a, p) => a + pedidoTotal(p), 0)}
                 </div>
                 <div className="stat-label">Unidades en curso</div>
               </div>
@@ -429,17 +503,21 @@ export default function Produccion({ onMenuClick }) {
         )}
       </div>
 
-      {pedidoOpen !== null && (
-        <Asistente
-          pedido={pedidos.find(p => p.id === pedidoOpen)}
-          etapaId={etapaSel}
-          contactos={contactos}
-          lotes={lotesPorPedido[pedidoOpen] || []}
-          onClose={() => setPedidoOpen(null)}
-          onSaved={refetch}
-          onAvanzar={() => avanzarEtapa(pedidoOpen, etapaSel)}
-        />
-      )}
+      {pedidoOpen !== null && (() => {
+        const p = pedidos.find(x => x.id === pedidoOpen)
+        if (!p) return null
+        return (
+          <Asistente
+            pedido={p}
+            etapaId={p.etapa_actual}
+            contactos={contactos}
+            lotes={lotesPorPedido[pedidoOpen] || []}
+            onClose={() => setPedidoOpen(null)}
+            onSaved={refetch}
+            onAvanzar={() => avanzarEtapa(pedidoOpen, p.etapa_actual)}
+          />
+        )
+      })()}
 
       {libreOpen && (() => {
         const tabla = inferirTabla(libreOpen.hechas?.[0]?.talles) || 'adulto'
@@ -701,7 +779,8 @@ function FaltaCortar({ productos: prodsMap }) {
       const [{ data: todasPiezas }, { data: todosAjustes }, { data: pedidosData }] = await Promise.all([
         marcadaIds.length ? supabase.from('cortes_piezas').select('*').in('marcada_id', marcadaIds) : Promise.resolve({ data: [] }),
         marcadaIds.length ? supabase.from('cortes_ajustes').select('*').in('marcada_id', marcadaIds) : Promise.resolve({ data: [] }),
-        supabase.from('pedidos').select('id, items, talles, producto_id').neq('etapa_actual', 'cancelado'),
+        supabase.from('pedidos').select('id, items, talles, producto_id, etapa_actual, cliente')
+          .in('etapa_actual', ['confirmado', 'compra_tela', 'corte', 'taller']),
       ])
 
       // ya_cortado[producto_id][pieza_nombre][talle] = cantidad total
@@ -772,8 +851,9 @@ function FaltaCortar({ productos: prodsMap }) {
 
   return (
     <div>
-      <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 14 }}>
-        Balance de piezas cortadas vs. necesarias según pedidos activos. Verde = sobra · Rojo = falta · Gris = sin data.
+      <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>Balance piezas cortadas vs. necesarias. Solo incluye pedidos en <strong>confirmado / compra_tela / corte / taller</strong>.</span>
+        <button className="btn btn-secondary btn-sm" onClick={cargar}>↺ Actualizar</button>
       </div>
       {prods.map(prod => {
         const nec  = necesario[prod.id] || {}
