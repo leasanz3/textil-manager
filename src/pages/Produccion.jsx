@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -105,8 +105,25 @@ export default function Produccion({ onMenuClick }) {
   const [lotesEtapa, setLotesEtapa] = useState([])
   const [loading, setLoading]       = useState(true)
 
-  const [etapaSel, setEtapaSel]   = useState('corte')
+  const [etapaSel, setEtapaSel]     = useState('corte')
   const [pedidoOpen, setPedidoOpen] = useState(null)
+
+  // ── Producción libre ──────────────────────────────────────────────────────
+  const [showFaltaCortar, setShowFaltaCortar] = useState(false)
+  const [libreOpen, setLibreOpen]             = useState(null)  // lote objeto
+  const [modalLibre, setModalLibre]           = useState(false)
+  const [libreEtapa, setLibreEtapa]           = useState('corte')
+  const [libreNota, setLibreNota]             = useState('')
+  const [libreProdId, setLibreProdId]         = useState('')
+  const [libreProdNombre, setLibreProdNombre] = useState('')
+  const [libreProdQ, setLibreProdQ]           = useState('')
+  const [libreProdRes, setLibreProdRes]       = useState([])
+  const [libresVinculados, setLibresVinculados] = useState([])
+  const [pedQ, setPedQ]                       = useState('')
+  const [pedRes, setPedRes]                   = useState([])
+  const [savingLibre, setSavingLibre]         = useState(false)
+  const pedTimer  = useRef(null)
+  const prodTimer = useRef(null)
 
   useEffect(() => { fetchBase() }, [])
   useEffect(() => { fetchLotesEtapa(etapaSel) }, [etapaSel])
@@ -115,7 +132,7 @@ export default function Produccion({ onMenuClick }) {
     setLoading(true)
     const [ped, prods, cont] = await Promise.all([
       supabase.from('pedidos').select('*').order('created_at', { ascending: false }),
-      supabase.from('productos').select('id, nombre, procesos'),
+      supabase.from('productos').select('id, nombre, procesos, piezas, codigo'),
       supabase.from('contactos').select('*').order('nombre'),
     ])
     setPedidos(ped.data || [])
@@ -159,10 +176,13 @@ export default function Produccion({ onMenuClick }) {
       })
   }, [pedidos, etapaSel])
 
-  // ── Mapa pedido_id → lotes ─────────────────────────────────────────────────
+  // ── Lotes libres (sin pedido) y mapa pedido_id → lotes ───────────────────
+  const libresLotes = useMemo(() => lotesEtapa.filter(l => !l.pedido_id), [lotesEtapa])
+
   const lotesPorPedido = useMemo(() => {
     const m = {}
     for (const l of lotesEtapa) {
+      if (!l.pedido_id) continue
       if (!m[l.pedido_id]) m[l.pedido_id] = []
       m[l.pedido_id].push(l)
     }
@@ -198,6 +218,82 @@ export default function Produccion({ onMenuClick }) {
     await refetch()
   }
 
+  // ── Búsqueda de pedidos para modal libre ─────────────────────────────────
+  function onPedSearch(val) {
+    setPedQ(val)
+    if (pedTimer.current) clearTimeout(pedTimer.current)
+    if (!val.trim()) { setPedRes([]); return }
+    pedTimer.current = setTimeout(async () => {
+      const { data } = await supabase.from('pedidos')
+        .select('id, cliente, items, talles')
+        .ilike('cliente', `%${val.trim()}%`)
+        .limit(6)
+      setPedRes(data || [])
+    }, 300)
+  }
+
+  function vincularPedido(ped) {
+    if (libresVinculados.find(x => x.id === ped.id)) return
+    setLibresVinculados(v => [...v, ped])
+    setPedQ(''); setPedRes([])
+  }
+
+  function onLibreProdSearch(val) {
+    setLibreProdQ(val); setLibreProdId(''); setLibreProdNombre('')
+    if (prodTimer.current) clearTimeout(prodTimer.current)
+    if (!val.trim()) { setLibreProdRes([]); return }
+    prodTimer.current = setTimeout(async () => {
+      const { data } = await supabase.from('productos')
+        .select('id, nombre, codigo')
+        .ilike('nombre', `%${val.trim()}%`)
+        .limit(8)
+      setLibreProdRes(data || [])
+    }, 250)
+  }
+
+  async function guardarLibre() {
+    setSavingLibre(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    const hechasInit = libreProdId
+      ? [{ item_idx: 0, producto_id: libreProdId, producto: libreProdNombre, talles: {} }]
+      : []
+
+    const { data: loteNuevo, error } = await supabase
+      .from('produccion_etapas')
+      .insert({ etapa: libreEtapa, nota: libreNota || null, hechas: hechasInit, iniciado_at: new Date().toISOString() })
+      .select().single()
+
+    if (error) { alert('Error: ' + error.message); setSavingLibre(false); return }
+
+    if (libresVinculados.length > 0 && loteNuevo) {
+      await supabase.from('produccion_pedidos').insert(
+        libresVinculados.map(p => ({ produccion_etapa_id: loteNuevo.id, pedido_id: p.id, user_id: user?.id }))
+      )
+    }
+    setSavingLibre(false); setModalLibre(false)
+    setLibreEtapa('corte'); setLibreNota('')
+    setLibreProdId(''); setLibreProdNombre(''); setLibreProdQ(''); setLibreProdRes([])
+    setLibresVinculados([]); setPedQ(''); setPedRes([])
+    setEtapaSel(libreEtapa)
+    await refetch()
+  }
+
+  async function avanzarLibre(lote) {
+    const idx  = ETAPAS.findIndex(e => e.id === lote.etapa)
+    const next = ETAPAS[idx + 1]
+    await supabase.from('produccion_etapas')
+      .update({ completado_at: new Date().toISOString() })
+      .eq('id', lote.id)
+    if (next) {
+      await supabase.from('produccion_etapas').insert({
+        etapa: next.id, hechas: lote.hechas || [], iniciado_at: new Date().toISOString(),
+      })
+      setEtapaSel(next.id)
+    }
+    setLibreOpen(null)
+    await refetch()
+  }
+
   // ═══════════════════ Render ═══════════════════════════════════════════════
   return (
     <div>
@@ -206,6 +302,7 @@ export default function Produccion({ onMenuClick }) {
           <button className="mobile-menu-btn" onClick={onMenuClick}>☰</button>
           <h2>🏭 Producción</h2>
         </div>
+        <button className="btn btn-primary btn-sm" onClick={() => setModalLibre(true)}>+ Agregar producción</button>
       </div>
 
       <div className="content">
@@ -216,11 +313,11 @@ export default function Produccion({ onMenuClick }) {
             {/* Tabs de etapas */}
             <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid #003d7a', marginBottom: 12, flexWrap: 'wrap' }}>
               {ETAPAS.map(e => {
-                const activa = etapaSel === e.id
+                const activa = !showFaltaCortar && etapaSel === e.id
                 return (
                   <button
                     key={e.id}
-                    onClick={() => { setEtapaSel(e.id); setPedidoOpen(null) }}
+                    onClick={() => { setEtapaSel(e.id); setPedidoOpen(null); setShowFaltaCortar(false) }}
                     style={{
                       padding: '5px 14px',
                       fontFamily: 'Tahoma, sans-serif',
@@ -250,14 +347,34 @@ export default function Produccion({ onMenuClick }) {
                   </button>
                 )
               })}
+              <button
+                onClick={() => { setShowFaltaCortar(true); setPedidoOpen(null) }}
+                style={{
+                  padding: '5px 14px',
+                  fontFamily: 'Tahoma, sans-serif',
+                  fontSize: 11,
+                  fontWeight: 'bold',
+                  border: '1px solid #a8a8a8',
+                  borderBottom: showFaltaCortar ? '2px solid #ece9d8' : '1px solid #a8a8a8',
+                  background: showFaltaCortar ? '#ece9d8' : 'linear-gradient(to bottom, #f4f4ec, #d8d4c8)',
+                  color: showFaltaCortar ? '#003d7a' : '#555',
+                  cursor: 'pointer',
+                  marginBottom: showFaltaCortar ? -2 : 0,
+                  marginLeft: 8,
+                }}
+              >
+                🔍 Falta cortar
+              </button>
             </div>
 
-            {/* Lista de pedidos */}
-            {pedidosEtapa.length === 0 ? (
+            {/* Contenido principal */}
+            {showFaltaCortar ? (
+              <FaltaCortar productos={productos} />
+            ) : pedidosEtapa.length === 0 && libresLotes.length === 0 ? (
               <div className="empty-state">
                 <div className="icon">{ETAPA_BY_ID[etapaSel]?.icon}</div>
-                <h3>No hay pedidos en {ETAPA_BY_ID[etapaSel]?.label?.toLowerCase()}</h3>
-                <p>Cuando un pedido entre en esta etapa lo vas a ver acá.</p>
+                <h3>No hay producción en {ETAPA_BY_ID[etapaSel]?.label?.toLowerCase()}</h3>
+                <p>Cuando un pedido o lote libre entre en esta etapa lo vas a ver acá.</p>
               </div>
             ) : (
               <div style={{ marginBottom: 16 }}>
@@ -270,6 +387,18 @@ export default function Produccion({ onMenuClick }) {
                     onCambiarEtapa={(nuevaEtapa) => cambiarEtapa(p.id, nuevaEtapa)}
                   />
                 ))}
+                {libresLotes.length > 0 && (
+                  <>
+                    {pedidosEtapa.length > 0 && (
+                      <div style={{ fontSize: 10, color: 'var(--text2)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, padding: '10px 0 4px' }}>
+                        Producción libre / stock
+                      </div>
+                    )}
+                    {libresLotes.map(l => (
+                      <LibreLoteRow key={l.id} lote={l} onOpen={() => setLibreOpen(l)} />
+                    ))}
+                  </>
+                )}
               </div>
             )}
 
@@ -310,6 +439,124 @@ export default function Produccion({ onMenuClick }) {
           onSaved={refetch}
           onAvanzar={() => avanzarEtapa(pedidoOpen, etapaSel)}
         />
+      )}
+
+      {libreOpen && (() => {
+        const tabla = inferirTabla(libreOpen.hechas?.[0]?.talles) || 'adulto'
+        const allTalles = Object.fromEntries((TABLAS[tabla]?.talles || TABLAS.adulto.talles).map(t => [t, 0]))
+        const synth = {
+          id: '__libre__',
+          cliente: 'Producción libre',
+          fecha: null,
+          items: libreOpen.hechas?.length
+            ? libreOpen.hechas.map(h => ({ producto: h.producto, producto_id: h.producto_id, tabla, talles: allTalles }))
+            : [{ producto: '', producto_id: null, tabla, talles: allTalles }],
+        }
+        return (
+          <Asistente
+            pedido={synth}
+            etapaId={libreOpen.etapa}
+            contactos={contactos}
+            lotes={[libreOpen]}
+            libreMode
+            onClose={() => setLibreOpen(null)}
+            onSaved={async () => { await refetch(); setLibreOpen(null) }}
+            onAvanzar={() => avanzarLibre(libreOpen)}
+          />
+        )
+      })()}
+
+      {modalLibre && (
+        <div className="modal-overlay" onClick={() => setModalLibre(false)}>
+          <div className="modal" style={{ maxWidth: 560 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>🏭 Nueva producción</h3>
+              <button className="close-btn" onClick={() => setModalLibre(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div className="form-grid">
+                <div className="form-group">
+                  <label>Etapa inicial</label>
+                  <select value={libreEtapa} onChange={e => setLibreEtapa(e.target.value)}>
+                    {ETAPAS.map(e => <option key={e.id} value={e.id}>{e.icon} {e.label}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Nota <span style={{ fontWeight: 400, color: 'var(--text2)' }}>(opcional)</span></label>
+                  <input value={libreNota} onChange={e => setLibreNota(e.target.value)} placeholder="Ej: stock camperas, próxima temporada…" />
+                </div>
+              </div>
+
+              <div className="form-group" style={{ position: 'relative' }}>
+                <label>Producto <span style={{ fontWeight: 400, color: 'var(--text2)' }}>(opcional)</span></label>
+                <input
+                  value={libreProdQ}
+                  onChange={e => onLibreProdSearch(e.target.value)}
+                  onBlur={() => setTimeout(() => setLibreProdRes([]), 150)}
+                  placeholder="Buscar producto…"
+                  autoComplete="off"
+                />
+                {libreProdId && <div style={{ fontSize: 11, color: 'var(--success)', marginTop: 2 }}>✔ {libreProdNombre}</div>}
+                {libreProdRes.length > 0 && (
+                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, background: 'var(--surface)', border: '1px solid var(--border)', boxShadow: '0 4px 16px rgba(0,0,0,0.18)', maxHeight: 180, overflowY: 'auto' }}>
+                    {libreProdRes.map(p => (
+                      <div
+                        key={p.id}
+                        onMouseDown={() => { setLibreProdId(p.id); setLibreProdNombre(p.nombre); setLibreProdQ(p.nombre); setLibreProdRes([]) }}
+                        style={{ padding: '7px 12px', cursor: 'pointer', fontSize: 12, borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between' }}
+                        onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'}
+                        onMouseLeave={e => e.currentTarget.style.background = ''}
+                      >
+                        <span>{p.nombre}</span>
+                        {p.codigo && <span style={{ fontSize: 11, color: 'var(--text2)' }}>{p.codigo}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="form-group">
+                <label>Pedidos vinculados <span style={{ fontWeight: 400, color: 'var(--text2)' }}>(opcional — 0, 1 o varios)</span></label>
+                {libresVinculados.map((p, i) => (
+                  <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 8px', background: '#f4f4ec', border: '1px solid #d0d0c8', marginBottom: 4, fontSize: 12 }}>
+                    <span style={{ fontWeight: 600 }}>{p.cliente}</span>
+                    <button className="btn btn-danger btn-sm" onClick={() => setLibresVinculados(v => v.filter((_, j) => j !== i))}>✕</button>
+                  </div>
+                ))}
+                <div style={{ position: 'relative' }}>
+                  <input
+                    value={pedQ}
+                    onChange={e => onPedSearch(e.target.value)}
+                    onBlur={() => setTimeout(() => setPedRes([]), 150)}
+                    placeholder="Buscar pedido por cliente…"
+                    autoComplete="off"
+                  />
+                  {pedRes.length > 0 && (
+                    <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, background: 'var(--surface)', border: '1px solid var(--border)', boxShadow: '0 4px 16px rgba(0,0,0,0.18)', maxHeight: 180, overflowY: 'auto' }}>
+                      {pedRes.map(p => (
+                        <div
+                          key={p.id}
+                          onMouseDown={() => vincularPedido(p)}
+                          style={{ padding: '7px 12px', cursor: 'pointer', fontSize: 12, borderBottom: '1px solid var(--border)' }}
+                          onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'}
+                          onMouseLeave={e => e.currentTarget.style.background = ''}
+                        >
+                          {p.cliente}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setModalLibre(false)}>Cancelar</button>
+              <button className="btn btn-primary" onClick={guardarLibre} disabled={savingLibre}>
+                {savingLibre ? 'Guardando…' : '✔ Crear producción'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
@@ -387,10 +634,242 @@ function PedidoRow({ pedido, lotes, onOpen, onCambiarEtapa }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// ─── LibreLoteRow ─────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function LibreLoteRow({ lote, onOpen }) {
+  const hechas = sumarHechas([lote])
+  const prod   = lote.hechas?.[0]?.producto
+
+  return (
+    <div style={{ border: '1px solid #a8a8a8', borderLeft: '5px solid #888888', boxShadow: '1px 1px 0 #b8b8b8', marginBottom: 8, background: '#fff' }}>
+      <div style={{ background: '#f4f0e8', borderBottom: '1px solid #c8c0a8', padding: '5px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontWeight: 'bold', color: '#555', fontSize: 12 }}>🏭 {prod || 'Producción libre'}</span>
+        <span style={{ fontSize: 10, color: '#777' }}>{fmtFecha(lote.iniciado_at?.split('T')[0])}</span>
+      </div>
+      <div style={{ padding: '8px 10px', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        {lote.responsable_nombre && <span style={{ fontSize: 10, color: '#555' }}>👤 {lote.responsable_nombre}</span>}
+        <span style={{ fontSize: 10, color: '#555' }}>{hechas} u. hechas</span>
+        {lote.nota && <span style={{ fontSize: 10, color: '#888', fontStyle: 'italic' }}>{lote.nota}</span>}
+        <button className="btn btn-secondary btn-sm" onClick={onOpen} style={{ marginLeft: 'auto' }}>📝 Asistente</button>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // ─── Asistente ────────────────────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvanzar }) {
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── FaltaCortar ──────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function buildResultFC(piezas, pares, ajustes) {
+  const r = {}
+  for (const p of piezas) {
+    if (!r[p.pieza_nombre]) r[p.pieza_nombre] = {}
+    r[p.pieza_nombre][p.talle] = (parseFloat(p.cantidad) || 0) * pares
+  }
+  for (const a of (ajustes || [])) {
+    if (a.de_pieza && a.a_pieza) {
+      const qty = parseFloat(a.cantidad) || 0
+      if (!r[a.de_pieza]) r[a.de_pieza] = {}
+      if (!r[a.a_pieza])  r[a.a_pieza]  = {}
+      r[a.de_pieza][a.de_talle] = (r[a.de_pieza][a.de_talle] || 0) - qty
+      r[a.a_pieza][a.a_talle]   = (r[a.a_pieza][a.a_talle]   || 0) + qty
+    }
+  }
+  return r
+}
+
+function FaltaCortar({ productos: prodsMap }) {
+  const [data, setData]       = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => { cargar() }, [])
+
+  async function cargar() {
+    setLoading(true)
+    try {
+      const { data: mps } = await supabase
+        .from('cortes_marcadas_productos')
+        .select('marcada_id, producto_id, cortes_marcadas!marcada_id(id, pliegues, total_pliegues)')
+
+      const marcadaIds = [...new Set((mps || []).map(mp => mp.marcada_id))]
+
+      const [{ data: todasPiezas }, { data: todosAjustes }, { data: pedidosData }] = await Promise.all([
+        marcadaIds.length ? supabase.from('cortes_piezas').select('*').in('marcada_id', marcadaIds) : Promise.resolve({ data: [] }),
+        marcadaIds.length ? supabase.from('cortes_ajustes').select('*').in('marcada_id', marcadaIds) : Promise.resolve({ data: [] }),
+        supabase.from('pedidos').select('id, items, talles, producto_id').neq('etapa_actual', 'cancelado'),
+      ])
+
+      // ya_cortado[producto_id][pieza_nombre][talle] = cantidad total
+      const yaCortado = {}
+      for (const mp of (mps || [])) {
+        const marcada = mp.cortes_marcadas
+        if (!marcada) continue
+        const tp = parseFloat(marcada.total_pliegues) || 0
+        const pp = parseFloat(marcada.pliegues) || 1
+        const pares = pp > 0 ? tp / pp : 0
+        const piezas = (todasPiezas || []).filter(p => p.marcada_id === mp.marcada_id && p.producto_id === mp.producto_id)
+        const ajustes = (todosAjustes || []).filter(a => a.marcada_id === mp.marcada_id && a.producto_id === mp.producto_id)
+        const result = buildResultFC(piezas, pares, ajustes)
+        if (!yaCortado[mp.producto_id]) yaCortado[mp.producto_id] = {}
+        for (const [pieza, tallesObj] of Object.entries(result)) {
+          if (!yaCortado[mp.producto_id][pieza]) yaCortado[mp.producto_id][pieza] = {}
+          for (const [t, qty] of Object.entries(tallesObj)) {
+            yaCortado[mp.producto_id][pieza][t] = (yaCortado[mp.producto_id][pieza][t] || 0) + qty
+          }
+        }
+      }
+
+      // necesario[producto_id][talle] = unidades de pedido
+      const necesario = {}
+      for (const ped of (pedidosData || [])) {
+        const items = ped.items?.length ? ped.items : [{ producto_id: ped.producto_id, talles: ped.talles }]
+        for (const item of items) {
+          if (!item.producto_id) continue
+          if (!necesario[item.producto_id]) necesario[item.producto_id] = {}
+          for (const [t, qty] of Object.entries(item.talles || {})) {
+            necesario[item.producto_id][t] = (necesario[item.producto_id][t] || 0) + (Number(qty) || 0)
+          }
+        }
+      }
+
+      setData({ yaCortado, necesario })
+    } catch (e) {
+      console.error('FaltaCortar error', e)
+    } finally { setLoading(false) }
+  }
+
+  if (loading) return <div className="loading"><div className="spinner" /> Calculando balance…</div>
+  if (!data) return null
+
+  const { yaCortado, necesario } = data
+  const prodIds = [...new Set([...Object.keys(yaCortado), ...Object.keys(necesario)])]
+  const prods = prodIds.map(id => prodsMap[id]).filter(Boolean).filter(p => (p.piezas || []).length > 0)
+
+  if (prods.length === 0) {
+    return (
+      <div className="empty-state">
+        <div className="icon">🔍</div>
+        <h3>Sin datos de corte</h3>
+        <p>Cargá al menos una sesión de corte y un pedido activo para ver el balance.</p>
+      </div>
+    )
+  }
+
+  const chipStyle = diff => ({
+    display: 'inline-block', padding: '1px 6px', fontWeight: 700, fontSize: 11,
+    fontFamily: 'Tahoma, Arial, sans-serif',
+    background: diff > 0 ? '#d4edda' : diff < 0 ? '#f8d7da' : '#e8e8e8',
+    color:      diff > 0 ? '#155724' : diff < 0 ? '#721c24' : '#555',
+    border:     `1px solid ${diff > 0 ? '#c3e6cb' : diff < 0 ? '#f5c6cb' : '#c8c8c8'}`,
+  })
+
+  const ROL_LABEL = { tela1: '🧶 Tela 1', tela2: '🧶 Tela 2', rib: '🧶 RIB', entretela: '🧶 Entretela' }
+
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 14 }}>
+        Balance de piezas cortadas vs. necesarias según pedidos activos. Verde = sobra · Rojo = falta · Gris = sin data.
+      </div>
+      {prods.map(prod => {
+        const nec  = necesario[prod.id] || {}
+        const cort = yaCortado[prod.id] || {}
+        const todosLosTalles = [...new Set([
+          ...Object.keys(nec),
+          ...Object.values(cort).flatMap(t => Object.keys(t)),
+        ])].sort((a, b) => ORDEN_TALLES.indexOf(a) - ORDEN_TALLES.indexOf(b))
+
+        if (todosLosTalles.length === 0) return null
+
+        const rolesMap = {}
+        for (const pieza of (prod.piezas || [])) {
+          const rol = pieza.tela_rol || 'otro'
+          if (!rolesMap[rol]) rolesMap[rol] = []
+          rolesMap[rol].push(pieza)
+        }
+
+        const totalNecProd = Object.values(nec).reduce((a, b) => a + b, 0)
+
+        return (
+          <div key={prod.id} style={{ marginBottom: 24 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, padding: '5px 10px', background: 'linear-gradient(to bottom, #e8eef7, #c8d4e8)', border: '1px solid #c8d4e8', color: '#1a3a6b', fontFamily: 'Tahoma, Arial, sans-serif', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>{prod.nombre}</span>
+              <span style={{ fontSize: 11, fontWeight: 400, color: '#555' }}>
+                Pedidos activos: {totalNecProd} u.
+              </span>
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: 'Tahoma, Arial, sans-serif' }}>
+              <thead>
+                <tr>
+                  <th style={{ padding: '3px 8px', background: '#f0f4f8', border: '1px solid #dde4ee', textAlign: 'left', width: '30%' }}>Pieza</th>
+                  {todosLosTalles.map(t => (
+                    <th key={t} style={{ padding: '3px 6px', background: '#f0f4f8', border: '1px solid #dde4ee', textAlign: 'center', minWidth: 46 }}>{t}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(rolesMap).map(([rol, piezasDeRol]) => (
+                  <React.Fragment key={rol}>
+                    <tr>
+                      <td colSpan={todosLosTalles.length + 1} style={{ padding: '3px 8px', background: '#f4f4ec', fontWeight: 700, color: '#555', fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, border: '1px solid #e0e8f0' }}>
+                        {ROL_LABEL[rol] || `🧶 ${rol}`}
+                      </td>
+                    </tr>
+                    <tr style={{ background: '#fafafa' }}>
+                      <td style={{ padding: '3px 8px', border: '1px solid #eee', color: '#777', fontStyle: 'italic' }}>Pedidos (necesario)</td>
+                      {todosLosTalles.map(t => (
+                        <td key={t} style={{ padding: '3px 6px', border: '1px solid #eee', textAlign: 'center', color: '#555' }}>
+                          {nec[t] || '—'}
+                        </td>
+                      ))}
+                    </tr>
+                    {piezasDeRol.map(pieza => {
+                      const cortPieza = cort[pieza.nombre] || {}
+                      return (
+                        <tr key={pieza.nombre}
+                          onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'}
+                          onMouseLeave={e => e.currentTarget.style.background = ''}
+                        >
+                          <td style={{ padding: '3px 8px', border: '1px solid #eee', fontWeight: 600 }}>
+                            {pieza.nombre}
+                            {pieza.mult > 1 && <span style={{ fontSize: 10, color: '#888', marginLeft: 4 }}>×{pieza.mult}</span>}
+                          </td>
+                          {todosLosTalles.map(t => {
+                            const cut   = cortPieza[t] || 0
+                            const neces = (nec[t] || 0) * (pieza.mult || 1)
+                            const diff  = Math.round((cut - neces) * 100) / 100
+                            return (
+                              <td key={t} style={{ padding: '3px 6px', border: '1px solid #eee', textAlign: 'center' }}>
+                                {cut > 0 || neces > 0
+                                  ? <span style={chipStyle(diff)}>{diff > 0 ? `+${diff}` : diff}</span>
+                                  : <span style={{ color: '#ccc' }}>—</span>
+                                }
+                              </td>
+                            )
+                          })}
+                        </tr>
+                      )
+                    })}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── Asistente ────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvanzar, libreMode = false }) {
   const eInfo = ETAPA_BY_ID[etapaId]
   const items = pedidoItems(pedido)
 
@@ -454,7 +933,7 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
     const responsable = contactos.find(c => c.id === responsableId)
 
     const payload = {
-      pedido_id:          pedido.id,
+      ...(libreMode ? {} : { pedido_id: pedido.id }),
       etapa:              etapaId,
       responsable_id:     responsableId,
       responsable_nombre: responsable?.nombre || null,
@@ -538,7 +1017,9 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
 
           {items.map((item, idx) => {
             const tabla         = item.tabla || inferirTabla(item.talles)
-            const tallesPedido  = (TABLAS[tabla]?.talles || []).filter(t => (item.talles || {})[t] > 0)
+            const tallesPedido  = libreMode
+              ? (TABLAS[tabla]?.talles || TABLAS.adulto.talles)
+              : (TABLAS[tabla]?.talles || []).filter(t => (item.talles || {})[t] > 0)
             const totalNec      = totalTalles(item.talles)
             const totalEsteLote = totalTalles(hechasState[idx]?.talles)
             const totalHist     = totalTalles(historico[idx])
@@ -551,12 +1032,14 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
                 </div>
 
                 <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 10 }}>
-                  Pedido: <strong style={{ color: 'var(--text)' }}>{totalNec} u.</strong>
-                  {totalHist > 0 && (
-                    <> · Anteriores: <strong style={{ color: 'var(--success)' }}>{totalHist} u.</strong></>
+                  {!libreMode && (
+                    <>Pedido: <strong style={{ color: 'var(--text)' }}>{totalNec} u.</strong>{' · '}</>
                   )}
-                  {' '}· Este lote: <strong style={{ color: 'var(--accent)' }}>{totalEsteLote} u.</strong>
-                  {' '}· Total: <strong>{totalAcum}/{totalNec}</strong>
+                  {totalHist > 0 && (
+                    <>Anteriores: <strong style={{ color: 'var(--success)' }}>{totalHist} u.</strong>{' · '}</>
+                  )}
+                  Este lote: <strong style={{ color: 'var(--accent)' }}>{totalEsteLote} u.</strong>
+                  {!libreMode && <> · Total: <strong>{totalAcum}/{totalNec}</strong></>}
                 </div>
 
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>

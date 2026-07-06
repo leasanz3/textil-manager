@@ -531,20 +531,7 @@ export default function Pedidos({ onMenuClick }) {
     fetchPedidos()
   }
 
-  async function avanzarEtapa(p, e) {
-    e.stopPropagation()
-    const actual = normalizeEtapa(p.etapa_actual)
-    const idx = FLUJO_ETAPAS.indexOf(actual)
-    if (idx === -1 || idx >= FLUJO_ETAPAS.length - 1) return
-    const siguiente = FLUJO_ETAPAS[idx + 1]
-    if (siguiente === 'entrega') { abrirModalEntrega(p, e); return }
-    await supabase.from('pedidos').update({ etapa_actual: siguiente }).eq('id', p.id)
-    fetchPedidos()
-  }
-
-  async function cambiarEtapa(p, nuevaEtapa, e) {
-    e.stopPropagation()
-    if (nuevaEtapa === 'entrega') { abrirModalEntrega(p, e); return }
+  async function cambiarEtapaDirecta(p, nuevaEtapa) {
     await supabase.from('pedidos').update({ etapa_actual: nuevaEtapa }).eq('id', p.id)
     fetchPedidos()
   }
@@ -696,7 +683,6 @@ export default function Pedidos({ onMenuClick }) {
                 <tbody>
                   {sorted.map(p => {
                     const ei = etapaInfo(p.etapa_actual)
-                    const puedeAvanzar = FLUJO_ETAPAS.indexOf(normalizeEtapa(p.etapa_actual)) < FLUJO_ETAPAS.length - 1
                     const items = p.items && p.items.length > 0 ? p.items : null
                     return (
                       <tr key={p.id} onClick={() => setVistaFicha(vistaFicha?.id === p.id ? null : p)} style={{ cursor: 'pointer' }}>
@@ -708,14 +694,10 @@ export default function Pedidos({ onMenuClick }) {
                           )}
                         </td>
                         <td>{p.cliente}</td>
-                        <td onClick={e => e.stopPropagation()}>
-                          <select
-                            value={normalizeEtapa(p.etapa_actual) || ''}
-                            onChange={e => cambiarEtapa(p, e.target.value, e)}
-                            style={{ background: ei.color + '22', color: ei.color, border: `1px solid ${ei.color}88`, cursor: 'pointer', fontSize: 11, fontWeight: 700, padding: '2px 4px', appearance: 'auto', borderRadius: 2 }}
-                          >
-                            {ETAPAS.map(e => <option key={e.id} value={e.id}>{e.label}</option>)}
-                          </select>
+                        <td>
+                          <span style={{ background: ei.color + '22', color: ei.color, border: `1px solid ${ei.color}88`, fontSize: 11, fontWeight: 700, padding: '2px 8px', display: 'inline-block' }}>
+                            {ei.label}
+                          </span>
                         </td>
                         <td><strong>{pedidoTotal(p)} u.</strong></td>
                         <td style={{ fontSize: 12, color: 'var(--text2)' }}>{fmtFecha(p.fecha_pedido)}</td>
@@ -737,9 +719,6 @@ export default function Pedidos({ onMenuClick }) {
                         </td>
                         <td onClick={e => e.stopPropagation()}>
                           <div style={{ display: 'flex', gap: 4 }}>
-                            {puedeAvanzar && p.etapa_actual !== 'cancelado' && (
-                              <button className="btn btn-secondary btn-sm" title="Avanzar etapa" onClick={e => avanzarEtapa(p, e)}>→</button>
-                            )}
                             <button className="btn btn-secondary btn-sm" title="Editar" onClick={e => { e.stopPropagation(); openEdit(p) }}>✏</button>
                             <button className="btn btn-danger btn-sm" title="Eliminar" onClick={e => handleDelete(p, e)}>🗑</button>
                           </div>
@@ -893,12 +872,6 @@ export default function Pedidos({ onMenuClick }) {
                   )}
                 </div>
 
-                <div className="form-group">
-                  <label>Etapa actual</label>
-                  <select value={form.etapa_actual} onChange={e => setF('etapa_actual', e.target.value)}>
-                    {ETAPAS.map(e => <option key={e.id} value={e.id}>{e.label}</option>)}
-                  </select>
-                </div>
                 <div className="form-group">
                   <label>Fecha del pedido</label>
                   <input type="date" value={form.fecha_pedido} onChange={e => setF('fecha_pedido', e.target.value)} />
