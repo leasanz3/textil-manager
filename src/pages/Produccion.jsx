@@ -4,12 +4,16 @@ import { supabase } from '../lib/supabase'
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
 const ETAPAS = [
-  { id: 'corte',   label: 'Corte',   icon: '✂',  tipo: ['otro', 'taller'], color: '' },
-  { id: 'taller',  label: 'Taller',  icon: '🧵', tipo: ['taller'],         color: '' },
-  { id: 'entrega', label: 'Entrega', icon: '📦', tipo: [],                  color: 'green' },
+  { id: 'recibido',      label: 'Pedido recibido', icon: '📋', tipo: [],                 color: '#888888' },
+  { id: 'presupuestado', label: 'Presupuestado',   icon: '💬', tipo: [],                 color: '#8060c0' },
+  { id: 'confirmado',    label: 'Confirmado',      icon: '✅', tipo: [],                 color: '#2060a8' },
+  { id: 'compra_tela',   label: 'Compra de tela',  icon: '🧶', tipo: [],                 color: '#c8a040' },
+  { id: 'corte',         label: 'Corte',           icon: '✂',  tipo: ['otro', 'taller'], color: '#d48a00' },
+  { id: 'taller',        label: 'Taller',          icon: '🧵', tipo: ['taller'],         color: '#2a7a2a' },
+  { id: 'entrega',       label: 'Entrega',         icon: '📦', tipo: [],                 color: '#1a5a1a' },
 ]
 
-const ETAPA_BY_ID   = Object.fromEntries(ETAPAS.map(e => [e.id, e]))
+const ETAPA_BY_ID = Object.fromEntries(ETAPAS.map(e => [e.id, e]))
 
 // ─── Colores por cliente ──────────────────────────────────────────────────────
 // Editá acá: border = franja izquierda, bg = fondo del header, text = texto header
@@ -181,7 +185,7 @@ export default function Produccion({ onMenuClick }) {
 
   // ── Lista filtrada y ordenada ─────────────────────────────────────────────
   const pedidosActivos = useMemo(() => {
-    return pedidos.filter(p => !['cancelado', 'recibido', 'presupuestado'].includes(p.etapa_actual))
+    return pedidos.filter(p => p.etapa_actual !== 'cancelado')
   }, [pedidos])
 
   function toggleSort(col) {
@@ -249,7 +253,7 @@ export default function Produccion({ onMenuClick }) {
     if (!val.trim()) { setPedRes([]); return }
     pedTimer.current = setTimeout(async () => {
       const { data } = await supabase.from('pedidos')
-        .select('id, cliente, items, talles')
+        .select('id, cliente, items, talles, etapa_actual')
         .ilike('cliente', `%${val.trim()}%`)
         .limit(6)
       setPedRes(data || [])
@@ -293,6 +297,14 @@ export default function Produccion({ onMenuClick }) {
       await supabase.from('produccion_pedidos').insert(
         libresVinculados.map(p => ({ produccion_etapa_id: loteNuevo.id, pedido_id: p.id, user_id: user?.id }))
       )
+      // Avanzar etapa del pedido si está antes de la etapa seleccionada
+      const etapaIdx = ETAPAS.findIndex(e => e.id === libreEtapa)
+      for (const ped of libresVinculados) {
+        const pedIdx = ETAPAS.findIndex(e => e.id === ped.etapa_actual)
+        if (pedIdx < etapaIdx) {
+          await supabase.from('pedidos').update({ etapa_actual: libreEtapa }).eq('id', ped.id)
+        }
+      }
     }
     setSavingLibre(false); setModalLibre(false)
     setLibreEtapa('corte'); setLibreNota('')
@@ -415,7 +427,7 @@ export default function Produccion({ onMenuClick }) {
                             {items.length > 1 && <span style={{ fontSize: 10, color: 'var(--text2)', marginLeft: 4 }}>+{items.length - 1}</span>}
                           </td>
                           <td>
-                            <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', display: 'inline-block', background: '#e8eef7', color: '#1a3a6b', border: '1px solid #c8d4e8' }}>
+                            <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', display: 'inline-block', background: (ei.color || '#888') + '22', color: ei.color || '#555', border: `1px solid ${(ei.color || '#888')}88` }}>
                               {ei.icon} {ei.label}
                             </span>
                           </td>
@@ -452,7 +464,7 @@ export default function Produccion({ onMenuClick }) {
                                 title="Cambiar etapa"
                               >
                                 {ETAPAS.map(e => <option key={e.id} value={e.id}>{e.icon} {e.label}</option>)}
-                                <option value="entrega">📦 Entrega</option>
+                                <option value="cancelado">✕ Cancelado</option>
                               </select>
                             </div>
                           </td>
@@ -779,8 +791,8 @@ function FaltaCortar({ productos: prodsMap }) {
       const [{ data: todasPiezas }, { data: todosAjustes }, { data: pedidosData }] = await Promise.all([
         marcadaIds.length ? supabase.from('cortes_piezas').select('*').in('marcada_id', marcadaIds) : Promise.resolve({ data: [] }),
         marcadaIds.length ? supabase.from('cortes_ajustes').select('*').in('marcada_id', marcadaIds) : Promise.resolve({ data: [] }),
-        supabase.from('pedidos').select('id, items, talles, producto_id, etapa_actual, cliente')
-          .in('etapa_actual', ['confirmado', 'compra_tela', 'corte', 'taller']),
+        supabase.from('pedidos').select('id, items, talles, producto_id, cliente')
+          .eq('etapa_actual', 'corte'),
       ])
 
       // ya_cortado[producto_id][pieza_nombre][talle] = cantidad total
@@ -852,7 +864,7 @@ function FaltaCortar({ productos: prodsMap }) {
   return (
     <div>
       <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span>Balance piezas cortadas vs. necesarias. Solo incluye pedidos en <strong>confirmado / compra_tela / corte / taller</strong>.</span>
+        <span>Balance piezas cortadas vs. necesarias. Solo incluye pedidos en etapa <strong>Corte</strong>.</span>
         <button className="btn btn-secondary btn-sm" onClick={cargar}>↺ Actualizar</button>
       </div>
       {prods.map(prod => {
