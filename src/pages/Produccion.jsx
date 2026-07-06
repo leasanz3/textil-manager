@@ -1044,6 +1044,35 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
   const [nota, setNota]                   = useState(loteAbierto?.nota || '')
   const [saving, setSaving]               = useState(false)
 
+  // ── Edición inline de lotes cerrados ──────────────────────────────────────
+  const [editLoteId, setEditLoteId]     = useState(null)
+  const [editFecha, setEditFecha]       = useState('')
+  const [editNota, setEditNota]         = useState('')
+  const [savingEdit, setSavingEdit]     = useState(false)
+
+  function startEditLote(l) {
+    setEditLoteId(l.id)
+    setEditFecha(l.iniciado_at ? l.iniciado_at.split('T')[0] : '')
+    setEditNota(l.nota || '')
+  }
+
+  async function saveEditLote(loteId) {
+    setSavingEdit(true)
+    await supabase.from('produccion_etapas').update({
+      iniciado_at: editFecha ? new Date(editFecha).toISOString() : null,
+      nota: editNota || null,
+    }).eq('id', loteId)
+    setSavingEdit(false)
+    setEditLoteId(null)
+    await onSaved()
+  }
+
+  async function borrarLote(loteId) {
+    if (!window.confirm('¿Borrar este lote? Esta acción no se puede deshacer.')) return
+    await supabase.from('produccion_etapas').delete().eq('id', loteId)
+    await onSaved()
+  }
+
   // ── Cortes vinculados (solo en etapa corte) ────────────────────────────────
   const [cortesVinc, setCortesVinc]       = useState([])
   const [cortesSugeridos, setCortesSugeridos] = useState([])
@@ -1353,20 +1382,72 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
           )}
 
           {lotesCerrados.length > 0 && (
-            <details style={{ marginTop: 12 }}>
-              <summary style={{ fontSize: 12, color: 'var(--text2)', cursor: 'pointer' }}>
-                📜 Historial de lotes cerrados ({lotesCerrados.length})
+            <details style={{ marginTop: 12 }} open>
+              <summary style={{ fontSize: 12, color: 'var(--text2)', cursor: 'pointer', fontWeight: 700 }}>
+                📜 Historial de entregas ({lotesCerrados.length})
               </summary>
               <div style={{ marginTop: 8 }}>
-                {lotesCerrados.map(l => (
-                  <div key={l.id} style={{ fontSize: 11, padding: '6px 10px', background: 'var(--bg3)', borderRadius: 'var(--radius)', marginBottom: 4 }}>
-                    <strong>{fmtFecha(l.iniciado_at?.split('T')[0])}</strong>
-                    {l.completado_at && <span style={{ color: 'var(--text2)' }}> → {fmtFecha(l.completado_at.split('T')[0])}</span>}
-                    {l.responsable_nombre && <> · 👤 {l.responsable_nombre}</>}
-                    <> · {sumarHechas([l])} u.</>
-                    {l.nota && <div style={{ color: 'var(--text2)', marginTop: 2 }}>{l.nota}</div>}
-                  </div>
-                ))}
+                {lotesCerrados.map(l => {
+                  const isEditing = editLoteId === l.id
+                  const totalLote = sumarHechas([l])
+                  return (
+                    <div key={l.id} style={{ fontSize: 11, border: '1px solid #d8d4c8', marginBottom: 6, background: '#fafaf4' }}>
+                      {/* Header lote */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 10px', background: '#f0f0e8', borderBottom: '1px solid #d8d4c8' }}>
+                        {isEditing ? (
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flex: 1 }}>
+                            <input
+                              type="date"
+                              value={editFecha}
+                              onChange={e => setEditFecha(e.target.value)}
+                              style={{ fontSize: 11, padding: '1px 4px', width: 130 }}
+                            />
+                            <input
+                              value={editNota}
+                              onChange={e => setEditNota(e.target.value)}
+                              placeholder="Nota…"
+                              style={{ fontSize: 11, padding: '1px 4px', flex: 1 }}
+                            />
+                            <button className="btn btn-primary btn-sm" onClick={() => saveEditLote(l.id)} disabled={savingEdit}>
+                              {savingEdit ? '…' : '✔'}
+                            </button>
+                            <button className="btn btn-secondary btn-sm" onClick={() => setEditLoteId(null)}>✕</button>
+                          </div>
+                        ) : (
+                          <>
+                            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                              <strong>{fmtFecha(l.iniciado_at?.split('T')[0])}</strong>
+                              {l.responsable_nombre && <span style={{ color: 'var(--text2)' }}>👤 {l.responsable_nombre}</span>}
+                              <span style={{ color: 'var(--text2)' }}>{totalLote} u.</span>
+                              {l.nota && <span style={{ color: '#888', fontStyle: 'italic' }}>{l.nota}</span>}
+                            </div>
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              <button className="btn btn-secondary btn-sm" onClick={() => startEditLote(l)} title="Editar fecha / nota">✏</button>
+                              <button className="btn btn-danger btn-sm" onClick={() => borrarLote(l.id)} title="Borrar lote">🗑</button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                      {/* Detalle talles */}
+                      {!isEditing && (l.hechas || []).map((h, hIdx) => {
+                        const pairs = tallesOrdenados(h.talles)
+                        if (!pairs.length) return null
+                        return (
+                          <div key={hIdx} style={{ padding: '5px 10px', borderTop: hIdx > 0 ? '1px solid #e8e4dc' : undefined }}>
+                            {items.length > 1 && <div style={{ fontWeight: 700, color: '#555', marginBottom: 3 }}>{h.producto}</div>}
+                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                              {pairs.map(([t, c]) => (
+                                <span key={t} style={{ border: '1px solid #c8c4b8', padding: '1px 6px', fontSize: 10, background: '#fff', fontWeight: 700 }}>
+                                  {t} <span style={{ color: '#1a5aa8' }}>{c}</span>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })}
               </div>
             </details>
           )}
