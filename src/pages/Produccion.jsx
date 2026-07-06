@@ -774,7 +774,7 @@ function buildResultFC(piezas, pares, ajustes) {
 }
 
 function FaltaCortar({ productos: prodsMap }) {
-  const [data, setData]       = useState(null)
+  const [filas, setFilas]     = useState([])   // [{ pedido, cortesVinc, yaCortado }]
   const [loading, setLoading] = useState(true)
 
   useEffect(() => { cargar() }, [])
@@ -782,71 +782,78 @@ function FaltaCortar({ productos: prodsMap }) {
   async function cargar() {
     setLoading(true)
     try {
-      const { data: mps } = await supabase
-        .from('cortes_marcadas_productos')
-        .select('marcada_id, producto_id, cortes_marcadas!marcada_id(id, pliegues, total_pliegues)')
+      // 1. Pedidos en etapa corte
+      const { data: pedidosCorte } = await supabase
+        .from('pedidos').select('id, cliente, items, talles, producto_id').eq('etapa_actual', 'corte')
 
-      const marcadaIds = [...new Set((mps || []).map(mp => mp.marcada_id))]
+      if (!pedidosCorte?.length) { setFilas([]); return }
 
-      const [{ data: todasPiezas }, { data: todosAjustes }, { data: pedidosData }] = await Promise.all([
-        marcadaIds.length ? supabase.from('cortes_piezas').select('*').in('marcada_id', marcadaIds) : Promise.resolve({ data: [] }),
-        marcadaIds.length ? supabase.from('cortes_ajustes').select('*').in('marcada_id', marcadaIds) : Promise.resolve({ data: [] }),
-        supabase.from('pedidos').select('id, items, talles, producto_id, cliente')
-          .eq('etapa_actual', 'corte'),
+      const pedidoIds = pedidosCorte.map(p => p.id)
+
+      // 2. Cortes vinculados a esos pedidos
+      const { data: cpRows } = await supabase
+        .from('cortes_pedidos')
+        .select('pedido_id, corte_id, cortes_marcadas!corte_id(id, pliegues, total_pliegues, fecha, nota)')
+        .in('pedido_id', pedidoIds)
+
+      // Agrupar cortes por pedido
+      const cortesPorPedido = {}
+      for (const cp of (cpRows || [])) {
+        if (!cortesPorPedido[cp.pedido_id]) cortesPorPedido[cp.pedido_id] = []
+        if (cp.cortes_marcadas) cortesPorPedido[cp.pedido_id].push(cp.cortes_marcadas)
+      }
+
+      // 3. Para las marcadas vinculadas, traer piezas y ajustes
+      const allMarcadaIds = [...new Set((cpRows || []).map(cp => cp.corte_id))]
+
+      const [{ data: todasPiezas }, { data: todosAjustes }, { data: mps }] = await Promise.all([
+        allMarcadaIds.length ? supabase.from('cortes_piezas').select('*').in('marcada_id', allMarcadaIds) : Promise.resolve({ data: [] }),
+        allMarcadaIds.length ? supabase.from('cortes_ajustes').select('*').in('marcada_id', allMarcadaIds) : Promise.resolve({ data: [] }),
+        allMarcadaIds.length ? supabase.from('cortes_marcadas_productos').select('marcada_id, producto_id').in('marcada_id', allMarcadaIds) : Promise.resolve({ data: [] }),
       ])
 
-      // ya_cortado[producto_id][pieza_nombre][talle] = cantidad total
-      const yaCortado = {}
-      for (const mp of (mps || [])) {
-        const marcada = mp.cortes_marcadas
-        if (!marcada) continue
-        const tp = parseFloat(marcada.total_pliegues) || 0
-        const pp = parseFloat(marcada.pliegues) || 1
-        const pares = pp > 0 ? tp / pp : 0
-        const piezas = (todasPiezas || []).filter(p => p.marcada_id === mp.marcada_id && p.producto_id === mp.producto_id)
-        const ajustes = (todosAjustes || []).filter(a => a.marcada_id === mp.marcada_id && a.producto_id === mp.producto_id)
-        const result = buildResultFC(piezas, pares, ajustes)
-        if (!yaCortado[mp.producto_id]) yaCortado[mp.producto_id] = {}
-        for (const [pieza, tallesObj] of Object.entries(result)) {
-          if (!yaCortado[mp.producto_id][pieza]) yaCortado[mp.producto_id][pieza] = {}
-          for (const [t, qty] of Object.entries(tallesObj)) {
-            yaCortado[mp.producto_id][pieza][t] = (yaCortado[mp.producto_id][pieza][t] || 0) + qty
+      // 4. Calcular ya_cortado por pedido → producto_id → pieza → talle
+      const result = pedidosCorte.map(ped => {
+        const marcadas = cortesPorPedido[ped.id] || []
+        const yaCortado = {}   // { producto_id: { pieza: { talle: qty } } }
+
+        for (const marcada of marcadas) {
+          const tp    = parseFloat(marcada.total_pliegues) || 0
+          const pp    = parseFloat(marcada.pliegues) || 1
+          const pares = pp > 0 ? tp / pp : 0
+          const prodsEnMarcada = (mps || []).filter(mp => mp.marcada_id === marcada.id)
+
+          for (const mp of prodsEnMarcada) {
+            const piezas  = (todasPiezas || []).filter(p => p.marcada_id === marcada.id && p.producto_id === mp.producto_id)
+            const ajustes = (todosAjustes || []).filter(a => a.marcada_id === marcada.id && a.producto_id === mp.producto_id)
+            const res     = buildResultFC(piezas, pares, ajustes)
+            if (!yaCortado[mp.producto_id]) yaCortado[mp.producto_id] = {}
+            for (const [pieza, tallesObj] of Object.entries(res)) {
+              if (!yaCortado[mp.producto_id][pieza]) yaCortado[mp.producto_id][pieza] = {}
+              for (const [t, qty] of Object.entries(tallesObj)) {
+                yaCortado[mp.producto_id][pieza][t] = (yaCortado[mp.producto_id][pieza][t] || 0) + qty
+              }
+            }
           }
         }
-      }
 
-      // necesario[producto_id][talle] = unidades de pedido
-      const necesario = {}
-      for (const ped of (pedidosData || [])) {
-        const items = ped.items?.length ? ped.items : [{ producto_id: ped.producto_id, talles: ped.talles }]
-        for (const item of items) {
-          if (!item.producto_id) continue
-          if (!necesario[item.producto_id]) necesario[item.producto_id] = {}
-          for (const [t, qty] of Object.entries(item.talles || {})) {
-            necesario[item.producto_id][t] = (necesario[item.producto_id][t] || 0) + (Number(qty) || 0)
-          }
-        }
-      }
+        return { pedido: ped, marcadas, yaCortado }
+      })
 
-      setData({ yaCortado, necesario })
+      setFilas(result)
     } catch (e) {
       console.error('FaltaCortar error', e)
     } finally { setLoading(false) }
   }
 
   if (loading) return <div className="loading"><div className="spinner" /> Calculando balance…</div>
-  if (!data) return null
 
-  const { yaCortado, necesario } = data
-  const prodIds = [...new Set([...Object.keys(yaCortado), ...Object.keys(necesario)])]
-  const prods = prodIds.map(id => prodsMap[id]).filter(Boolean).filter(p => (p.piezas || []).length > 0)
-
-  if (prods.length === 0) {
+  if (!filas.length) {
     return (
       <div className="empty-state">
         <div className="icon">🔍</div>
-        <h3>Sin datos de corte</h3>
-        <p>Cargá al menos una sesión de corte y un pedido activo para ver el balance.</p>
+        <h3>Sin pedidos en Corte</h3>
+        <p>No hay pedidos en etapa Corte. Vinculá cortes desde el Asistente de cada pedido.</p>
       </div>
     )
   }
@@ -863,93 +870,125 @@ function FaltaCortar({ productos: prodsMap }) {
 
   return (
     <div>
-      <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span>Balance piezas cortadas vs. necesarias. Solo incluye pedidos en etapa <strong>Corte</strong>.</span>
+      <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 14, display: 'flex', justifyContent: 'space-between' }}>
+        <span>Balance por pedido usando los cortes vinculados. Pedidos en etapa <strong>Corte</strong>.</span>
         <button className="btn btn-secondary btn-sm" onClick={cargar}>↺ Actualizar</button>
       </div>
-      {prods.map(prod => {
-        const nec  = necesario[prod.id] || {}
-        const cort = yaCortado[prod.id] || {}
-        const todosLosTalles = [...new Set([
-          ...Object.keys(nec),
-          ...Object.values(cort).flatMap(t => Object.keys(t)),
-        ])].sort((a, b) => ORDEN_TALLES.indexOf(a) - ORDEN_TALLES.indexOf(b))
 
-        if (todosLosTalles.length === 0) return null
-
-        const rolesMap = {}
-        for (const pieza of (prod.piezas || [])) {
-          const rol = pieza.tela_rol || 'otro'
-          if (!rolesMap[rol]) rolesMap[rol] = []
-          rolesMap[rol].push(pieza)
-        }
-
-        const totalNecProd = Object.values(nec).reduce((a, b) => a + b, 0)
+      {filas.map(({ pedido, marcadas, yaCortado }) => {
+        const items = pedidoItems(pedido)
 
         return (
-          <div key={prod.id} style={{ marginBottom: 24 }}>
+          <div key={pedido.id} style={{ marginBottom: 28 }}>
+            {/* Header pedido */}
             <div style={{ fontWeight: 700, fontSize: 13, padding: '5px 10px', background: 'linear-gradient(to bottom, #e8eef7, #c8d4e8)', border: '1px solid #c8d4e8', color: '#1a3a6b', fontFamily: 'Tahoma, Arial, sans-serif', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>{prod.nombre}</span>
-              <span style={{ fontSize: 11, fontWeight: 400, color: '#555' }}>
-                Pedidos activos: {totalNecProd} u.
-              </span>
+              <span>👤 {pedido.cliente}</span>
+              {marcadas.length === 0
+                ? <span style={{ fontSize: 11, fontWeight: 400, color: '#c04040' }}>⚠ Sin cortes vinculados — vinculá desde el Asistente</span>
+                : <span style={{ fontSize: 11, fontWeight: 400, color: '#555' }}>{marcadas.length} sesión{marcadas.length > 1 ? 'es' : ''} de corte vinculada{marcadas.length > 1 ? 's' : ''}</span>
+              }
             </div>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: 'Tahoma, Arial, sans-serif' }}>
-              <thead>
-                <tr>
-                  <th style={{ padding: '3px 8px', background: '#f0f4f8', border: '1px solid #dde4ee', textAlign: 'left', width: '30%' }}>Pieza</th>
-                  {todosLosTalles.map(t => (
-                    <th key={t} style={{ padding: '3px 6px', background: '#f0f4f8', border: '1px solid #dde4ee', textAlign: 'center', minWidth: 46 }}>{t}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(rolesMap).map(([rol, piezasDeRol]) => (
-                  <React.Fragment key={rol}>
-                    <tr>
-                      <td colSpan={todosLosTalles.length + 1} style={{ padding: '3px 8px', background: '#f4f4ec', fontWeight: 700, color: '#555', fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, border: '1px solid #e0e8f0' }}>
-                        {ROL_LABEL[rol] || `🧶 ${rol}`}
-                      </td>
-                    </tr>
-                    <tr style={{ background: '#fafafa' }}>
-                      <td style={{ padding: '3px 8px', border: '1px solid #eee', color: '#777', fontStyle: 'italic' }}>Pedidos (necesario)</td>
-                      {todosLosTalles.map(t => (
-                        <td key={t} style={{ padding: '3px 6px', border: '1px solid #eee', textAlign: 'center', color: '#555' }}>
-                          {nec[t] || '—'}
-                        </td>
-                      ))}
-                    </tr>
-                    {piezasDeRol.map(pieza => {
-                      const cortPieza = cort[pieza.nombre] || {}
-                      return (
-                        <tr key={pieza.nombre}
-                          onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'}
-                          onMouseLeave={e => e.currentTarget.style.background = ''}
-                        >
-                          <td style={{ padding: '3px 8px', border: '1px solid #eee', fontWeight: 600 }}>
-                            {pieza.nombre}
-                            {pieza.mult > 1 && <span style={{ fontSize: 10, color: '#888', marginLeft: 4 }}>×{pieza.mult}</span>}
+
+            {/* Sesiones vinculadas */}
+            {marcadas.length > 0 && (
+              <div style={{ display: 'flex', gap: 6, padding: '5px 10px', background: '#f8f8f4', border: '1px solid #ddd', borderTop: 'none', flexWrap: 'wrap' }}>
+                {marcadas.map(m => (
+                  <span key={m.id} style={{ fontSize: 10, border: '1px solid #c8c0a8', padding: '1px 6px', background: '#fff' }}>
+                    ✂ {m.fecha || '—'}{m.nota ? ` · ${m.nota}` : ''} · {m.total_pliegues} pliegos
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Tabla por ítem del pedido */}
+            {items.map((item, iIdx) => {
+              if (!item.producto_id) return null
+              const prod = prodsMap[item.producto_id]
+              if (!prod || !(prod.piezas || []).length) return null
+
+              const nec  = item.talles || {}
+              const cort = yaCortado[item.producto_id] || {}
+              const todosLosTalles = [...new Set([
+                ...Object.keys(nec).filter(t => (nec[t] || 0) > 0),
+                ...Object.values(cort).flatMap(t => Object.keys(t)),
+              ])].sort((a, b) => ORDEN_TALLES.indexOf(a) - ORDEN_TALLES.indexOf(b))
+
+              if (todosLosTalles.length === 0) return null
+
+              const rolesMap = {}
+              for (const pieza of prod.piezas) {
+                const rol = pieza.tela_rol || 'otro'
+                if (!rolesMap[rol]) rolesMap[rol] = []
+                rolesMap[rol].push(pieza)
+              }
+
+              return (
+                <div key={iIdx}>
+                  {items.length > 1 && (
+                    <div style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', background: '#f0f4f8', border: '1px solid #dde4ee', borderTop: 'none', color: '#333' }}>
+                      {prod.nombre}
+                    </div>
+                  )}
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: 'Tahoma, Arial, sans-serif' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ padding: '3px 8px', background: '#f0f4f8', border: '1px solid #dde4ee', textAlign: 'left', width: '28%' }}>Pieza</th>
+                        {todosLosTalles.map(t => (
+                          <th key={t} style={{ padding: '3px 6px', background: '#f0f4f8', border: '1px solid #dde4ee', textAlign: 'center', minWidth: 46 }}>{t}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {/* Fila necesario */}
+                      <tr style={{ background: '#fafafa' }}>
+                        <td style={{ padding: '3px 8px', border: '1px solid #eee', color: '#777', fontStyle: 'italic' }}>Pedido (necesario)</td>
+                        {todosLosTalles.map(t => (
+                          <td key={t} style={{ padding: '3px 6px', border: '1px solid #eee', textAlign: 'center', color: '#555' }}>
+                            {nec[t] || '—'}
                           </td>
-                          {todosLosTalles.map(t => {
-                            const cut   = cortPieza[t] || 0
-                            const neces = (nec[t] || 0) * (pieza.mult || 1)
-                            const diff  = Math.round((cut - neces) * 100) / 100
+                        ))}
+                      </tr>
+                      {Object.entries(rolesMap).map(([rol, piezasDeRol]) => (
+                        <React.Fragment key={rol}>
+                          <tr>
+                            <td colSpan={todosLosTalles.length + 1} style={{ padding: '2px 8px', background: '#f4f4ec', fontWeight: 700, color: '#555', fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, border: '1px solid #e0e8f0' }}>
+                              {ROL_LABEL[rol] || `🧶 ${rol}`}
+                            </td>
+                          </tr>
+                          {piezasDeRol.map(pieza => {
+                            const cortPieza = cort[pieza.nombre] || {}
                             return (
-                              <td key={t} style={{ padding: '3px 6px', border: '1px solid #eee', textAlign: 'center' }}>
-                                {cut > 0 || neces > 0
-                                  ? <span style={chipStyle(diff)}>{diff > 0 ? `+${diff}` : diff}</span>
-                                  : <span style={{ color: '#ccc' }}>—</span>
-                                }
-                              </td>
+                              <tr key={pieza.nombre}
+                                onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'}
+                                onMouseLeave={e => e.currentTarget.style.background = ''}
+                              >
+                                <td style={{ padding: '3px 8px', border: '1px solid #eee', fontWeight: 600 }}>
+                                  {pieza.nombre}
+                                  {pieza.mult > 1 && <span style={{ fontSize: 10, color: '#888', marginLeft: 4 }}>×{pieza.mult}</span>}
+                                </td>
+                                {todosLosTalles.map(t => {
+                                  const cut   = cortPieza[t] || 0
+                                  const neces = (nec[t] || 0) * (pieza.mult || 1)
+                                  const diff  = Math.round((cut - neces) * 100) / 100
+                                  return (
+                                    <td key={t} style={{ padding: '3px 6px', border: '1px solid #eee', textAlign: 'center' }}>
+                                      {cut > 0 || neces > 0
+                                        ? <span style={chipStyle(diff)}>{diff > 0 ? `+${diff}` : `${diff}`}</span>
+                                        : <span style={{ color: '#ccc' }}>—</span>
+                                      }
+                                    </td>
+                                  )
+                                })}
+                              </tr>
                             )
                           })}
-                        </tr>
-                      )
-                    })}
-                  </React.Fragment>
-                ))}
-              </tbody>
-            </table>
+                        </React.Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            })}
           </div>
         )
       })}
@@ -1028,7 +1067,12 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
 
   async function vincularCorte(marcada) {
     const { data: { user } } = await supabase.auth.getUser()
-    await supabase.from('cortes_pedidos').insert({ corte_id: marcada.id, pedido_id: pedido.id, user_id: user?.id })
+    const { error } = await supabase.from('cortes_pedidos').insert({
+      corte_id: marcada.id,
+      pedido_id: pedido.id,
+      user_id: user?.id,
+    })
+    if (error) { alert('Error al vincular: ' + error.message); return }
     await cargarCortesVinc()
     await cargarCortesSugeridos()
   }
