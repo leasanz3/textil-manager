@@ -4,12 +4,16 @@ import { supabase } from '../lib/supabase'
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
 const ETAPAS = [
-  { id: 'corte',   label: 'Corte',   icon: '✂',  tipo: ['otro', 'taller'], color: '' },
-  { id: 'taller',  label: 'Taller',  icon: '🧵', tipo: ['taller'],         color: '' },
-  { id: 'entrega', label: 'Entrega', icon: '📦', tipo: [],                  color: 'green' },
+  { id: 'recibido',      label: 'Pedido recibido', icon: '📋', tipo: [],                 color: '#888888' },
+  { id: 'presupuestado', label: 'Presupuestado',   icon: '💬', tipo: [],                 color: '#8060c0' },
+  { id: 'confirmado',    label: 'Confirmado',      icon: '✅', tipo: [],                 color: '#2060a8' },
+  { id: 'compra_tela',   label: 'Compra de tela',  icon: '🧶', tipo: [],                 color: '#c8a040' },
+  { id: 'corte',         label: 'Corte',           icon: '✂',  tipo: ['otro', 'taller'], color: '#d48a00' },
+  { id: 'taller',        label: 'Taller',          icon: '🧵', tipo: ['taller'],         color: '#2a7a2a' },
+  { id: 'entrega',       label: 'Entrega',         icon: '📦', tipo: [],                 color: '#1a5a1a' },
 ]
 
-const ETAPA_BY_ID   = Object.fromEntries(ETAPAS.map(e => [e.id, e]))
+const ETAPA_BY_ID = Object.fromEntries(ETAPAS.map(e => [e.id, e]))
 
 // ─── Colores por cliente ──────────────────────────────────────────────────────
 // Editá acá: border = franja izquierda, bg = fondo del header, text = texto header
@@ -105,8 +109,13 @@ export default function Produccion({ onMenuClick }) {
   const [lotesEtapa, setLotesEtapa] = useState([])
   const [loading, setLoading]       = useState(true)
 
-  const [etapaSel, setEtapaSel]     = useState('corte')
   const [pedidoOpen, setPedidoOpen] = useState(null)
+  const [sortCol, setSortCol]       = useState('fecha')
+  const [sortDir, setSortDir]       = useState('asc')
+  const [filterEtapa, setFilterEtapa] = useState('')
+  const [searchQ, setSearchQ]       = useState('')
+  // etapaSel: solo para fetch de lotes (se mantiene sincronizado con filterEtapa o carga todo)
+  const [etapaSel, setEtapaSel]     = useState(null)
 
   // ── Producción libre ──────────────────────────────────────────────────────
   const [showFaltaCortar, setShowFaltaCortar] = useState(false)
@@ -126,32 +135,29 @@ export default function Produccion({ onMenuClick }) {
   const prodTimer = useRef(null)
 
   useEffect(() => { fetchBase() }, [])
-  useEffect(() => { fetchLotesEtapa(etapaSel) }, [etapaSel])
 
   async function fetchBase() {
     setLoading(true)
-    const [ped, prods, cont] = await Promise.all([
+    const [ped, prods, cont, lotes] = await Promise.all([
       supabase.from('pedidos').select('*').order('created_at', { ascending: false }),
       supabase.from('productos').select('id, nombre, procesos, piezas, codigo'),
       supabase.from('contactos').select('*').order('nombre'),
+      supabase.from('produccion_etapas').select('*'),
     ])
     setPedidos(ped.data || [])
     setProductos(Object.fromEntries((prods.data || []).map(p => [p.id, p])))
     setContactos(cont.data || [])
+    setLotesEtapa(lotes.data || [])
     setLoading(false)
   }
 
-  async function fetchLotesEtapa(etapa) {
-    const { data } = await supabase
-      .from('produccion_etapas')
-      .select('*')
-      .eq('etapa', etapa)
+  async function fetchLotesEtapa() {
+    const { data } = await supabase.from('produccion_etapas').select('*')
     setLotesEtapa(data || [])
   }
 
   async function refetch() {
     await fetchBase()
-    if (etapaSel) await fetchLotesEtapa(etapaSel)
   }
 
   // ── Contadores por etapa ───────────────────────────────────────────────────
@@ -163,18 +169,6 @@ export default function Produccion({ onMenuClick }) {
     }
     return c
   }, [pedidos])
-
-  // ── Pedidos en la etapa seleccionada ──────────────────────────────────────
-  const pedidosEtapa = useMemo(() => {
-    return pedidos
-      .filter(p => p.etapa_actual === etapaSel)
-      .sort((a, b) => {
-        if (a.fecha && b.fecha) return a.fecha.localeCompare(b.fecha)
-        if (a.fecha) return -1
-        if (b.fecha) return 1
-        return 0
-      })
-  }, [pedidos, etapaSel])
 
   // ── Lotes libres (sin pedido) y mapa pedido_id → lotes ───────────────────
   const libresLotes = useMemo(() => lotesEtapa.filter(l => !l.pedido_id), [lotesEtapa])
@@ -188,6 +182,40 @@ export default function Produccion({ onMenuClick }) {
     }
     return m
   }, [lotesEtapa])
+
+  // ── Lista filtrada y ordenada ─────────────────────────────────────────────
+  const pedidosActivos = useMemo(() => {
+    return pedidos.filter(p => p.etapa_actual !== 'cancelado')
+  }, [pedidos])
+
+  function toggleSort(col) {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortCol(col); setSortDir('asc') }
+  }
+
+  const listaSorted = useMemo(() => {
+    let base = pedidosActivos
+    if (filterEtapa) base = base.filter(p => p.etapa_actual === filterEtapa)
+    if (searchQ.trim()) {
+      const q = searchQ.toLowerCase()
+      base = base.filter(p =>
+        p.cliente?.toLowerCase().includes(q) ||
+        pedidoItems(p).some(it => it.producto?.toLowerCase().includes(q))
+      )
+    }
+    return [...base].sort((a, b) => {
+      let va, vb
+      if (sortCol === 'cliente')   { va = (a.cliente || '').toLowerCase(); vb = (b.cliente || '').toLowerCase() }
+      if (sortCol === 'producto')  { va = (pedidoItems(a)[0]?.producto || '').toLowerCase(); vb = (pedidoItems(b)[0]?.producto || '').toLowerCase() }
+      if (sortCol === 'etapa')     { va = a.etapa_actual || ''; vb = b.etapa_actual || '' }
+      if (sortCol === 'total')     { va = pedidoTotal(a); vb = pedidoTotal(b) }
+      if (sortCol === 'fecha')     { va = a.fecha || '9999'; vb = b.fecha || '9999' }
+      if (sortCol === 'progreso')  { va = pedidoTotal(a) > 0 ? sumarHechas(lotesPorPedido[a.id] || []) / pedidoTotal(a) : 0; vb = pedidoTotal(b) > 0 ? sumarHechas(lotesPorPedido[b.id] || []) / pedidoTotal(b) : 0 }
+      if (va < vb) return sortDir === 'asc' ? -1 : 1
+      if (va > vb) return sortDir === 'asc' ?  1 : -1
+      return 0
+    })
+  }, [pedidosActivos, filterEtapa, searchQ, sortCol, sortDir, lotesPorPedido])
 
   // ── Cambiar etapa directamente ────────────────────────────────────────────
   async function cambiarEtapa(pedidoId, nuevaEtapa) {
@@ -225,7 +253,7 @@ export default function Produccion({ onMenuClick }) {
     if (!val.trim()) { setPedRes([]); return }
     pedTimer.current = setTimeout(async () => {
       const { data } = await supabase.from('pedidos')
-        .select('id, cliente, items, talles')
+        .select('id, cliente, items, talles, etapa_actual')
         .ilike('cliente', `%${val.trim()}%`)
         .limit(6)
       setPedRes(data || [])
@@ -269,12 +297,19 @@ export default function Produccion({ onMenuClick }) {
       await supabase.from('produccion_pedidos').insert(
         libresVinculados.map(p => ({ produccion_etapa_id: loteNuevo.id, pedido_id: p.id, user_id: user?.id }))
       )
+      // Avanzar etapa del pedido si está antes de la etapa seleccionada
+      const etapaIdx = ETAPAS.findIndex(e => e.id === libreEtapa)
+      for (const ped of libresVinculados) {
+        const pedIdx = ETAPAS.findIndex(e => e.id === ped.etapa_actual)
+        if (pedIdx < etapaIdx) {
+          await supabase.from('pedidos').update({ etapa_actual: libreEtapa }).eq('id', ped.id)
+        }
+      }
     }
     setSavingLibre(false); setModalLibre(false)
     setLibreEtapa('corte'); setLibreNota('')
     setLibreProdId(''); setLibreProdNombre(''); setLibreProdQ(''); setLibreProdRes([])
     setLibresVinculados([]); setPedQ(''); setPedRes([])
-    setEtapaSel(libreEtapa)
     await refetch()
   }
 
@@ -294,6 +329,12 @@ export default function Produccion({ onMenuClick }) {
     await refetch()
   }
 
+  const thStyle = (col) => ({
+    cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap',
+    background: sortCol === col ? '#dde4f0' : undefined,
+  })
+  const sortInd = (col) => sortCol === col ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ' ↕'
+
   // ═══════════════════ Render ═══════════════════════════════════════════════
   return (
     <div>
@@ -302,110 +343,155 @@ export default function Produccion({ onMenuClick }) {
           <button className="mobile-menu-btn" onClick={onMenuClick}>☰</button>
           <h2>🏭 Producción</h2>
         </div>
-        <button className="btn btn-primary btn-sm" onClick={() => setModalLibre(true)}>+ Agregar producción</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowFaltaCortar(v => !v)}>
+            {showFaltaCortar ? '← Volver' : '🔍 Falta cortar'}
+          </button>
+          <button className="btn btn-primary btn-sm" onClick={() => setModalLibre(true)}>+ Agregar producción</button>
+        </div>
       </div>
 
       <div className="content">
         {loading ? (
           <div className="loading"><div className="spinner" /> Cargando…</div>
+        ) : showFaltaCortar ? (
+          <FaltaCortar productos={productos} />
         ) : (
           <>
-            {/* Tabs de etapas */}
-            <div style={{ display: 'flex', gap: 0, borderBottom: '2px solid #003d7a', marginBottom: 12, flexWrap: 'wrap' }}>
-              {ETAPAS.map(e => {
-                const activa = !showFaltaCortar && etapaSel === e.id
-                return (
+            {/* Barra de filtros */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+              <input
+                value={searchQ}
+                onChange={e => setSearchQ(e.target.value)}
+                placeholder="Buscar cliente o producto…"
+                style={{ width: 220, fontSize: 12 }}
+              />
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button
+                  className="btn btn-sm"
+                  onClick={() => setFilterEtapa('')}
+                  style={{ fontWeight: !filterEtapa ? 700 : 400, background: !filterEtapa ? '#d8e4f4' : undefined }}
+                >
+                  Todos <span style={{ fontSize: 10, color: '#555' }}>({pedidosActivos.length})</span>
+                </button>
+                {ETAPAS.map(e => (
                   <button
                     key={e.id}
-                    onClick={() => { setEtapaSel(e.id); setPedidoOpen(null); setShowFaltaCortar(false) }}
-                    style={{
-                      padding: '5px 14px',
-                      fontFamily: 'Tahoma, sans-serif',
-                      fontSize: 11,
-                      fontWeight: 'bold',
-                      border: '1px solid #a8a8a8',
-                      borderBottom: activa ? '2px solid #ece9d8' : '1px solid #a8a8a8',
-                      background: activa ? '#ece9d8' : 'linear-gradient(to bottom, #f4f4ec, #d8d4c8)',
-                      color: activa ? '#003d7a' : '#555',
-                      cursor: 'pointer',
-                      marginBottom: activa ? -2 : 0,
-                      display: 'flex', gap: 6, alignItems: 'center',
-                    }}
+                    className="btn btn-sm"
+                    onClick={() => setFilterEtapa(f => f === e.id ? '' : e.id)}
+                    style={{ fontWeight: filterEtapa === e.id ? 700 : 400, background: filterEtapa === e.id ? '#d8e4f4' : undefined }}
                   >
-                    {e.icon} {e.label}
-                    <span style={{
-                      background: counts[e.id] > 0 ? '#003d7a' : '#d8d4c8',
-                      color: counts[e.id] > 0 ? '#fff' : '#888',
-                      padding: '0 5px',
-                      fontSize: 10,
-                      fontWeight: 'bold',
-                      minWidth: 18,
-                      textAlign: 'center',
-                    }}>
-                      {counts[e.id] || 0}
-                    </span>
+                    {e.icon} {e.label} <span style={{ fontSize: 10, color: '#555' }}>({counts[e.id] || 0})</span>
                   </button>
-                )
-              })}
-              <button
-                onClick={() => { setShowFaltaCortar(true); setPedidoOpen(null) }}
-                style={{
-                  padding: '5px 14px',
-                  fontFamily: 'Tahoma, sans-serif',
-                  fontSize: 11,
-                  fontWeight: 'bold',
-                  border: '1px solid #a8a8a8',
-                  borderBottom: showFaltaCortar ? '2px solid #ece9d8' : '1px solid #a8a8a8',
-                  background: showFaltaCortar ? '#ece9d8' : 'linear-gradient(to bottom, #f4f4ec, #d8d4c8)',
-                  color: showFaltaCortar ? '#003d7a' : '#555',
-                  cursor: 'pointer',
-                  marginBottom: showFaltaCortar ? -2 : 0,
-                  marginLeft: 8,
-                }}
-              >
-                🔍 Falta cortar
-              </button>
+                ))}
+              </div>
             </div>
 
-            {/* Contenido principal */}
-            {showFaltaCortar ? (
-              <FaltaCortar productos={productos} />
-            ) : pedidosEtapa.length === 0 && libresLotes.length === 0 ? (
+            {/* Tabla principal */}
+            {listaSorted.length === 0 ? (
               <div className="empty-state">
-                <div className="icon">{ETAPA_BY_ID[etapaSel]?.icon}</div>
-                <h3>No hay producción en {ETAPA_BY_ID[etapaSel]?.label?.toLowerCase()}</h3>
-                <p>Cuando un pedido o lote libre entre en esta etapa lo vas a ver acá.</p>
+                <div className="icon">🏭</div>
+                <h3>Sin resultados</h3>
+                <p>No hay pedidos en producción que coincidan con el filtro.</p>
               </div>
             ) : (
+              <div style={{ overflowX: 'auto', marginBottom: 16 }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th onClick={() => toggleSort('cliente')} style={thStyle('cliente')}>Cliente{sortInd('cliente')}</th>
+                      <th onClick={() => toggleSort('producto')} style={thStyle('producto')}>Producto{sortInd('producto')}</th>
+                      <th onClick={() => toggleSort('etapa')} style={thStyle('etapa')}>Etapa{sortInd('etapa')}</th>
+                      <th onClick={() => toggleSort('total')} style={thStyle('total')}>Total{sortInd('total')}</th>
+                      <th onClick={() => toggleSort('progreso')} style={thStyle('progreso')}>Progreso{sortInd('progreso')}</th>
+                      <th onClick={() => toggleSort('fecha')} style={thStyle('fecha')}>Entrega{sortInd('fecha')}</th>
+                      <th>Talles</th>
+                      <th style={{ width: 120 }}>Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {listaSorted.map(p => {
+                      const items    = pedidoItems(p)
+                      const total    = pedidoTotal(p)
+                      const lotes    = lotesPorPedido[p.id] || []
+                      const hechas   = sumarHechas(lotes)
+                      const avance   = total > 0 ? Math.min(100, Math.round((hechas / total) * 100)) : 0
+                      const venc     = p.fecha && p.fecha < new Date().toISOString().split('T')[0]
+                      const ei       = ETAPA_BY_ID[p.etapa_actual] || { label: p.etapa_actual, icon: '' }
+                      const abierto  = lotes.find(l => !l.completado_at)
+                      return (
+                        <tr key={p.id} style={{ cursor: 'pointer' }} onClick={() => setPedidoOpen(p.id)}>
+                          <td style={{ fontWeight: 600 }}>{p.cliente || '—'}</td>
+                          <td>
+                            {items[0]?.producto || '—'}
+                            {items.length > 1 && <span style={{ fontSize: 10, color: 'var(--text2)', marginLeft: 4 }}>+{items.length - 1}</span>}
+                          </td>
+                          <td>
+                            <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', display: 'inline-block', background: (ei.color || '#888') + '22', color: ei.color || '#555', border: `1px solid ${(ei.color || '#888')}88` }}>
+                              {ei.icon} {ei.label}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'center' }}><strong>{total} u.</strong></td>
+                          <td style={{ minWidth: 110 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                              <div style={{ flex: 1, height: 6, background: '#e0ddd4', border: '1px solid #c8c4b8' }}>
+                                <div style={{ width: `${avance}%`, height: '100%', background: avance >= 100 ? 'var(--success)' : '#1a5aa8' }} />
+                              </div>
+                              <span style={{ fontSize: 10, color: 'var(--text2)', whiteSpace: 'nowrap' }}>{hechas}/{total}</span>
+                            </div>
+                            {abierto?.responsable_nombre && (
+                              <div style={{ fontSize: 10, color: 'var(--text2)', marginTop: 2 }}>👤 {abierto.responsable_nombre}</div>
+                            )}
+                          </td>
+                          <td style={{ color: venc ? 'var(--danger)' : undefined, fontWeight: venc ? 700 : undefined }}>
+                            {fmtFecha(p.fecha)}
+                          </td>
+                          <td style={{ fontSize: 11, color: 'var(--text2)' }}>
+                            {items.map((it, i) => (
+                              <div key={i}>
+                                {items.length > 1 && <span style={{ fontWeight: 600 }}>{it.producto}: </span>}
+                                {tallesOrdenados(it.talles).map(([t, c]) => `${t}:${c}`).join(' ')}
+                              </div>
+                            ))}
+                          </td>
+                          <td onClick={e => e.stopPropagation()}>
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              <button className="btn btn-secondary btn-sm" onClick={() => setPedidoOpen(p.id)}>📝 Asistente</button>
+                              <select
+                                value={p.etapa_actual || ''}
+                                onChange={e => cambiarEtapa(p.id, e.target.value)}
+                                style={{ fontSize: 11, padding: '2px 4px' }}
+                                title="Cambiar etapa"
+                              >
+                                {ETAPAS.map(e => <option key={e.id} value={e.id}>{e.icon} {e.label}</option>)}
+                                <option value="cancelado">✕ Cancelado</option>
+                              </select>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Lotes libres */}
+            {libresLotes.length > 0 && (
               <div style={{ marginBottom: 16 }}>
-                {pedidosEtapa.map(p => (
-                  <PedidoRow
-                    key={p.id}
-                    pedido={p}
-                    lotes={lotesPorPedido[p.id] || []}
-                    onOpen={() => setPedidoOpen(p.id)}
-                    onCambiarEtapa={(nuevaEtapa) => cambiarEtapa(p.id, nuevaEtapa)}
-                  />
+                <div style={{ fontSize: 10, color: 'var(--text2)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 0 6px' }}>
+                  Producción libre / stock
+                </div>
+                {libresLotes.map(l => (
+                  <LibreLoteRow key={l.id} lote={l} onOpen={() => setLibreOpen(l)} />
                 ))}
-                {libresLotes.length > 0 && (
-                  <>
-                    {pedidosEtapa.length > 0 && (
-                      <div style={{ fontSize: 10, color: 'var(--text2)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, padding: '10px 0 4px' }}>
-                        Producción libre / stock
-                      </div>
-                    )}
-                    {libresLotes.map(l => (
-                      <LibreLoteRow key={l.id} lote={l} onOpen={() => setLibreOpen(l)} />
-                    ))}
-                  </>
-                )}
               </div>
             )}
 
             {/* Stats */}
             <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(4,1fr)' }}>
               <div className="stat-card">
-                <div className="stat-value">{pedidos.filter(p => !['entrega', 'cancelado'].includes(p.etapa_actual)).length}</div>
+                <div className="stat-value">{pedidosActivos.length}</div>
                 <div className="stat-label">En producción</div>
               </div>
               <div className="stat-card">
@@ -414,13 +500,13 @@ export default function Produccion({ onMenuClick }) {
               </div>
               <div className="stat-card">
                 <div className="stat-value" style={{ color: 'var(--warning)' }}>
-                  {pedidos.filter(p => p.fecha && p.fecha < new Date().toISOString().split('T')[0] && !['entrega', 'cancelado'].includes(p.etapa_actual)).length}
+                  {pedidosActivos.filter(p => p.fecha && p.fecha < new Date().toISOString().split('T')[0]).length}
                 </div>
                 <div className="stat-label">Vencidos</div>
               </div>
               <div className="stat-card">
                 <div className="stat-value" style={{ color: 'var(--accent)' }}>
-                  {pedidos.filter(p => !['entrega', 'cancelado'].includes(p.etapa_actual)).reduce((a, p) => a + pedidoTotal(p), 0)}
+                  {pedidosActivos.reduce((a, p) => a + pedidoTotal(p), 0)}
                 </div>
                 <div className="stat-label">Unidades en curso</div>
               </div>
@@ -429,17 +515,21 @@ export default function Produccion({ onMenuClick }) {
         )}
       </div>
 
-      {pedidoOpen !== null && (
-        <Asistente
-          pedido={pedidos.find(p => p.id === pedidoOpen)}
-          etapaId={etapaSel}
-          contactos={contactos}
-          lotes={lotesPorPedido[pedidoOpen] || []}
-          onClose={() => setPedidoOpen(null)}
-          onSaved={refetch}
-          onAvanzar={() => avanzarEtapa(pedidoOpen, etapaSel)}
-        />
-      )}
+      {pedidoOpen !== null && (() => {
+        const p = pedidos.find(x => x.id === pedidoOpen)
+        if (!p) return null
+        return (
+          <Asistente
+            pedido={p}
+            etapaId={p.etapa_actual}
+            contactos={contactos}
+            lotes={lotesPorPedido[pedidoOpen] || []}
+            onClose={() => setPedidoOpen(null)}
+            onSaved={refetch}
+            onAvanzar={() => avanzarEtapa(pedidoOpen, p.etapa_actual)}
+          />
+        )
+      })()}
 
       {libreOpen && (() => {
         const tabla = inferirTabla(libreOpen.hechas?.[0]?.talles) || 'adulto'
@@ -684,7 +774,7 @@ function buildResultFC(piezas, pares, ajustes) {
 }
 
 function FaltaCortar({ productos: prodsMap }) {
-  const [data, setData]       = useState(null)
+  const [filas, setFilas]     = useState([])   // [{ pedido, cortesVinc, yaCortado }]
   const [loading, setLoading] = useState(true)
 
   useEffect(() => { cargar() }, [])
@@ -692,70 +782,95 @@ function FaltaCortar({ productos: prodsMap }) {
   async function cargar() {
     setLoading(true)
     try {
-      const { data: mps } = await supabase
-        .from('cortes_marcadas_productos')
-        .select('marcada_id, producto_id, cortes_marcadas!marcada_id(id, pliegues, total_pliegues)')
+      // 1. Pedidos en etapa corte
+      const { data: pedidosCorte } = await supabase
+        .from('pedidos').select('id, cliente, items, talles, producto_id').eq('etapa_actual', 'corte')
 
-      const marcadaIds = [...new Set((mps || []).map(mp => mp.marcada_id))]
+      if (!pedidosCorte?.length) { setFilas([]); return }
 
-      const [{ data: todasPiezas }, { data: todosAjustes }, { data: pedidosData }] = await Promise.all([
-        marcadaIds.length ? supabase.from('cortes_piezas').select('*').in('marcada_id', marcadaIds) : Promise.resolve({ data: [] }),
-        marcadaIds.length ? supabase.from('cortes_ajustes').select('*').in('marcada_id', marcadaIds) : Promise.resolve({ data: [] }),
-        supabase.from('pedidos').select('id, items, talles, producto_id').neq('etapa_actual', 'cancelado'),
+      const pedidoIds = pedidosCorte.map(p => p.id)
+
+      // 2. Links cortes_pedidos
+      const { data: cpRows } = await supabase
+        .from('cortes_pedidos').select('pedido_id, corte_id').in('pedido_id', pedidoIds)
+
+      const allMarcadaIds = [...new Set((cpRows || []).map(cp => cp.corte_id).filter(Boolean))]
+
+      // 3. Fetch todo en paralelo (sin joins, más robusto)
+      const [{ data: marcadasData }, { data: todasPiezas }, { data: todosAjustes }, { data: mps }] = await Promise.all([
+        allMarcadaIds.length
+          ? supabase.from('cortes_marcadas').select('id, pliegues, total_pliegues, fecha, nota').in('id', allMarcadaIds)
+          : Promise.resolve({ data: [] }),
+        allMarcadaIds.length
+          ? supabase.from('cortes_piezas').select('marcada_id, producto_id, pieza_nombre, talle, cantidad').in('marcada_id', allMarcadaIds)
+          : Promise.resolve({ data: [] }),
+        allMarcadaIds.length
+          ? supabase.from('cortes_ajustes').select('marcada_id, producto_id, de_pieza, a_pieza, de_talle, a_talle, cantidad').in('marcada_id', allMarcadaIds)
+          : Promise.resolve({ data: [] }),
+        allMarcadaIds.length
+          ? supabase.from('cortes_marcadas_productos').select('marcada_id, producto_id').in('marcada_id', allMarcadaIds)
+          : Promise.resolve({ data: [] }),
       ])
 
-      // ya_cortado[producto_id][pieza_nombre][talle] = cantidad total
-      const yaCortado = {}
-      for (const mp of (mps || [])) {
-        const marcada = mp.cortes_marcadas
-        if (!marcada) continue
-        const tp = parseFloat(marcada.total_pliegues) || 0
-        const pp = parseFloat(marcada.pliegues) || 1
-        const pares = pp > 0 ? tp / pp : 0
-        const piezas = (todasPiezas || []).filter(p => p.marcada_id === mp.marcada_id && p.producto_id === mp.producto_id)
-        const ajustes = (todosAjustes || []).filter(a => a.marcada_id === mp.marcada_id && a.producto_id === mp.producto_id)
-        const result = buildResultFC(piezas, pares, ajustes)
-        if (!yaCortado[mp.producto_id]) yaCortado[mp.producto_id] = {}
-        for (const [pieza, tallesObj] of Object.entries(result)) {
-          if (!yaCortado[mp.producto_id][pieza]) yaCortado[mp.producto_id][pieza] = {}
-          for (const [t, qty] of Object.entries(tallesObj)) {
-            yaCortado[mp.producto_id][pieza][t] = (yaCortado[mp.producto_id][pieza][t] || 0) + qty
-          }
-        }
+      const marcadaById = Object.fromEntries((marcadasData || []).map(m => [m.id, m]))
+
+      // Agrupar cortes por pedido (usando marcadaById para los datos de la marcada)
+      const cortesPorPedido = {}
+      for (const cp of (cpRows || [])) {
+        if (!cortesPorPedido[cp.pedido_id]) cortesPorPedido[cp.pedido_id] = []
+        const m = marcadaById[cp.corte_id]
+        if (m) cortesPorPedido[cp.pedido_id].push(m)
       }
 
-      // necesario[producto_id][talle] = unidades de pedido
-      const necesario = {}
-      for (const ped of (pedidosData || [])) {
-        const items = ped.items?.length ? ped.items : [{ producto_id: ped.producto_id, talles: ped.talles }]
-        for (const item of items) {
-          if (!item.producto_id) continue
-          if (!necesario[item.producto_id]) necesario[item.producto_id] = {}
-          for (const [t, qty] of Object.entries(item.talles || {})) {
-            necesario[item.producto_id][t] = (necesario[item.producto_id][t] || 0) + (Number(qty) || 0)
+      // 4. Calcular ya_cortado por pedido
+      const result = pedidosCorte.map(ped => {
+        const marcadas  = cortesPorPedido[ped.id] || []
+        const yaCortado = {}
+
+        for (const marcada of marcadas) {
+          const tp    = parseFloat(marcada.total_pliegues) || 0
+          const pp    = parseFloat(marcada.pliegues) || 1
+          const pares = pp > 0 ? tp / pp : 0
+
+          // Productos en esta marcada
+          const prodsEnMarcada = (mps || []).filter(mp => String(mp.marcada_id) === String(marcada.id))
+
+          // Si no hay entradas en cortes_marcadas_productos, usar las piezas directamente por marcada
+          const productosIds = prodsEnMarcada.length
+            ? prodsEnMarcada.map(mp => mp.producto_id)
+            : [...new Set((todasPiezas || []).filter(p => String(p.marcada_id) === String(marcada.id)).map(p => p.producto_id))]
+
+          for (const prodId of productosIds) {
+            const piezas  = (todasPiezas || []).filter(p => String(p.marcada_id) === String(marcada.id) && String(p.producto_id) === String(prodId))
+            const ajustes = (todosAjustes || []).filter(a => String(a.marcada_id) === String(marcada.id) && String(a.producto_id) === String(prodId))
+            const res     = buildResultFC(piezas, pares, ajustes)
+            if (!yaCortado[prodId]) yaCortado[prodId] = {}
+            for (const [pieza, tallesObj] of Object.entries(res)) {
+              if (!yaCortado[prodId][pieza]) yaCortado[prodId][pieza] = {}
+              for (const [t, qty] of Object.entries(tallesObj)) {
+                yaCortado[prodId][pieza][t] = (yaCortado[prodId][pieza][t] || 0) + qty
+              }
+            }
           }
         }
-      }
 
-      setData({ yaCortado, necesario })
+        return { pedido: ped, marcadas, yaCortado }
+      })
+
+      setFilas(result)
     } catch (e) {
       console.error('FaltaCortar error', e)
     } finally { setLoading(false) }
   }
 
   if (loading) return <div className="loading"><div className="spinner" /> Calculando balance…</div>
-  if (!data) return null
 
-  const { yaCortado, necesario } = data
-  const prodIds = [...new Set([...Object.keys(yaCortado), ...Object.keys(necesario)])]
-  const prods = prodIds.map(id => prodsMap[id]).filter(Boolean).filter(p => (p.piezas || []).length > 0)
-
-  if (prods.length === 0) {
+  if (!filas.length) {
     return (
       <div className="empty-state">
         <div className="icon">🔍</div>
-        <h3>Sin datos de corte</h3>
-        <p>Cargá al menos una sesión de corte y un pedido activo para ver el balance.</p>
+        <h3>Sin pedidos en Corte</h3>
+        <p>No hay pedidos en etapa Corte. Vinculá cortes desde el Asistente de cada pedido.</p>
       </div>
     )
   }
@@ -772,92 +887,125 @@ function FaltaCortar({ productos: prodsMap }) {
 
   return (
     <div>
-      <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 14 }}>
-        Balance de piezas cortadas vs. necesarias según pedidos activos. Verde = sobra · Rojo = falta · Gris = sin data.
+      <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 14, display: 'flex', justifyContent: 'space-between' }}>
+        <span>Balance por pedido usando los cortes vinculados. Pedidos en etapa <strong>Corte</strong>.</span>
+        <button className="btn btn-secondary btn-sm" onClick={cargar}>↺ Actualizar</button>
       </div>
-      {prods.map(prod => {
-        const nec  = necesario[prod.id] || {}
-        const cort = yaCortado[prod.id] || {}
-        const todosLosTalles = [...new Set([
-          ...Object.keys(nec),
-          ...Object.values(cort).flatMap(t => Object.keys(t)),
-        ])].sort((a, b) => ORDEN_TALLES.indexOf(a) - ORDEN_TALLES.indexOf(b))
 
-        if (todosLosTalles.length === 0) return null
-
-        const rolesMap = {}
-        for (const pieza of (prod.piezas || [])) {
-          const rol = pieza.tela_rol || 'otro'
-          if (!rolesMap[rol]) rolesMap[rol] = []
-          rolesMap[rol].push(pieza)
-        }
-
-        const totalNecProd = Object.values(nec).reduce((a, b) => a + b, 0)
+      {filas.map(({ pedido, marcadas, yaCortado }) => {
+        const items = pedidoItems(pedido)
 
         return (
-          <div key={prod.id} style={{ marginBottom: 24 }}>
+          <div key={pedido.id} style={{ marginBottom: 28 }}>
+            {/* Header pedido */}
             <div style={{ fontWeight: 700, fontSize: 13, padding: '5px 10px', background: 'linear-gradient(to bottom, #e8eef7, #c8d4e8)', border: '1px solid #c8d4e8', color: '#1a3a6b', fontFamily: 'Tahoma, Arial, sans-serif', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>{prod.nombre}</span>
-              <span style={{ fontSize: 11, fontWeight: 400, color: '#555' }}>
-                Pedidos activos: {totalNecProd} u.
-              </span>
+              <span>👤 {pedido.cliente}</span>
+              {marcadas.length === 0
+                ? <span style={{ fontSize: 11, fontWeight: 400, color: '#c04040' }}>⚠ Sin cortes vinculados — vinculá desde el Asistente</span>
+                : <span style={{ fontSize: 11, fontWeight: 400, color: '#555' }}>{marcadas.length} sesión{marcadas.length > 1 ? 'es' : ''} de corte vinculada{marcadas.length > 1 ? 's' : ''}</span>
+              }
             </div>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: 'Tahoma, Arial, sans-serif' }}>
-              <thead>
-                <tr>
-                  <th style={{ padding: '3px 8px', background: '#f0f4f8', border: '1px solid #dde4ee', textAlign: 'left', width: '30%' }}>Pieza</th>
-                  {todosLosTalles.map(t => (
-                    <th key={t} style={{ padding: '3px 6px', background: '#f0f4f8', border: '1px solid #dde4ee', textAlign: 'center', minWidth: 46 }}>{t}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(rolesMap).map(([rol, piezasDeRol]) => (
-                  <React.Fragment key={rol}>
-                    <tr>
-                      <td colSpan={todosLosTalles.length + 1} style={{ padding: '3px 8px', background: '#f4f4ec', fontWeight: 700, color: '#555', fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, border: '1px solid #e0e8f0' }}>
-                        {ROL_LABEL[rol] || `🧶 ${rol}`}
-                      </td>
-                    </tr>
-                    <tr style={{ background: '#fafafa' }}>
-                      <td style={{ padding: '3px 8px', border: '1px solid #eee', color: '#777', fontStyle: 'italic' }}>Pedidos (necesario)</td>
-                      {todosLosTalles.map(t => (
-                        <td key={t} style={{ padding: '3px 6px', border: '1px solid #eee', textAlign: 'center', color: '#555' }}>
-                          {nec[t] || '—'}
-                        </td>
-                      ))}
-                    </tr>
-                    {piezasDeRol.map(pieza => {
-                      const cortPieza = cort[pieza.nombre] || {}
-                      return (
-                        <tr key={pieza.nombre}
-                          onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'}
-                          onMouseLeave={e => e.currentTarget.style.background = ''}
-                        >
-                          <td style={{ padding: '3px 8px', border: '1px solid #eee', fontWeight: 600 }}>
-                            {pieza.nombre}
-                            {pieza.mult > 1 && <span style={{ fontSize: 10, color: '#888', marginLeft: 4 }}>×{pieza.mult}</span>}
+
+            {/* Sesiones vinculadas */}
+            {marcadas.length > 0 && (
+              <div style={{ display: 'flex', gap: 6, padding: '5px 10px', background: '#f8f8f4', border: '1px solid #ddd', borderTop: 'none', flexWrap: 'wrap' }}>
+                {marcadas.map(m => (
+                  <span key={m.id} style={{ fontSize: 10, border: '1px solid #c8c0a8', padding: '1px 6px', background: '#fff' }}>
+                    ✂ {m.fecha || '—'}{m.nota ? ` · ${m.nota}` : ''} · {m.total_pliegues} pliegos
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Tabla por ítem del pedido */}
+            {items.map((item, iIdx) => {
+              if (!item.producto_id) return null
+              const prod = prodsMap[item.producto_id]
+              if (!prod || !(prod.piezas || []).length) return null
+
+              const nec  = item.talles || {}
+              const cort = yaCortado[item.producto_id] || {}
+              const todosLosTalles = [...new Set([
+                ...Object.keys(nec).filter(t => (nec[t] || 0) > 0),
+                ...Object.values(cort).flatMap(t => Object.keys(t)),
+              ])].sort((a, b) => ORDEN_TALLES.indexOf(a) - ORDEN_TALLES.indexOf(b))
+
+              if (todosLosTalles.length === 0) return null
+
+              const rolesMap = {}
+              for (const pieza of prod.piezas) {
+                const rol = pieza.tela_rol || 'otro'
+                if (!rolesMap[rol]) rolesMap[rol] = []
+                rolesMap[rol].push(pieza)
+              }
+
+              return (
+                <div key={iIdx}>
+                  {items.length > 1 && (
+                    <div style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', background: '#f0f4f8', border: '1px solid #dde4ee', borderTop: 'none', color: '#333' }}>
+                      {prod.nombre}
+                    </div>
+                  )}
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: 'Tahoma, Arial, sans-serif' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ padding: '3px 8px', background: '#f0f4f8', border: '1px solid #dde4ee', textAlign: 'left', width: '28%' }}>Pieza</th>
+                        {todosLosTalles.map(t => (
+                          <th key={t} style={{ padding: '3px 6px', background: '#f0f4f8', border: '1px solid #dde4ee', textAlign: 'center', minWidth: 46 }}>{t}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {/* Fila necesario */}
+                      <tr style={{ background: '#fafafa' }}>
+                        <td style={{ padding: '3px 8px', border: '1px solid #eee', color: '#777', fontStyle: 'italic' }}>Pedido (necesario)</td>
+                        {todosLosTalles.map(t => (
+                          <td key={t} style={{ padding: '3px 6px', border: '1px solid #eee', textAlign: 'center', color: '#555' }}>
+                            {nec[t] || '—'}
                           </td>
-                          {todosLosTalles.map(t => {
-                            const cut   = cortPieza[t] || 0
-                            const neces = (nec[t] || 0) * (pieza.mult || 1)
-                            const diff  = Math.round((cut - neces) * 100) / 100
+                        ))}
+                      </tr>
+                      {Object.entries(rolesMap).map(([rol, piezasDeRol]) => (
+                        <React.Fragment key={rol}>
+                          <tr>
+                            <td colSpan={todosLosTalles.length + 1} style={{ padding: '2px 8px', background: '#f4f4ec', fontWeight: 700, color: '#555', fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, border: '1px solid #e0e8f0' }}>
+                              {ROL_LABEL[rol] || `🧶 ${rol}`}
+                            </td>
+                          </tr>
+                          {piezasDeRol.map(pieza => {
+                            const cortPieza = cort[pieza.nombre] || {}
                             return (
-                              <td key={t} style={{ padding: '3px 6px', border: '1px solid #eee', textAlign: 'center' }}>
-                                {cut > 0 || neces > 0
-                                  ? <span style={chipStyle(diff)}>{diff > 0 ? `+${diff}` : diff}</span>
-                                  : <span style={{ color: '#ccc' }}>—</span>
-                                }
-                              </td>
+                              <tr key={pieza.nombre}
+                                onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'}
+                                onMouseLeave={e => e.currentTarget.style.background = ''}
+                              >
+                                <td style={{ padding: '3px 8px', border: '1px solid #eee', fontWeight: 600 }}>
+                                  {pieza.nombre}
+                                  {pieza.mult > 1 && <span style={{ fontSize: 10, color: '#888', marginLeft: 4 }}>×{pieza.mult}</span>}
+                                </td>
+                                {todosLosTalles.map(t => {
+                                  const cut   = cortPieza[t] || 0
+                                  const neces = (nec[t] || 0) * (pieza.mult || 1)
+                                  const diff  = Math.round((cut - neces) * 100) / 100
+                                  return (
+                                    <td key={t} style={{ padding: '3px 6px', border: '1px solid #eee', textAlign: 'center' }}>
+                                      {cut > 0 || neces > 0
+                                        ? <span style={chipStyle(diff)}>{diff > 0 ? `+${diff}` : `${diff}`}</span>
+                                        : <span style={{ color: '#ccc' }}>—</span>
+                                      }
+                                    </td>
+                                  )
+                                })}
+                              </tr>
                             )
                           })}
-                        </tr>
-                      )
-                    })}
-                  </React.Fragment>
-                ))}
-              </tbody>
-            </table>
+                        </React.Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            })}
           </div>
         )
       })}
@@ -896,6 +1044,115 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
   const [nota, setNota]                   = useState(loteAbierto?.nota || '')
   const [saving, setSaving]               = useState(false)
 
+  // ── Edición inline de lotes cerrados ──────────────────────────────────────
+  const [editLoteId, setEditLoteId]       = useState(null)
+  const [editFecha, setEditFecha]         = useState('')
+  const [editNota, setEditNota]           = useState('')
+  const [editLoteHechas, setEditLoteHechas] = useState([])
+  const [savingEdit, setSavingEdit]       = useState(false)
+
+  function startEditLote(l) {
+    setEditLoteId(l.id)
+    setEditFecha(l.iniciado_at ? l.iniciado_at.split('T')[0] : '')
+    setEditNota(l.nota || '')
+    setEditLoteHechas((l.hechas || []).map(h => ({ ...h, talles: { ...(h.talles || {}) } })))
+  }
+
+  function setEditTalle(hIdx, talle, val) {
+    setEditLoteHechas(s => s.map((h, i) => {
+      if (i !== hIdx) return h
+      const newT = { ...h.talles }
+      const n = parseInt(val) || 0
+      if (n > 0) newT[talle] = n
+      else delete newT[talle]
+      return { ...h, talles: newT }
+    }))
+  }
+
+  async function saveEditLote(loteId) {
+    setSavingEdit(true)
+    await supabase.from('produccion_etapas').update({
+      iniciado_at: editFecha ? new Date(editFecha).toISOString() : null,
+      nota:        editNota || null,
+      hechas:      editLoteHechas,
+    }).eq('id', loteId)
+    setSavingEdit(false)
+    setEditLoteId(null)
+    await onSaved()
+  }
+
+  async function borrarLote(loteId) {
+    if (!window.confirm('¿Borrar este lote? Esta acción no se puede deshacer.')) return
+    await supabase.from('produccion_etapas').delete().eq('id', loteId)
+    await onSaved()
+  }
+
+  // ── Cortes vinculados (solo en etapa corte) ────────────────────────────────
+  const [cortesVinc, setCortesVinc]       = useState([])
+  const [cortesSugeridos, setCortesSugeridos] = useState([])
+
+  useEffect(() => {
+    if (etapaId === 'corte' && pedido.id && pedido.id !== '__libre__') {
+      cargarCortesVinc()
+      cargarCortesSugeridos()
+    }
+  }, [etapaId, pedido.id])
+
+  async function cargarCortesVinc() {
+    const { data: cp } = await supabase
+      .from('cortes_pedidos').select('id, corte_id').eq('pedido_id', pedido.id)
+    if (!cp?.length) { setCortesVinc([]); return }
+    const ids = cp.map(r => r.corte_id)
+    const { data: marcadas } = await supabase
+      .from('cortes_marcadas').select('id, fecha, nota, total_pliegues, pliegues').in('id', ids)
+    const { data: cmp } = await supabase
+      .from('cortes_marcadas_productos').select('marcada_id, producto_id, productos!producto_id(nombre)').in('marcada_id', ids)
+    setCortesVinc(cp.map(r => ({
+      id: r.id,
+      corte_id: r.corte_id,
+      cortes_marcadas: {
+        ...(marcadas || []).find(m => m.id === r.corte_id),
+        cortes_marcadas_productos: (cmp || []).filter(c => c.marcada_id === r.corte_id),
+      },
+    })))
+  }
+
+  async function cargarCortesSugeridos() {
+    const prodIds = pedidoItems(pedido).map(it => it.producto_id).filter(Boolean)
+    if (!prodIds.length) return
+    const { data } = await supabase
+      .from('cortes_marcadas_productos')
+      .select('marcada_id, productos!producto_id(nombre), cortes_marcadas!marcada_id(id, fecha, nota, total_pliegues, pliegues)')
+      .in('producto_id', prodIds)
+    // Deduplicar por marcada_id
+    const vistos = new Set()
+    const uniq = []
+    for (const row of (data || [])) {
+      const m = row.cortes_marcadas
+      if (!m || vistos.has(m.id)) continue
+      vistos.add(m.id)
+      uniq.push({ ...m, _producto: row.productos?.nombre })
+    }
+    setCortesSugeridos(uniq.sort((a, b) => (b.fecha || '').localeCompare(a.fecha || '')))
+  }
+
+  async function vincularCorte(marcada) {
+    const { error } = await supabase.from('cortes_pedidos').insert({
+      corte_id: marcada.id,
+      pedido_id: pedido.id,
+    })
+    if (error) { alert('Error al vincular: ' + error.message); return }
+    await cargarCortesVinc()
+    await cargarCortesSugeridos()
+  }
+
+  async function desvincularCorte(cp) {
+    if (!window.confirm('¿Desvincular este corte del pedido?')) return
+    await supabase.from('cortes_pedidos').delete().eq('id', cp.id)
+    await cargarCortesVinc()
+    await cargarCortesSugeridos()
+  }
+
   const contactosFiltrados = useMemo(() => {
     const tipos = eInfo.tipo
     if (!tipos.length) return contactos
@@ -928,7 +1185,8 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
     return acc
   }, [lotesCerrados, items])
 
-  async function guardar(avanzarDespues = false) {
+  // modo: 'progreso' | 'parcial' | 'avanzar'
+  async function guardar(modo = 'progreso') {
     setSaving(true)
     const responsable = contactos.find(c => c.id === responsableId)
 
@@ -942,24 +1200,34 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
       iniciado_at:        fechaIngreso ? new Date(fechaIngreso).toISOString() : new Date().toISOString(),
     }
 
+    // Para 'parcial' y 'avanzar' cerramos el lote actual
+    const payloadFinal = (modo === 'parcial' || modo === 'avanzar')
+      ? { ...payload, completado_at: new Date().toISOString() }
+      : payload
+
     let err = null
     if (loteAbierto) {
-      const { error } = await supabase
-        .from('produccion_etapas')
-        .update(payload)
-        .eq('id', loteAbierto.id)
+      const { error } = await supabase.from('produccion_etapas').update(payloadFinal).eq('id', loteAbierto.id)
       err = error
     } else {
-      const { error } = await supabase
-        .from('produccion_etapas')
-        .insert({ ...payload, iniciado_at: new Date().toISOString() })
+      const { error } = await supabase.from('produccion_etapas').insert({ ...payloadFinal, iniciado_at: new Date().toISOString() })
       err = error
     }
 
     if (err) { alert('Error al guardar: ' + err.message); setSaving(false); return }
 
+    if (modo === 'parcial') {
+      // Abrir nuevo lote vacío en la misma etapa
+      await supabase.from('produccion_etapas').insert({
+        ...(libreMode ? {} : { pedido_id: pedido.id }),
+        etapa:       etapaId,
+        hechas:      items.map((it, idx) => ({ item_idx: idx, producto_id: it.producto_id || null, producto: it.producto || '', talles: {} })),
+        iniciado_at: new Date().toISOString(),
+      })
+    }
+
     setSaving(false)
-    if (avanzarDespues) onAvanzar()
+    if (modo === 'avanzar') onAvanzar()
     else { await onSaved(); onClose() }
   }
 
@@ -1036,11 +1304,29 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
                     <>Pedido: <strong style={{ color: 'var(--text)' }}>{totalNec} u.</strong>{' · '}</>
                   )}
                   {totalHist > 0 && (
-                    <>Anteriores: <strong style={{ color: 'var(--success)' }}>{totalHist} u.</strong>{' · '}</>
+                    <>Ya entregado: <strong style={{ color: 'var(--success)' }}>{totalHist} u.</strong>{' · '}</>
                   )}
                   Este lote: <strong style={{ color: 'var(--accent)' }}>{totalEsteLote} u.</strong>
                   {!libreMode && <> · Total: <strong>{totalAcum}/{totalNec}</strong></>}
                 </div>
+
+                {/* Pendiente por talle */}
+                {!libreMode && (() => {
+                  const pendPairs = (TABLAS[item.tabla || inferirTabla(item.talles)]?.talles || [])
+                    .map(t => [t, (item.talles[t] || 0) - (historico[idx][t] || 0)])
+                    .filter(([, v]) => v > 0)
+                  if (!pendPairs.length) return null
+                  return (
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: '#a04000', textTransform: 'uppercase', letterSpacing: 0.5 }}>Pendiente:</span>
+                      {pendPairs.map(([t, v]) => (
+                        <span key={t} style={{ border: '1px solid #e8c080', padding: '1px 6px', fontSize: 10, fontWeight: 700, background: '#fff8e0', color: '#a04000' }}>
+                          {t} {v}
+                        </span>
+                      ))}
+                    </div>
+                  )
+                })()}
 
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   {tallesPedido.map(t => {
@@ -1070,21 +1356,157 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
             )
           })}
 
+          {/* Cortes vinculados — solo en etapa corte */}
+          {etapaId === 'corte' && !libreMode && (
+            <div className="groupbox" style={{ marginTop: 14 }}>
+              <div className="groupbox-title">✂ Cortes vinculados</div>
+
+              {cortesVinc.length > 0 && (
+                <div style={{ marginBottom: 10 }}>
+                  {cortesVinc.map(cp => {
+                    const m = cp.cortes_marcadas
+                    if (!m) return null
+                    const prods = m.cortes_marcadas_productos?.map(p => p.productos?.nombre).filter(Boolean).join(', ')
+                    return (
+                      <div key={cp.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 8px', background: '#f4f4ec', border: '1px solid #d0ccc0', marginBottom: 4, fontSize: 12 }}>
+                        <div>
+                          <strong>{m.fecha || '—'}</strong>
+                          {prods && <span style={{ color: 'var(--text2)', marginLeft: 6 }}>{prods}</span>}
+                          {m.nota && <span style={{ color: '#888', marginLeft: 6, fontStyle: 'italic' }}>{m.nota}</span>}
+                          <span style={{ color: 'var(--text2)', marginLeft: 6 }}>· {m.total_pliegues} pliegues</span>
+                        </div>
+                        <button className="btn btn-danger btn-sm" onClick={() => desvincularCorte(cp)}>✕</button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {(() => {
+                const yaVinc = new Set(cortesVinc.map(v => v.corte_id))
+                const disponibles = cortesSugeridos.filter(m => !yaVinc.has(m.id))
+                if (disponibles.length === 0) {
+                  return <div style={{ fontSize: 11, color: 'var(--text2)', fontStyle: 'italic' }}>No hay sesiones de corte con productos que coincidan.</div>
+                }
+                return (
+                  <div>
+                    <div style={{ fontSize: 10, color: 'var(--text2)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>
+                      Sesiones disponibles para vincular
+                    </div>
+                    {disponibles.map(m => (
+                      <div key={m.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 8px', background: '#f8f8f4', border: '1px solid #d8d4c8', marginBottom: 3, fontSize: 12 }}
+                        onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'}
+                        onMouseLeave={e => e.currentTarget.style.background = '#f8f8f4'}
+                      >
+                        <div>
+                          <strong>{m.fecha || '—'}</strong>
+                          <span style={{ color: 'var(--text2)', marginLeft: 8 }}>{m._producto}</span>
+                          {m.nota && <span style={{ color: '#888', marginLeft: 8, fontStyle: 'italic' }}>{m.nota}</span>}
+                          <span style={{ color: 'var(--text2)', marginLeft: 8 }}>· {m.total_pliegues} pliegues</span>
+                        </div>
+                        <button className="btn btn-secondary btn-sm" onClick={() => vincularCorte(m)}>+ Vincular</button>
+                      </div>
+                    ))}
+                  </div>
+                )
+              })()}
+            </div>
+          )}
+
           {lotesCerrados.length > 0 && (
-            <details style={{ marginTop: 12 }}>
-              <summary style={{ fontSize: 12, color: 'var(--text2)', cursor: 'pointer' }}>
-                📜 Historial de lotes cerrados ({lotesCerrados.length})
+            <details style={{ marginTop: 12 }} open>
+              <summary style={{ fontSize: 12, color: 'var(--text2)', cursor: 'pointer', fontWeight: 700 }}>
+                📜 Historial de entregas ({lotesCerrados.length})
               </summary>
               <div style={{ marginTop: 8 }}>
-                {lotesCerrados.map(l => (
-                  <div key={l.id} style={{ fontSize: 11, padding: '6px 10px', background: 'var(--bg3)', borderRadius: 'var(--radius)', marginBottom: 4 }}>
-                    <strong>{fmtFecha(l.iniciado_at?.split('T')[0])}</strong>
-                    {l.completado_at && <span style={{ color: 'var(--text2)' }}> → {fmtFecha(l.completado_at.split('T')[0])}</span>}
-                    {l.responsable_nombre && <> · 👤 {l.responsable_nombre}</>}
-                    <> · {sumarHechas([l])} u.</>
-                    {l.nota && <div style={{ color: 'var(--text2)', marginTop: 2 }}>{l.nota}</div>}
-                  </div>
-                ))}
+                {lotesCerrados.map(l => {
+                  const isEditing = editLoteId === l.id
+                  const totalLote = sumarHechas([l])
+                  return (
+                    <div key={l.id} style={{ fontSize: 11, border: '1px solid #d8d4c8', marginBottom: 6, background: '#fafaf4' }}>
+                      {/* Header lote */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 10px', background: '#f0f0e8', borderBottom: '1px solid #d8d4c8' }}>
+                        {isEditing ? (
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flex: 1 }}>
+                            <input
+                              type="date"
+                              value={editFecha}
+                              onChange={e => setEditFecha(e.target.value)}
+                              style={{ fontSize: 11, padding: '1px 4px', width: 130 }}
+                            />
+                            <input
+                              value={editNota}
+                              onChange={e => setEditNota(e.target.value)}
+                              placeholder="Nota…"
+                              style={{ fontSize: 11, padding: '1px 4px', flex: 1 }}
+                            />
+                            <button className="btn btn-primary btn-sm" onClick={() => saveEditLote(l.id)} disabled={savingEdit}>
+                              {savingEdit ? '…' : '✔'}
+                            </button>
+                            <button className="btn btn-secondary btn-sm" onClick={() => setEditLoteId(null)}>✕</button>
+                          </div>
+                        ) : (
+                          <>
+                            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                              <strong>{fmtFecha(l.iniciado_at?.split('T')[0])}</strong>
+                              {l.responsable_nombre && <span style={{ color: 'var(--text2)' }}>👤 {l.responsable_nombre}</span>}
+                              <span style={{ color: 'var(--text2)' }}>{totalLote} u.</span>
+                              {l.nota && <span style={{ color: '#888', fontStyle: 'italic' }}>{l.nota}</span>}
+                            </div>
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              <button className="btn btn-secondary btn-sm" onClick={() => startEditLote(l)} title="Editar fecha / nota">✏</button>
+                              <button className="btn btn-danger btn-sm" onClick={() => borrarLote(l.id)} title="Borrar lote">🗑</button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                      {/* Detalle talles (vista) */}
+                      {!isEditing && (l.hechas || []).map((h, hIdx) => {
+                        const pairs = tallesOrdenados(h.talles)
+                        if (!pairs.length) return null
+                        return (
+                          <div key={hIdx} style={{ padding: '5px 10px', borderTop: hIdx > 0 ? '1px solid #e8e4dc' : undefined }}>
+                            {items.length > 1 && <div style={{ fontWeight: 700, color: '#555', marginBottom: 3 }}>{h.producto}</div>}
+                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                              {pairs.map(([t, c]) => (
+                                <span key={t} style={{ border: '1px solid #c8c4b8', padding: '1px 6px', fontSize: 10, background: '#fff', fontWeight: 700 }}>
+                                  {t} <span style={{ color: '#1a5aa8' }}>{c}</span>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      })}
+                      {/* Edición de talles */}
+                      {isEditing && editLoteHechas.map((h, hIdx) => {
+                        const itemRef  = items[h.item_idx] || items[hIdx]
+                        const tabla    = itemRef ? (itemRef.tabla || inferirTabla(itemRef.talles)) : 'adulto'
+                        const tallesShow = libreMode
+                          ? (TABLAS[tabla]?.talles || TABLAS.adulto.talles)
+                          : (TABLAS[tabla]?.talles || []).filter(t => (itemRef?.talles || {})[t] > 0)
+                        return (
+                          <div key={hIdx} style={{ padding: '8px 10px', borderTop: '1px solid #e0dcd0' }}>
+                            {items.length > 1 && <div style={{ fontWeight: 700, color: '#555', marginBottom: 4, fontSize: 11 }}>{h.producto}</div>}
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              {tallesShow.map(t => (
+                                <div key={t} style={{ textAlign: 'center' }}>
+                                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', marginBottom: 2 }}>{t}</div>
+                                  <input
+                                    type="number" min="0"
+                                    value={h.talles[t] || ''}
+                                    placeholder="0"
+                                    onChange={e => setEditTalle(hIdx, t, e.target.value)}
+                                    style={{ width: 52, textAlign: 'center', fontSize: 11 }}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })}
               </div>
             </details>
           )}
@@ -1092,10 +1514,13 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
 
         <div className="modal-footer">
           <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
-          <button className="btn btn-secondary" onClick={() => guardar(false)} disabled={saving}>
+          <button className="btn btn-secondary" onClick={() => guardar('progreso')} disabled={saving}>
             {saving ? 'Guardando…' : '💾 Guardar progreso'}
           </button>
-          <button className="btn btn-primary" onClick={() => guardar(true)} disabled={saving}>
+          <button className="btn btn-secondary" onClick={() => guardar('parcial')} disabled={saving} title="Cerrar esta entrega y abrir un nuevo lote en la misma etapa">
+            📦 Registrar entrega parcial
+          </button>
+          <button className="btn btn-primary" onClick={() => guardar('avanzar')} disabled={saving}>
             ✔ Cerrar lote y avanzar etapa
           </button>
         </div>
