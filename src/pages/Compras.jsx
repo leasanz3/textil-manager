@@ -20,6 +20,22 @@ export default function Compras({ onMenuClick }) {
   const [showTcHistorial, setShowTcHistorial] = useState(false)
   const [sortAsc, setSortAsc] = useState(false)
 
+  // Modal detalle (solo lectura)
+  const [detalle, setDetalle] = useState(null)       // factura seleccionada
+  const [detalleItems, setDetalleItems] = useState({ telas: [], avios: [] })
+  const [loadingDetalle, setLoadingDetalle] = useState(false)
+
+  async function openDetalle(factura) {
+    setDetalle(factura)
+    setLoadingDetalle(true)
+    const [{ data: telas }, { data: avios }] = await Promise.all([
+      supabase.from('compras_tela').select('*, telas(tipo, color, unidad)').eq('compra_id', factura.id),
+      supabase.from('compras_avios').select('*, avios(nombre, tipo, unidad)').eq('compra_id', factura.id),
+    ])
+    setDetalleItems({ telas: telas || [], avios: avios || [] })
+    setLoadingDetalle(false)
+  }
+
   const [form, setForm] = useState({
     proveedor_id: '', factura: '', fecha: new Date().toISOString().split('T')[0],
     moneda: 'UYU', total_uyu: '', total_usd: '', dolar_fiscal: '',
@@ -248,7 +264,7 @@ export default function Compras({ onMenuClick }) {
                     const pendiente = x.moneda === 'USD' && !x.total_final
                     const sinFiscal = x.moneda === 'USD' && x.acredita_iva && !x.dolar_fiscal
                     return (
-                      <tr key={x.id} onClick={() => openEdit(x)}>
+                      <tr key={x.id} onClick={() => openDetalle(x)} style={{ cursor: 'pointer' }}>
                         <td style={{ color: 'var(--accent)', fontWeight: 700 }}>{x.id}</td>
                         <td><strong>{x.proveedor}</strong></td>
                         <td>{fmtFecha(x.fecha)}</td>
@@ -280,6 +296,126 @@ export default function Compras({ onMenuClick }) {
           )}
         </div>
       </div>
+
+      {detalle && (
+        <div className="modal-overlay" onClick={() => setDetalle(null)}>
+          <div className="modal modal-lg" onClick={e => e.stopPropagation()} style={{ maxWidth: 700 }}>
+            <div className="modal-header">
+              <div>
+                <h3 style={{ margin: 0 }}>🧾 Factura {detalle.factura || '#' + detalle.id}</h3>
+                <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>{detalle.proveedor} · {fmtFecha(detalle.fecha)}</div>
+              </div>
+              <button className="close-btn" onClick={() => setDetalle(null)}>✕</button>
+            </div>
+
+            <div className="modal-body">
+              {/* Datos de la factura */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 16 }}>
+                {[
+                  { label: 'Proveedor',    value: detalle.proveedor },
+                  { label: 'N° Factura',   value: detalle.factura || '—' },
+                  { label: 'Fecha',        value: fmtFecha(detalle.fecha) },
+                  { label: 'Moneda',       value: detalle.moneda || '—' },
+                  { label: 'Total USD',    value: detalle.moneda === 'USD' ? fmtUSD(detalle.total_usd) : '—' },
+                  { label: '$ Fiscal',     value: detalle.dolar_fiscal ? '$' + fmtNum(detalle.dolar_fiscal) : '—' },
+                  { label: 'IVA a favor',  value: fmtUYU(detalle.iva), color: 'var(--danger)' },
+                  { label: 'Total pagado', value: detalle.total_final ? fmtUYU(detalle.total_final) : '—', color: 'var(--accent)' },
+                  { label: 'TC pago',      value: detalle.dolar_costeo ? '$' + fmtNum(detalle.dolar_costeo) : '—' },
+                ].map(({ label, value, color }) => (
+                  <div key={label} style={{ background: 'var(--bg3)', border: '1px solid var(--border)', padding: '8px 12px' }}>
+                    <div style={{ fontSize: 10, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 }}>{label}</div>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: color || 'var(--text)' }}>{value}</div>
+                  </div>
+                ))}
+              </div>
+
+              {detalle.notas && (
+                <div style={{ fontSize: 12, color: 'var(--text2)', fontStyle: 'italic', marginBottom: 16, padding: '6px 10px', background: 'var(--bg3)', border: '1px solid var(--border)' }}>
+                  📝 {detalle.notas}
+                </div>
+              )}
+
+              {/* Items vinculados */}
+              {loadingDetalle ? (
+                <div className="loading"><div className="spinner" /> Cargando items…</div>
+              ) : (
+                <>
+                  {/* Telas */}
+                  {detalleItems.telas.length > 0 && (
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text2)', padding: '4px 0 6px', borderBottom: '1px solid var(--border)', marginBottom: 6 }}>
+                        🧶 Telas ({detalleItems.telas.length})
+                      </div>
+                      <table style={{ width: '100%' }}>
+                        <thead>
+                          <tr>
+                            <th>Tela</th><th>Color</th><th style={{ textAlign: 'right' }}>Cantidad</th><th>Unidad</th><th style={{ textAlign: 'right' }}>Precio lista</th><th style={{ textAlign: 'right' }}>Subtotal</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {detalleItems.telas.map(t => (
+                            <tr key={t.id}>
+                              <td><strong>{t.telas?.tipo || '—'}</strong></td>
+                              <td>{t.telas?.color || '—'}</td>
+                              <td style={{ textAlign: 'right' }}>{fmtNum(t.cantidad)}</td>
+                              <td>{t.telas?.unidad || t.unidad || '—'}</td>
+                              <td style={{ textAlign: 'right' }}>{t.precio_lista ? (t.moneda === 'USD' ? fmtUSD(t.precio_lista) : fmtUYU(t.precio_lista)) : '—'}</td>
+                              <td style={{ textAlign: 'right', fontWeight: 700 }}>
+                                {t.precio_lista && t.cantidad ? (t.moneda === 'USD' ? fmtUSD(t.precio_lista * t.cantidad) : fmtUYU(t.precio_lista * t.cantidad)) : '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {/* Avios */}
+                  {detalleItems.avios.length > 0 && (
+                    <div style={{ marginBottom: 8 }}>
+                      <div style={{ fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text2)', padding: '4px 0 6px', borderBottom: '1px solid var(--border)', marginBottom: 6 }}>
+                        🪡 Avíos ({detalleItems.avios.length})
+                      </div>
+                      <table style={{ width: '100%' }}>
+                        <thead>
+                          <tr>
+                            <th>Artículo</th><th>Tipo</th><th style={{ textAlign: 'right' }}>Cantidad</th><th>Unidad</th><th style={{ textAlign: 'right' }}>Precio lista</th><th style={{ textAlign: 'right' }}>Subtotal</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {detalleItems.avios.map(a => (
+                            <tr key={a.id}>
+                              <td><strong>{a.avios?.nombre || '—'}</strong></td>
+                              <td>{a.avios?.tipo || '—'}</td>
+                              <td style={{ textAlign: 'right' }}>{fmtNum(a.cantidad)}</td>
+                              <td>{a.avios?.unidad || a.unidad || '—'}</td>
+                              <td style={{ textAlign: 'right' }}>{a.precio_lista ? (a.moneda === 'USD' ? fmtUSD(a.precio_lista) : fmtUYU(a.precio_lista)) : '—'}</td>
+                              <td style={{ textAlign: 'right', fontWeight: 700 }}>
+                                {a.precio_lista && a.cantidad ? (a.moneda === 'USD' ? fmtUSD(a.precio_lista * a.cantidad) : fmtUYU(a.precio_lista * a.cantidad)) : '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {detalleItems.telas.length === 0 && detalleItems.avios.length === 0 && (
+                    <div style={{ fontSize: 12, color: 'var(--text2)', fontStyle: 'italic', textAlign: 'center', padding: '12px 0' }}>
+                      Sin telas ni avíos vinculados a esta factura.
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setDetalle(null)}>Cerrar</button>
+              <button className="btn btn-primary" onClick={() => { setDetalle(null); openEdit(detalle) }}>✏ Editar factura</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {modal && (
         <div className="modal-overlay" onClick={() => setModal(false)}>
