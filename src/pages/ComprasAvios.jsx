@@ -34,6 +34,36 @@ export default function ComprasAvios({ onMenuClick }) {
   // Modal detalle (solo lectura)
   const [detalle, setDetalle] = useState(null)
 
+  // Sort tabla
+  const [sortCol, setSortCol] = useState('fecha')
+  const [sortDir, setSortDir] = useState('desc')
+  function toggleSort(col) {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortCol(col); setSortDir('asc') }
+  }
+  const sortInd = (col) => sortCol === col ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ' ↕'
+  const thS = (col) => ({ cursor: 'pointer', userSelect: 'none', background: sortCol === col ? '#dde4f0' : undefined, whiteSpace: 'nowrap' })
+
+  // Modal factura
+  const [facturaDetalle, setFacturaDetalle] = useState(null)
+  const [facturaItems, setFacturaItems] = useState({ telas: [], avios: [] })
+  const [loadingFactura, setLoadingFactura] = useState(false)
+
+  async function openFactura(e, compraId) {
+    e.stopPropagation()
+    if (!compraId) return
+    const fac = facturas.find(f => f.id === compraId)
+    if (!fac) return
+    setFacturaDetalle(fac)
+    setLoadingFactura(true)
+    const [{ data: telas }, { data: avios }] = await Promise.all([
+      supabase.from('compras_tela').select('*, telas(tipo, color)').eq('compra_id', compraId),
+      supabase.from('compras_avios').select('*, avios(nombre, tipo)').eq('compra_id', compraId),
+    ])
+    setFacturaItems({ telas: telas || [], avios: avios || [] })
+    setLoadingFactura(false)
+  }
+
   useEffect(() => { fetchAll() }, [])
 
   async function fetchAll() {
@@ -247,21 +277,37 @@ export default function ComprasAvios({ onMenuClick }) {
               <table>
                 <thead>
                   <tr>
-                    <th>Avío</th><th>Factura</th><th>Fecha</th>
+                    <th onClick={() => toggleSort('avio')} style={thS('avio')}>Avío{sortInd('avio')}</th>
+                    <th onClick={() => toggleSort('proveedor')} style={thS('proveedor')}>Proveedor{sortInd('proveedor')}</th>
+                    <th>Factura</th>
+                    <th onClick={() => toggleSort('fecha')} style={thS('fecha')}>Fecha{sortInd('fecha')}</th>
                     <th>Cantidad</th><th>Precio lista</th><th>Descuento</th>
-                    <th>Total</th><th>TC</th><th></th>
+                    <th onClick={() => toggleSort('total')} style={thS('total')}>Total{sortInd('total')}</th>
+                    <th>TC</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {compras.map(c => (
+                  {[...compras].sort((a, b) => {
+                    let va, vb
+                    if (sortCol === 'avio')      { va = a.avios?.nombre || ''; vb = b.avios?.nombre || '' }
+                    if (sortCol === 'proveedor') { va = a.compras?.proveedor || ''; vb = b.compras?.proveedor || '' }
+                    if (sortCol === 'fecha')     { va = a.fecha || ''; vb = b.fecha || '' }
+                    if (sortCol === 'total')     { va = parseFloat(a.total_factura) || 0; vb = parseFloat(b.total_factura) || 0 }
+                    if (va < vb) return sortDir === 'asc' ? -1 : 1
+                    if (va > vb) return sortDir === 'asc' ?  1 : -1
+                    return 0
+                  }).map(c => (
                     <tr key={c.id} onClick={() => setDetalle(c)} style={{ cursor: 'pointer' }}>
                       <td>
                         <strong>{c.avios?.nombre || '—'}</strong>
                         {c.avios?.tipo && <div style={{ fontSize: 11, color: 'var(--text2)' }}>{c.avios.tipo}</div>}
                       </td>
-                      <td style={{ fontSize: 11 }}>
+                      <td style={{ fontSize: 12 }}>{c.compras?.proveedor || '—'}</td>
+                      <td style={{ fontSize: 11 }} onClick={e => openFactura(e, c.compra_id)}>
                         {c.compras
-                          ? <span style={{ color: 'var(--success)' }}>🔗 {c.compras.proveedor}{c.compras.factura ? ` #${c.compras.factura}` : ''}</span>
+                          ? <span style={{ color: 'var(--accent)', cursor: 'pointer', textDecoration: 'underline' }}>
+                              {c.compras.factura ? `#${c.compras.factura}` : '🔗 ver factura'}
+                            </span>
                           : <span style={{ color: 'var(--text2)' }}>—</span>}
                       </td>
                       <td>{fmtFecha(c.fecha)}</td>
@@ -284,6 +330,76 @@ export default function ComprasAvios({ onMenuClick }) {
           )}
         </div>
       </div>
+
+      {facturaDetalle && (
+        <div className="modal-overlay" onClick={() => setFacturaDetalle(null)}>
+          <div className="modal modal-lg" onClick={e => e.stopPropagation()} style={{ maxWidth: 660 }}>
+            <div className="modal-header">
+              <div>
+                <h3 style={{ margin: 0 }}>🧾 Factura {facturaDetalle.factura || '#' + facturaDetalle.id}</h3>
+                <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>{facturaDetalle.proveedor} · {fmtFecha(facturaDetalle.fecha)}</div>
+              </div>
+              <button className="close-btn" onClick={() => setFacturaDetalle(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              {loadingFactura ? (
+                <div className="loading"><div className="spinner" /> Cargando...</div>
+              ) : (
+                <>
+                  {facturaItems.telas.length > 0 && (
+                    <div style={{ marginBottom: 14 }}>
+                      <div style={{ fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text2)', borderBottom: '1px solid var(--border)', padding: '4px 0 6px', marginBottom: 6 }}>
+                        🧶 Telas ({facturaItems.telas.length})
+                      </div>
+                      <table style={{ width: '100%' }}>
+                        <thead><tr><th>Tela</th><th>Color</th><th style={{ textAlign: 'right' }}>Cantidad</th><th style={{ textAlign: 'right' }}>Precio</th><th style={{ textAlign: 'right' }}>Total</th></tr></thead>
+                        <tbody>
+                          {facturaItems.telas.map(t => (
+                            <tr key={t.id}>
+                              <td><strong>{t.telas?.tipo || '—'}</strong></td>
+                              <td style={{ fontSize: 11 }}>{t.telas?.color || '—'}</td>
+                              <td style={{ textAlign: 'right' }}>{fmtNum(t.cantidad)} {t.unidad}</td>
+                              <td style={{ textAlign: 'right', fontSize: 11 }}>{t.moneda === 'USD' ? fmtUSD(t.precio_lista) : fmtUYU(t.precio_lista)}</td>
+                              <td style={{ textAlign: 'right', fontWeight: 700 }}>{t.moneda === 'USD' ? fmtUSD(t.total_factura) : fmtUYU(t.total_factura)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  {facturaItems.avios.length > 0 && (
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text2)', borderBottom: '1px solid var(--border)', padding: '4px 0 6px', marginBottom: 6 }}>
+                        🪡 Avíos ({facturaItems.avios.length})
+                      </div>
+                      <table style={{ width: '100%' }}>
+                        <thead><tr><th>Avío</th><th>Tipo</th><th style={{ textAlign: 'right' }}>Cantidad</th><th style={{ textAlign: 'right' }}>Precio</th><th style={{ textAlign: 'right' }}>Total</th></tr></thead>
+                        <tbody>
+                          {facturaItems.avios.map(a => (
+                            <tr key={a.id}>
+                              <td><strong>{a.avios?.nombre || '—'}</strong></td>
+                              <td style={{ fontSize: 11 }}>{a.avios?.tipo || '—'}</td>
+                              <td style={{ textAlign: 'right' }}>{fmtNum(a.cantidad)} {a.unidad}</td>
+                              <td style={{ textAlign: 'right', fontSize: 11 }}>{a.moneda === 'USD' ? fmtUSD(a.precio_lista) : fmtUYU(a.precio_lista)}</td>
+                              <td style={{ textAlign: 'right', fontWeight: 700 }}>{a.moneda === 'USD' ? fmtUSD(a.total_factura) : fmtUYU(a.total_factura)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  {facturaItems.telas.length === 0 && facturaItems.avios.length === 0 && (
+                    <div style={{ fontSize: 12, color: 'var(--text2)', fontStyle: 'italic', textAlign: 'center', padding: 16 }}>Sin ítems vinculados.</div>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setFacturaDetalle(null)}>Cerrar</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {detalle && (() => {
         const c = detalle
