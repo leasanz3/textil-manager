@@ -143,6 +143,21 @@ export default function Compras({ onMenuClick }) {
     if (editing) {
       await supabase.from('compras').update(datos).eq('id', editing)
     } else {
+      // Verificar duplicado: mismo proveedor + mismo número de factura
+      if (form.factura?.trim()) {
+        const { data: dup } = await supabase
+          .from('compras')
+          .select('id, fecha')
+          .eq('proveedor_id', parseInt(form.proveedor_id))
+          .eq('factura', form.factura.trim())
+          .limit(1)
+        if (dup?.length) {
+          const prov = proveedores.find(p => p.id === parseInt(form.proveedor_id))
+          setError(`Ya existe una factura ${form.factura.trim()} de ${prov?.nombre || 'ese proveedor'} (${fmtFecha(dup[0].fecha)})`)
+          setSaving(false)
+          return
+        }
+      }
       await supabase.from('compras').insert(datos)
     }
     setSaving(false)
