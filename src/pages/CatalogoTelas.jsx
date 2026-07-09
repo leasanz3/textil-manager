@@ -21,6 +21,22 @@ export default function CatalogoTelas({ onMenuClick, onNavigate }) {
   const [form, setForm] = useState(emptyForm)
   const setF = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
+  // Modal detalle
+  const [detalle, setDetalle] = useState(null)
+  const [detalleCompras, setDetalleCompras] = useState([])
+  const [loadingDetalle, setLoadingDetalle] = useState(false)
+
+  async function openDetalle(t) {
+    setDetalle(t)
+    setLoadingDetalle(true)
+    const [{ data: compras }, productos] = await Promise.all([
+      supabase.from('compras_tela').select('*, compras(factura, fecha, proveedor)').eq('tela_id', t.id).order('fecha', { ascending: false }),
+      fetchProductosUsandoTela(t.id),
+    ])
+    setDetalleCompras(compras || [])
+    setLoadingDetalle(false)
+  }
+
   useEffect(() => { fetchAll() }, [])
 
   async function fetchAll() {
@@ -60,7 +76,6 @@ export default function CatalogoTelas({ onMenuClick, onNavigate }) {
   }
 
   async function fetchProductosUsandoTela(telaId) {
-    // Search across all fields where this tela_id might appear
     const { data } = await supabase
       .from('productos')
       .select('id, nombre, cliente_id, tela1_id, tela2_id, rib_id, telas_extra')
@@ -69,6 +84,7 @@ export default function CatalogoTelas({ onMenuClick, onNavigate }) {
       return (p.telas_extra || []).some(te => Number(te.tela_id) === telaId)
     })
     setProductosUsandoTela(todos)
+    return todos
   }
 
   async function handleSave() {
@@ -177,7 +193,7 @@ export default function CatalogoTelas({ onMenuClick, onNavigate }) {
                   {filtered.map(t => {
                     const pm = precioEnMetros(t)
                     return (
-                      <tr key={t.id} onClick={() => openEdit(t)}>
+                      <tr key={t.id} onClick={() => openDetalle(t)} style={{ cursor: 'pointer' }}>
                         <td><strong>{t.tipo || '—'}</strong></td>
                         <td style={{ fontSize: 11, color: 'var(--accent)' }}>{t.codigo || '—'}</td>
                         <td>{t.color || '—'}</td>
@@ -214,6 +230,102 @@ export default function CatalogoTelas({ onMenuClick, onNavigate }) {
           )}
         </div>
       </div>
+
+      {detalle && (
+        <div className="modal-overlay" onClick={() => setDetalle(null)}>
+          <div className="modal modal-lg" onClick={e => e.stopPropagation()} style={{ maxWidth: 680 }}>
+            <div className="modal-header">
+              <div>
+                <h3 style={{ margin: 0 }}>🧶 {detalle.tipo}</h3>
+                <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>
+                  {detalle.color && <span>{detalle.color} · </span>}
+                  {detalle.proveedor && <span>{detalle.proveedor}</span>}
+                </div>
+              </div>
+              <button className="close-btn" onClick={() => setDetalle(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              {/* Datos del catálogo */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 16 }}>
+                {[
+                  { label: 'Nombre',       value: detalle.tipo || '—' },
+                  { label: 'Color',        value: detalle.color || '—' },
+                  { label: 'Código',       value: detalle.codigo || '—' },
+                  { label: 'Proveedor',    value: detalle.proveedor || '—' },
+                  { label: 'Unidad',       value: detalle.unidad || '—' },
+                  { label: 'Rendimiento',  value: detalle.rendimiento ? `${detalle.rendimiento} m/kg` : '—' },
+                  { label: 'Precio ref.',  value: detalle.precio ? `${detalle.moneda === 'USD' ? 'U$D' : '$'} ${fmtNum(detalle.precio)} / ${detalle.unidad}` : '—' },
+                  { label: 'Precio / m',   value: detalle.precio && detalle.rendimiento && detalle.unidad === 'kg' ? `${detalle.moneda === 'USD' ? 'U$D' : '$'} ${fmtNum(detalle.precio / detalle.rendimiento)} / m` : '—', color: 'var(--accent)' },
+                  { label: 'Stock',        value: detalle.metros != null ? `${fmtNum(detalle.metros)} m` : '—' },
+                ].map(({ label, value, color }) => (
+                  <div key={label} style={{ background: 'var(--bg3)', border: '1px solid var(--border)', padding: '7px 10px' }}>
+                    <div style={{ fontSize: 10, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 }}>{label}</div>
+                    <div style={{ fontWeight: 700, fontSize: 12, color: color || 'var(--text)' }}>{value}</div>
+                  </div>
+                ))}
+              </div>
+              {detalle.notas && (
+                <div style={{ fontSize: 12, color: 'var(--text2)', fontStyle: 'italic', padding: '6px 10px', background: 'var(--bg3)', border: '1px solid var(--border)', marginBottom: 14 }}>
+                  📝 {detalle.notas}
+                </div>
+              )}
+
+              {loadingDetalle ? (
+                <div className="loading"><div className="spinner" /> Cargando...</div>
+              ) : (
+                <>
+                  {/* Compras vinculadas */}
+                  <div style={{ fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text2)', padding: '4px 0 6px', borderBottom: '1px solid var(--border)', marginBottom: 6 }}>
+                    🛒 Historial de compras ({detalleCompras.length})
+                  </div>
+                  {detalleCompras.length === 0 ? (
+                    <div style={{ fontSize: 12, color: 'var(--text2)', fontStyle: 'italic', marginBottom: 14 }}>Sin compras registradas para esta tela.</div>
+                  ) : (
+                    <table style={{ width: '100%', marginBottom: 14 }}>
+                      <thead>
+                        <tr>
+                          <th>Fecha</th><th>Factura</th><th style={{ textAlign: 'right' }}>Cantidad</th><th style={{ textAlign: 'right' }}>Precio</th><th style={{ textAlign: 'right' }}>Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detalleCompras.map(c => (
+                          <tr key={c.id}>
+                            <td>{c.fecha ? c.fecha.split('-').reverse().join('/') : '—'}</td>
+                            <td style={{ fontSize: 11 }}>
+                              {c.compras ? `${c.compras.proveedor}${c.compras.factura ? ` #${c.compras.factura}` : ''}` : '—'}
+                            </td>
+                            <td style={{ textAlign: 'right' }}>{fmtNum(c.cantidad)} {c.unidad}</td>
+                            <td style={{ textAlign: 'right', fontSize: 11 }}>{c.moneda === 'USD' ? `U$D ${fmtNum(c.precio_lista)}` : `$${fmtNum(c.precio_lista)}`}</td>
+                            <td style={{ textAlign: 'right', fontWeight: 700 }}>{c.moneda === 'USD' ? `U$D ${fmtNum(c.total_factura)}` : `$${fmtNum(c.total_factura)}`}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+
+                  {/* Productos que la usan */}
+                  {productosUsandoTela.length > 0 && (
+                    <>
+                      <div style={{ fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text2)', padding: '4px 0 6px', borderBottom: '1px solid var(--border)', marginBottom: 6 }}>
+                        📦 Productos que usan esta tela ({productosUsandoTela.length})
+                      </div>
+                      {productosUsandoTela.map(p => (
+                        <div key={p.id} style={{ fontSize: 12, padding: '4px 0', borderBottom: '1px solid var(--border)' }}>
+                          {p.nombre}
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setDetalle(null)}>Cerrar</button>
+              <button className="btn btn-primary" onClick={() => { setDetalle(null); openEdit(detalle) }}>✏ Editar</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {modal && (
         <div className="modal-overlay" onClick={() => setModal(false)}>

@@ -22,6 +22,23 @@ export default function CatalogoAvios({ onMenuClick }) {
   const [form, setForm] = useState(emptyForm)
   const setF = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
+  // Modal detalle
+  const [detalle, setDetalle] = useState(null)
+  const [detalleCompras, setDetalleCompras] = useState([])
+  const [loadingDetalle, setLoadingDetalle] = useState(false)
+
+  async function openDetalle(a) {
+    setDetalle(a)
+    setLoadingDetalle(true)
+    const { data } = await supabase
+      .from('compras_avios')
+      .select('*, compras(factura, fecha, proveedor)')
+      .eq('avio_id', a.id)
+      .order('fecha', { ascending: false })
+    setDetalleCompras(data || [])
+    setLoadingDetalle(false)
+  }
+
   useEffect(() => { fetchAll() }, [])
 
   async function fetchAll() {
@@ -143,7 +160,7 @@ export default function CatalogoAvios({ onMenuClick }) {
                 </thead>
                 <tbody>
                   {filtered.map(a => (
-                    <tr key={a.id} onClick={() => openEdit(a)} style={{ cursor: 'pointer' }}>
+                    <tr key={a.id} onClick={() => openDetalle(a)} style={{ cursor: 'pointer' }}>
                       <td><strong>{a.nombre}</strong>{a.descripcion && <div style={{ fontSize: 11, color: 'var(--text2)' }}>{a.descripcion}</div>}</td>
                       <td>{a.tipo || '—'}</td>
                       <td style={{ fontSize: 11, color: 'var(--accent)' }}>{a.codigo || '—'}</td>
@@ -159,6 +176,84 @@ export default function CatalogoAvios({ onMenuClick }) {
           )}
         </div>
       </div>
+
+      {detalle && (
+        <div className="modal-overlay" onClick={() => setDetalle(null)}>
+          <div className="modal modal-lg" onClick={e => e.stopPropagation()} style={{ maxWidth: 640 }}>
+            <div className="modal-header">
+              <div>
+                <h3 style={{ margin: 0 }}>🪡 {detalle.nombre}</h3>
+                <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>
+                  {detalle.tipo && <span>{detalle.tipo} · </span>}
+                  {detalle.proveedor && <span>{detalle.proveedor}</span>}
+                </div>
+              </div>
+              <button className="close-btn" onClick={() => setDetalle(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 16 }}>
+                {[
+                  { label: 'Nombre',      value: detalle.nombre || '—' },
+                  { label: 'Tipo',        value: detalle.tipo || '—' },
+                  { label: 'Código',      value: detalle.codigo || '—' },
+                  { label: 'Descripción', value: detalle.descripcion || '—' },
+                  { label: 'Proveedor',   value: detalle.proveedor || '—' },
+                  { label: 'Unidad',      value: detalle.unidad || '—' },
+                  { label: 'Precio ref.', value: detalle.precio ? `${detalle.moneda === 'USD' ? 'U$D' : '$'} ${fmtNum(detalle.precio)} / ${detalle.unidad}` : '—', color: 'var(--accent)' },
+                ].map(({ label, value, color }) => (
+                  <div key={label} style={{ background: 'var(--bg3)', border: '1px solid var(--border)', padding: '7px 10px' }}>
+                    <div style={{ fontSize: 10, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 }}>{label}</div>
+                    <div style={{ fontWeight: 700, fontSize: 12, color: color || 'var(--text)' }}>{value}</div>
+                  </div>
+                ))}
+              </div>
+              {detalle.notas && (
+                <div style={{ fontSize: 12, color: 'var(--text2)', fontStyle: 'italic', padding: '6px 10px', background: 'var(--bg3)', border: '1px solid var(--border)', marginBottom: 14 }}>
+                  📝 {detalle.notas}
+                </div>
+              )}
+
+              {loadingDetalle ? (
+                <div className="loading"><div className="spinner" /> Cargando...</div>
+              ) : (
+                <>
+                  <div style={{ fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text2)', padding: '4px 0 6px', borderBottom: '1px solid var(--border)', marginBottom: 6 }}>
+                    🛒 Historial de compras ({detalleCompras.length})
+                  </div>
+                  {detalleCompras.length === 0 ? (
+                    <div style={{ fontSize: 12, color: 'var(--text2)', fontStyle: 'italic' }}>Sin compras registradas para este avío.</div>
+                  ) : (
+                    <table style={{ width: '100%' }}>
+                      <thead>
+                        <tr>
+                          <th>Fecha</th><th>Factura</th><th style={{ textAlign: 'right' }}>Cantidad</th><th style={{ textAlign: 'right' }}>Precio</th><th style={{ textAlign: 'right' }}>Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {detalleCompras.map(c => (
+                          <tr key={c.id}>
+                            <td>{c.fecha ? c.fecha.split('-').reverse().join('/') : '—'}</td>
+                            <td style={{ fontSize: 11 }}>
+                              {c.compras ? `${c.compras.proveedor}${c.compras.factura ? ` #${c.compras.factura}` : ''}` : '—'}
+                            </td>
+                            <td style={{ textAlign: 'right' }}>{fmtNum(c.cantidad)} {c.unidad}</td>
+                            <td style={{ textAlign: 'right', fontSize: 11 }}>{c.moneda === 'USD' ? `U$D ${fmtNum(c.precio_lista)}` : `$${fmtNum(c.precio_lista)}`}</td>
+                            <td style={{ textAlign: 'right', fontWeight: 700 }}>{c.moneda === 'USD' ? `U$D ${fmtNum(c.total_factura)}` : `$${fmtNum(c.total_factura)}`}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setDetalle(null)}>Cerrar</button>
+              <button className="btn btn-primary" onClick={() => { setDetalle(null); openEdit(detalle) }}>✏ Editar</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {modal && (
         <div className="modal-overlay" onClick={() => setModal(false)}>
