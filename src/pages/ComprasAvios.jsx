@@ -31,6 +31,9 @@ export default function ComprasAvios({ onMenuClick }) {
   const [items, setItems] = useState([emptyItem()])
   const [avioForm, setAvioForm] = useState({ nombre: '', tipo: '', codigo: '', unidad: 'unidad', descripcion: '' })
 
+  // Modal detalle (solo lectura)
+  const [detalle, setDetalle] = useState(null)
+
   useEffect(() => { fetchAll() }, [])
 
   async function fetchAll() {
@@ -251,7 +254,7 @@ export default function ComprasAvios({ onMenuClick }) {
                 </thead>
                 <tbody>
                   {compras.map(c => (
-                    <tr key={c.id} onClick={() => openEdit(c)} style={{ cursor: 'pointer' }}>
+                    <tr key={c.id} onClick={() => setDetalle(c)} style={{ cursor: 'pointer' }}>
                       <td>
                         <strong>{c.avios?.nombre || '—'}</strong>
                         {c.avios?.tipo && <div style={{ fontSize: 11, color: 'var(--text2)' }}>{c.avios.tipo}</div>}
@@ -281,6 +284,68 @@ export default function ComprasAvios({ onMenuClick }) {
           )}
         </div>
       </div>
+
+      {detalle && (() => {
+        const c = detalle
+        const subtotal = (parseFloat(c.cantidad) || 0) * (parseFloat(c.precio_lista) || 0)
+        const fmt = (n) => c.moneda === 'USD' ? fmtUSD(n) : fmtUYU(n)
+        return (
+          <div className="modal-overlay" onClick={() => setDetalle(null)}>
+            <div className="modal" style={{ maxWidth: 580 }} onClick={e => e.stopPropagation()}>
+              <div className="modal-header">
+                <div>
+                  <h3 style={{ margin: 0 }}>🪡 {c.avios?.nombre || 'Compra de avío'}</h3>
+                  <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>
+                    {c.avios?.tipo && <span>{c.avios.tipo} · </span>}
+                    {fmtFecha(c.fecha)}
+                  </div>
+                </div>
+                <button className="close-btn" onClick={() => setDetalle(null)}>✕</button>
+              </div>
+              <div className="modal-body">
+                {c.compras && (
+                  <div style={{ background: '#f0f4f8', border: '1px solid #c8d4e8', padding: '8px 12px', marginBottom: 14, fontSize: 12 }}>
+                    <span style={{ fontWeight: 700, color: '#1a3a6b' }}>🔗 Factura: </span>
+                    {c.compras.proveedor}
+                    {c.compras.factura && <span style={{ marginLeft: 6 }}>#{c.compras.factura}</span>}
+                    <span style={{ marginLeft: 8, color: 'var(--text2)' }}>{fmtFecha(c.compras.fecha)}</span>
+                  </div>
+                )}
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 14 }}>
+                  {[
+                    { label: 'Avío',          value: c.avios?.nombre || '—' },
+                    { label: 'Tipo',           value: c.avios?.tipo || '—' },
+                    { label: 'Fecha',          value: fmtFecha(c.fecha) },
+                    { label: 'Cantidad',       value: `${fmtNum(c.cantidad)} ${c.unidad || ''}` },
+                    { label: 'Precio lista',   value: fmt(c.precio_lista) },
+                    { label: 'Moneda',         value: c.moneda || '—' },
+                    { label: 'Subtotal',       value: fmt(subtotal) },
+                    { label: 'Descuento',      value: c.descuento_pct ? `${fmtNum(c.descuento_pct)}% (${fmt(c.descuento_monto)})` : '—', color: c.descuento_pct ? 'var(--success)' : undefined },
+                    { label: 'Total factura',  value: fmt(c.total_factura), color: 'var(--accent)' },
+                    { label: 'TC de pago',     value: c.tc ? '$' + c.tc : '—' },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} style={{ background: 'var(--bg3)', border: '1px solid var(--border)', padding: '7px 10px' }}>
+                      <div style={{ fontSize: 10, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 }}>{label}</div>
+                      <div style={{ fontWeight: 700, fontSize: 12, color: color || 'var(--text)' }}>{value}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {c.notas && (
+                  <div style={{ fontSize: 12, color: 'var(--text2)', fontStyle: 'italic', padding: '6px 10px', background: 'var(--bg3)', border: '1px solid var(--border)' }}>
+                    📝 {c.notas}
+                  </div>
+                )}
+              </div>
+              <div className="modal-footer">
+                <button className="btn btn-secondary" onClick={() => setDetalle(null)}>Cerrar</button>
+                <button className="btn btn-primary" onClick={() => { setDetalle(null); openEdit(c) }}>✏ Editar</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {modal && (
         <div className="modal-overlay" onClick={() => setModal(false)}>
