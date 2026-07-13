@@ -49,6 +49,25 @@ export default function ComprasAvios({ onMenuClick }) {
   const [facturaItems, setFacturaItems] = useState({ telas: [], avios: [] })
   const [loadingFactura, setLoadingFactura] = useState(false)
 
+  // Historial de avío (todas las compras de ese avío)
+  const [avioHistorial, setAvioHistorial] = useState(null)
+  const [avioHistorialCompras, setAvioHistorialCompras] = useState([])
+  const [loadingAvioHist, setLoadingAvioHist] = useState(false)
+
+  async function openAvioHistorial(e, avioId, avioNombre) {
+    e.stopPropagation()
+    if (!avioId) return
+    setAvioHistorial({ id: avioId, nombre: avioNombre })
+    setLoadingAvioHist(true)
+    const { data } = await supabase
+      .from('compras_avios')
+      .select('*, compras(factura, fecha, proveedor)')
+      .eq('avio_id', avioId)
+      .order('fecha', { ascending: false })
+    setAvioHistorialCompras(data || [])
+    setLoadingAvioHist(false)
+  }
+
   async function openFactura(e, compraId) {
     e.stopPropagation()
     if (!compraId) return
@@ -410,7 +429,11 @@ export default function ComprasAvios({ onMenuClick }) {
             <div className="modal" style={{ maxWidth: 580 }} onClick={e => e.stopPropagation()}>
               <div className="modal-header">
                 <div>
-                  <h3 style={{ margin: 0 }}>🪡 {c.avios?.nombre || 'Compra de avío'}</h3>
+                  <h3
+                    style={{ margin: 0, cursor: c.avio_id ? 'pointer' : 'default', textDecoration: c.avio_id ? 'underline' : 'none', color: c.avio_id ? 'var(--accent)' : undefined }}
+                    onClick={e => c.avio_id && openAvioHistorial(e, c.avio_id, c.avios?.nombre)}
+                    title={c.avio_id ? 'Ver todas las compras de este avío' : undefined}
+                  >🪡 {c.avios?.nombre || 'Compra de avío'}</h3>
                   <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>
                     {c.avios?.tipo && <span>{c.avios.tipo} · </span>}
                     {fmtFecha(c.fecha)}
@@ -420,11 +443,15 @@ export default function ComprasAvios({ onMenuClick }) {
               </div>
               <div className="modal-body">
                 {c.compras && (
-                  <div style={{ background: '#f0f4f8', border: '1px solid #c8d4e8', padding: '8px 12px', marginBottom: 14, fontSize: 12 }}>
+                  <div
+                    style={{ background: '#f0f4f8', border: '1px solid #c8d4e8', padding: '8px 12px', marginBottom: 14, fontSize: 12, cursor: 'pointer' }}
+                    onClick={e => openFactura(e, c.compra_id)}
+                    title="Ver todos los ítems de esta factura"
+                  >
                     <span style={{ fontWeight: 700, color: '#1a3a6b' }}>🔗 Factura: </span>
-                    {c.compras.proveedor}
-                    {c.compras.factura && <span style={{ marginLeft: 6 }}>#{c.compras.factura}</span>}
+                    <span style={{ color: 'var(--accent)', textDecoration: 'underline' }}>{c.compras.proveedor}{c.compras.factura ? ` #${c.compras.factura}` : ''}</span>
                     <span style={{ marginLeft: 8, color: 'var(--text2)' }}>{fmtFecha(c.compras.fecha)}</span>
+                    <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--text2)' }}>→ ver factura completa</span>
                   </div>
                 )}
 
@@ -462,6 +489,44 @@ export default function ComprasAvios({ onMenuClick }) {
           </div>
         )
       })()}
+
+      {avioHistorial && (
+        <div className="modal-overlay" onClick={() => setAvioHistorial(null)}>
+          <div className="modal modal-lg" style={{ maxWidth: 640 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 style={{ margin: 0 }}>🪡 Historial: {avioHistorial.nombre}</h3>
+              <button className="close-btn" onClick={() => setAvioHistorial(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              {loadingAvioHist ? (
+                <div className="loading"><div className="spinner" /> Cargando...</div>
+              ) : avioHistorialCompras.length === 0 ? (
+                <div style={{ fontSize: 12, color: 'var(--text2)', fontStyle: 'italic' }}>Sin compras registradas para este avío.</div>
+              ) : (
+                <table style={{ width: '100%' }}>
+                  <thead><tr><th>Fecha</th><th>Factura</th><th style={{ textAlign: 'right' }}>Cantidad</th><th style={{ textAlign: 'right' }}>Precio</th><th style={{ textAlign: 'right' }}>Total</th></tr></thead>
+                  <tbody>
+                    {avioHistorialCompras.map(c => (
+                      <tr key={c.id}>
+                        <td>{fmtFecha(c.fecha)}</td>
+                        <td style={{ fontSize: 11 }}>
+                          {c.compras ? `${c.compras.proveedor}${c.compras.factura ? ` #${c.compras.factura}` : ''}` : '—'}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>{fmtNum(c.cantidad)} {c.unidad}</td>
+                        <td style={{ textAlign: 'right', fontSize: 11 }}>{c.moneda === 'USD' ? fmtUSD(c.precio_lista) : fmtUYU(c.precio_lista)}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700 }}>{c.moneda === 'USD' ? fmtUSD(c.total_factura) : fmtUYU(c.total_factura)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setAvioHistorial(null)}>Cerrar</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {modal && (
         <div className="modal-overlay" onClick={() => setModal(false)}>

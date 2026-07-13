@@ -50,6 +50,25 @@ export default function ComprasTela({ onMenuClick }) {
   const [facturaItems, setFacturaItems] = useState({ telas: [], avios: [] })
   const [loadingFactura, setLoadingFactura] = useState(false)
 
+  // Historial de tela (todas las compras de esa tela)
+  const [telaHistorial, setTelaHistorial] = useState(null)   // { id, tipo, color }
+  const [telaHistorialCompras, setTelaHistorialCompras] = useState([])
+  const [loadingTelaHist, setLoadingTelaHist] = useState(false)
+
+  async function openTelaHistorial(e, telaId, telaNombre) {
+    e.stopPropagation()
+    if (!telaId) return
+    setTelaHistorial({ id: telaId, nombre: telaNombre })
+    setLoadingTelaHist(true)
+    const { data } = await supabase
+      .from('compras_tela')
+      .select('*, compras(factura, fecha, proveedor)')
+      .eq('tela_id', telaId)
+      .order('fecha', { ascending: false })
+    setTelaHistorialCompras(data || [])
+    setLoadingTelaHist(false)
+  }
+
   async function openFactura(e, compraId) {
     e.stopPropagation()
     if (!compraId) return
@@ -421,7 +440,11 @@ export default function ComprasTela({ onMenuClick }) {
             <div className="modal" style={{ maxWidth: 580 }} onClick={e => e.stopPropagation()}>
               <div className="modal-header">
                 <div>
-                  <h3 style={{ margin: 0 }}>🧶 {c.telas?.tipo || 'Compra de tela'}</h3>
+                  <h3
+                    style={{ margin: 0, cursor: c.tela_id ? 'pointer' : 'default', textDecoration: c.tela_id ? 'underline' : 'none', color: c.tela_id ? 'var(--accent)' : undefined }}
+                    onClick={e => c.tela_id && openTelaHistorial(e, c.tela_id, c.telas?.tipo)}
+                    title={c.tela_id ? 'Ver todas las compras de esta tela' : undefined}
+                  >🧶 {c.telas?.tipo || 'Compra de tela'}</h3>
                   <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>
                     {c.telas?.color && <span>{c.telas.color} · </span>}
                     {fmtFecha(c.fecha)}
@@ -432,11 +455,15 @@ export default function ComprasTela({ onMenuClick }) {
               <div className="modal-body">
                 {/* Factura vinculada */}
                 {c.compras && (
-                  <div style={{ background: '#f0f4f8', border: '1px solid #c8d4e8', padding: '8px 12px', marginBottom: 14, fontSize: 12 }}>
+                  <div
+                    style={{ background: '#f0f4f8', border: '1px solid #c8d4e8', padding: '8px 12px', marginBottom: 14, fontSize: 12, cursor: 'pointer' }}
+                    onClick={e => openFactura(e, c.compra_id)}
+                    title="Ver todos los ítems de esta factura"
+                  >
                     <span style={{ fontWeight: 700, color: '#1a3a6b' }}>🔗 Factura: </span>
-                    {c.compras.proveedor}
-                    {c.compras.factura && <span style={{ marginLeft: 6 }}>#{c.compras.factura}</span>}
+                    <span style={{ color: 'var(--accent)', textDecoration: 'underline' }}>{c.compras.proveedor}{c.compras.factura ? ` #${c.compras.factura}` : ''}</span>
                     <span style={{ marginLeft: 8, color: 'var(--text2)' }}>{fmtFecha(c.compras.fecha)}</span>
+                    <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--text2)' }}>→ ver factura completa</span>
                   </div>
                 )}
 
@@ -475,6 +502,44 @@ export default function ComprasTela({ onMenuClick }) {
           </div>
         )
       })()}
+
+      {telaHistorial && (
+        <div className="modal-overlay" onClick={() => setTelaHistorial(null)}>
+          <div className="modal modal-lg" style={{ maxWidth: 640 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 style={{ margin: 0 }}>🧶 Historial: {telaHistorial.nombre}</h3>
+              <button className="close-btn" onClick={() => setTelaHistorial(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              {loadingTelaHist ? (
+                <div className="loading"><div className="spinner" /> Cargando...</div>
+              ) : telaHistorialCompras.length === 0 ? (
+                <div style={{ fontSize: 12, color: 'var(--text2)', fontStyle: 'italic' }}>Sin compras registradas para esta tela.</div>
+              ) : (
+                <table style={{ width: '100%' }}>
+                  <thead><tr><th>Fecha</th><th>Factura</th><th style={{ textAlign: 'right' }}>Cantidad</th><th style={{ textAlign: 'right' }}>Precio</th><th style={{ textAlign: 'right' }}>Total</th></tr></thead>
+                  <tbody>
+                    {telaHistorialCompras.map(c => (
+                      <tr key={c.id}>
+                        <td>{fmtFecha(c.fecha)}</td>
+                        <td style={{ fontSize: 11 }}>
+                          {c.compras ? `${c.compras.proveedor}${c.compras.factura ? ` #${c.compras.factura}` : ''}` : '—'}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>{fmtNum(c.cantidad)} {c.unidad}</td>
+                        <td style={{ textAlign: 'right', fontSize: 11 }}>{c.moneda === 'USD' ? fmtUSD(c.precio_lista) : fmtUYU(c.precio_lista)}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 700 }}>{c.moneda === 'USD' ? fmtUSD(c.total_factura) : fmtUYU(c.total_factura)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setTelaHistorial(null)}>Cerrar</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {modal && (
         <div className="modal-overlay" onClick={() => setModal(false)}>
