@@ -295,6 +295,239 @@ function TablaPorPar({ marcadaId, productoId, talles, piezas, pares, ajustes, on
   )
 }
 
+// ── CortePiezasPorPrendaSection ────────────────────────────────────────────────
+
+function CortePiezasPorPrendaSection({ marcadaId, productoId, catalogPiezas, piezasReq, onReload }) {
+  const [collapsed, setCollapsed] = useState(true)
+  const [editingId, setEditingId] = useState(null)
+  const [editVal,   setEditVal]   = useState('')
+
+  const mine        = piezasReq.filter(p => p.marcada_id === marcadaId && p.producto_id === productoId)
+  const mineSet     = new Set(mine.map(p => p.pieza_nombre))
+  const disponibles = (catalogPiezas || []).filter(p => !mineSet.has(p.nombre))
+
+  async function addPieza(nombre) {
+    await supabase.from('cortes_piezas_req').insert({ marcada_id: marcadaId, producto_id: productoId, pieza_nombre: nombre, cant_prenda: 1 })
+    onReload()
+  }
+  async function delPieza(id) {
+    await supabase.from('cortes_piezas_req').delete().eq('id', id)
+    onReload()
+  }
+  async function saveCant(id) {
+    const v = parseInt(editVal) || 1
+    await supabase.from('cortes_piezas_req').update({ cant_prenda: v }).eq('id', id)
+    setEditingId(null); onReload()
+  }
+
+  return (
+    <div style={{ marginBottom:8, border:'1px solid #b0bcd8', background:'#f4f8fc' }}>
+      <div style={{ background:'linear-gradient(to bottom,#e0e8f4,#d0ddf0)', padding:'4px 8px', display:'flex', justifyContent:'space-between', alignItems:'center', cursor:'pointer' }} onClick={() => setCollapsed(c => !c)}>
+        <span style={{ fontWeight:700, fontSize:10, color:'#1a3a6b' }}>{collapsed ? '▶' : '▼'} PIEZAS POR PRENDA</span>
+        <span style={{ fontSize:10, color:'#555' }}>{mine.length} piezas definidas</span>
+      </div>
+      {!collapsed && (
+        <div style={{ padding:'6px 8px' }}>
+          {mine.length === 0 && <div style={{ fontSize:10, color:'#888', fontStyle:'italic', marginBottom:4 }}>Agregá las piezas necesarias para completar una prenda.</div>}
+          {mine.length > 0 && (
+            <table style={{ ...S.tbl, marginBottom:6 }}>
+              <thead><tr>
+                <th style={S.thL}>Pieza</th>
+                <th style={S.th}>Cant. por prenda</th>
+                <th style={S.th}></th>
+              </tr></thead>
+              <tbody>
+                {mine.map(p => (
+                  <tr key={p.id}>
+                    <td style={S.tdL}><strong>{p.pieza_nombre}</strong></td>
+                    <td style={S.td}>
+                      {editingId === p.id ? (
+                        <input style={{ ...S.inpC, width:36 }} type="number" min="1" value={editVal} autoFocus
+                          onChange={e => setEditVal(e.target.value)}
+                          onBlur={() => saveCant(p.id)}
+                          onKeyDown={e => { if (e.key==='Enter') saveCant(p.id); if (e.key==='Escape') setEditingId(null) }} />
+                      ) : (
+                        <span>{p.cant_prenda || 1}</span>
+                      )}
+                    </td>
+                    <td style={{ ...S.td, whiteSpace:'nowrap' }}>
+                      <button style={{ ...S.btnS, marginRight:3 }} onClick={() => { setEditingId(p.id); setEditVal(String(p.cant_prenda || 1)) }}>✏</button>
+                      <button style={S.btnD} onClick={() => delPieza(p.id)}>✕</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {disponibles.length > 0 && (
+            <div style={{ display:'flex', flexWrap:'wrap', gap:3 }}>
+              <span style={{ fontSize:10, color:'#1a3a6b', fontWeight:700, marginRight:4, alignSelf:'center' }}>+ agregar:</span>
+              {disponibles.map(p => (
+                <button key={p.nombre} style={S.btnS} onClick={() => addPieza(p.nombre)}>
+                  {p.nombre}{p.mult > 1 ? ` ×${p.mult}` : ''}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── CortePedidoSection ─────────────────────────────────────────────────────────
+
+function CortePedidoSection({ marcadaId, productoId, talles, pedidoTalles, onReload }) {
+  const [collapsed, setCollapsed] = useState(false)
+  const saveTimers = useRef({})
+
+  const mine    = pedidoTalles.filter(p => p.marcada_id === marcadaId && p.producto_id === productoId)
+  const mineMap = {}
+  for (const p of mine) mineMap[p.talle] = p
+
+  function onCantChange(talle, val) {
+    const key = `${marcadaId}-${productoId}-${talle}`
+    if (saveTimers.current[key]) clearTimeout(saveTimers.current[key])
+    saveTimers.current[key] = setTimeout(async () => {
+      const cantidad = parseInt(val) || 0
+      const ex = mineMap[talle]
+      if (ex) {
+        await supabase.from('cortes_pedido_talles').update({ cantidad }).eq('id', ex.id)
+      } else {
+        await supabase.from('cortes_pedido_talles').insert({ marcada_id: marcadaId, producto_id: productoId, talle, cantidad })
+      }
+      onReload()
+    }, 500)
+  }
+
+  const total = mine.reduce((s, p) => s + (p.cantidad || 0), 0)
+
+  return (
+    <div style={{ marginBottom:8, border:'1px solid #a0b870', background:'#f4f8ec' }}>
+      <div style={{ background:'linear-gradient(to bottom,#e0eecc,#d0e8b0)', padding:'4px 8px', display:'flex', justifyContent:'space-between', alignItems:'center', cursor:'pointer' }} onClick={() => setCollapsed(c => !c)}>
+        <span style={{ fontWeight:700, fontSize:10, color:'#3a5a10' }}>{collapsed ? '▶' : '▼'} PEDIDO</span>
+        {total > 0 && <span style={{ fontSize:10, color:'#555' }}>total: <b>{total}</b></span>}
+      </div>
+      {!collapsed && (
+        <div style={{ padding:'6px 8px', overflowX:'auto' }}>
+          <table style={S.tbl}>
+            <thead><tr>
+              <th style={S.thL}>Talle</th>
+              <th style={S.th}>Cantidad</th>
+            </tr></thead>
+            <tbody>
+              {talles.map(t => {
+                const ped = mineMap[t]?.cantidad || 0
+                return (
+                  <tr key={t}>
+                    <td style={S.tdL}><strong>{t}</strong></td>
+                    <td style={S.td}>
+                      <input style={{ ...S.inpC, width:44 }} type="number" min="0" defaultValue={ped || ''}
+                        placeholder="0" onChange={e => onCantChange(t, e.target.value)} />
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── CorteResumenSection ────────────────────────────────────────────────────────
+
+function CorteResumenSection({ entries, allPiezas, allAjustes, piezasReq, pedidoTalles, talles, productoId, marcadaId }) {
+  const [collapsed, setCollapsed] = useState(false)
+
+  const mine      = pedidoTalles.filter(p => p.marcada_id === marcadaId && p.producto_id === productoId)
+  const pedidoMap = {}
+  for (const p of mine) pedidoMap[p.talle] = p.cantidad || 0
+
+  const reqMap = {}
+  for (const { marcada, prodEntry } of entries) {
+    const reqs = piezasReq.filter(p => p.marcada_id === marcada.id && p.producto_id === prodEntry.producto_id)
+    for (const r of reqs) if (!reqMap[r.pieza_nombre]) reqMap[r.pieza_nombre] = r.cant_prenda || 1
+  }
+
+  const cortadoMap = {}
+  for (const { marcada, prodEntry } of entries) {
+    const piezas  = allPiezas.filter(p => p.marcada_id === marcada.id && p.producto_id === prodEntry.producto_id)
+    const ajustes = allAjustes.filter(a => a.marcada_id === marcada.id && a.producto_id === prodEntry.producto_id)
+    const result  = buildResult(piezas, calcPares(marcada), ajustes)
+    for (const [pieza, row] of Object.entries(result)) {
+      if (!cortadoMap[pieza]) cortadoMap[pieza] = {}
+      for (const [talle, qty] of Object.entries(row)) {
+        cortadoMap[pieza][talle] = (cortadoMap[pieza][talle] || 0) + qty
+      }
+    }
+  }
+
+  const piezas = Object.keys(reqMap)
+  if (!piezas.length) return null
+
+  return (
+    <div style={{ marginBottom:8, border:'1px solid #9898c0', background:'#f4f4fc' }}>
+      <div style={{ background:'linear-gradient(to bottom,#e4e4f4,#d4d4ec)', padding:'4px 8px', display:'flex', justifyContent:'space-between', alignItems:'center', cursor:'pointer' }} onClick={() => setCollapsed(c => !c)}>
+        <span style={{ fontWeight:700, fontSize:10, color:'#2a2a6b' }}>{collapsed ? '▶' : '▼'} RESUMEN DE CORTES</span>
+      </div>
+      {!collapsed && (
+        <div style={{ padding:'6px 8px', overflowX:'auto' }}>
+          <table style={{ ...S.tbl, tableLayout:'auto' }}>
+            <thead>
+              <tr>
+                <th style={{ ...S.thL, minWidth:50 }} rowSpan={2}>Talle</th>
+                {piezas.map(pieza => (
+                  <th key={pieza} style={{ ...S.th, textAlign:'center' }} colSpan={3}>{pieza}</th>
+                ))}
+              </tr>
+              <tr>
+                {piezas.map(pieza => (
+                  <React.Fragment key={pieza}>
+                    <th style={{ ...S.th, fontSize:9, fontWeight:400, color:'#555', minWidth:30 }}>prec.</th>
+                    <th style={{ ...S.th, fontSize:9, fontWeight:400, color:'#555', minWidth:30 }}>cort.</th>
+                    <th style={{ ...S.th, fontSize:9, fontWeight:700, minWidth:30 }}>Δ</th>
+                  </React.Fragment>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {talles.filter(t => piezas.some(pieza => (pedidoMap[t]||0) > 0 || (cortadoMap[pieza]?.[t]||0) > 0)).map((t, ti) => {
+                const precisa = piezas.some(pieza => {
+                  const req = reqMap[pieza] || 1
+                  return (pedidoMap[t] || 0) * req > 0
+                })
+                return (
+                  <tr key={t} style={{ background: ti % 2 === 0 ? '#fff' : '#f4f4fc' }}>
+                    <td style={S.tdL}><strong>{t}</strong></td>
+                    {piezas.map(pieza => {
+                      const req      = reqMap[pieza] || 1
+                      const precisaP = (pedidoMap[t] || 0) * req
+                      const cortado  = cortadoMap[pieza]?.[t] || 0
+                      const delta    = cortado - precisaP
+                      const ok       = delta >= 0
+                      return (
+                        <React.Fragment key={pieza}>
+                          <td style={{ ...S.td, color:'#555' }}>{precisaP > 0 ? precisaP : '—'}</td>
+                          <td style={{ ...S.td }}>{cortado > 0 ? cortado : '—'}</td>
+                          <td style={{ ...S.td, fontWeight:700, color: ok ? '#1a6a1a' : '#aa1a1a' }}>
+                            {precisaP === 0 && cortado === 0 ? '—' : (ok ? `+${delta}` : delta)}
+                          </td>
+                        </React.Fragment>
+                      )
+                    })}
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── ModificacionesSection ─────────────────────────────────────────────────────
 
 function ModificacionesSection({ marcadaId, productoId, piezas, talles, ajustes, catalogPiezas, onReload }) {
@@ -787,7 +1020,7 @@ function CorteMarcadaSlim({ marcada, num, prodEntry, prod, allPiezas, allAjustes
 
 // ── CorteTelaSection ───────────────────────────────────────────────────────────
 
-function CorteTelaSection({ tela, items, prod, allPiezas, allAjustes, onDeleteMarcada, onReload, sessionId, productoId }) {
+function CorteTelaSection({ tela, items, prod, allPiezas, allAjustes, piezasReq, onDeleteMarcada, onReload, sessionId, productoId }) {
   const [adding, setAdding] = useState(false)
   const label = tela ? telaLabel(tela) : 'Sin tela'
 
@@ -817,6 +1050,13 @@ function CorteTelaSection({ tela, items, prod, allPiezas, allAjustes, onDeleteMa
         <button style={S.btnP} onClick={addMarcada} disabled={adding}>{adding?'...':'+ Marcada'}</button>
       </div>
       <div style={{ padding:'6px 8px' }}>
+        {items[0] && (
+          <CortePiezasPorPrendaSection
+            marcadaId={items[0].marcada.id} productoId={productoId}
+            catalogPiezas={prod?.piezas || []} piezasReq={piezasReq}
+            onReload={onReload}
+          />
+        )}
         {items.map(({ marcada, prodEntry }, i) => (
           <CorteMarcadaSlim key={marcada.id} marcada={marcada} num={i+1}
             prodEntry={prodEntry} prod={prod}
@@ -831,7 +1071,7 @@ function CorteTelaSection({ tela, items, prod, allPiezas, allAjustes, onDeleteMa
 
 // ── CorteProductoSection ───────────────────────────────────────────────────────
 
-function CorteProductoSection({ prod, entries, allPiezas, allAjustes, onDeleteMarcada, onReload, sessionId }) {
+function CorteProductoSection({ prod, entries, allPiezas, allAjustes, piezasReq, pedidoTalles, onDeleteMarcada, onReload, sessionId }) {
   const [collapsed, setCollapsed] = useState(false)
   const tabla  = prod?.tabla || 'adulto'
   const talles = TABLAS_TALLES[tabla] || TABLAS_TALLES.adulto
@@ -869,14 +1109,24 @@ function CorteProductoSection({ prod, entries, allPiezas, allAjustes, onDeleteMa
       </div>
       {!collapsed && (
         <div style={{ padding:'8px 10px' }}>
+          <CortePedidoSection
+            marcadaId={entries[0].marcada.id} productoId={entries[0].prodEntry.producto_id}
+            talles={talles} pedidoTalles={pedidoTalles} onReload={onReload}
+          />
           {telaList.map(({ tela, items }) => (
             <CorteTelaSection key={tela?.id || '__none__'}
               tela={tela} items={items} prod={prod}
               allPiezas={allPiezas} allAjustes={allAjustes}
+              piezasReq={piezasReq}
               onDeleteMarcada={onDeleteMarcada} onReload={onReload}
               sessionId={sessionId} productoId={entries[0].prodEntry.producto_id}
             />
           ))}
+          <CorteResumenSection
+            entries={entries} allPiezas={allPiezas} allAjustes={allAjustes}
+            piezasReq={piezasReq} pedidoTalles={pedidoTalles} talles={talles}
+            productoId={entries[0].prodEntry.producto_id} marcadaId={entries[0].marcada.id}
+          />
         </div>
       )}
     </div>
@@ -1001,12 +1251,14 @@ export default function Corte({ onMenuClick }) {
     }
     if (!marcadas.length) { setLoadingFicha(false); return }
     const ids = marcadas.map(m => m.id)
-    const [pr, ar, ped] = await Promise.all([
+    const [pr, ar, ped, preq, ptal] = await Promise.all([
       supabase.from('cortes_piezas').select('*').in('marcada_id', ids),
       supabase.from('cortes_ajustes').select('*').in('marcada_id', ids).order('created_at'),
       supabase.from('cortes_pedidos').select('*, pedidos(id, cliente)').in('corte_id', ids),
+      supabase.from('cortes_piezas_req').select('*').in('marcada_id', ids),
+      supabase.from('cortes_pedido_talles').select('*').in('marcada_id', ids),
     ])
-    setFichaData({ session_id:sid, marcadas, piezas:pr.data||[], ajustes:ar.data||[], pedidos:ped.data||[] })
+    setFichaData({ session_id:sid, marcadas, piezas:pr.data||[], ajustes:ar.data||[], pedidos:ped.data||[], piezasReq:preq.data||[], pedidoTalles:ptal.data||[] })
     setLoadingFicha(false)
   }
 
@@ -1051,6 +1303,8 @@ export default function Corte({ onMenuClick }) {
     await supabase.from('cortes_piezas').delete().eq('marcada_id', mid)
     await supabase.from('cortes_ajustes').delete().eq('marcada_id', mid)
     await supabase.from('cortes_pedidos').delete().eq('corte_id', mid)
+    await supabase.from('cortes_piezas_req').delete().eq('marcada_id', mid)
+    await supabase.from('cortes_pedido_talles').delete().eq('marcada_id', mid)
     await supabase.from('cortes_marcadas_productos').delete().eq('marcada_id', mid)
     await supabase.from('cortes_marcadas').delete().eq('id', mid)
     reloadFicha()
@@ -1211,6 +1465,7 @@ export default function Corte({ onMenuClick }) {
                 <CorteProductoSection key={pg.prod?.id || 'noprod'}
                   prod={pg.prod} entries={pg.entries}
                   allPiezas={fichaData.piezas} allAjustes={fichaData.ajustes}
+                  piezasReq={fichaData.piezasReq||[]} pedidoTalles={fichaData.pedidoTalles||[]}
                   onDeleteMarcada={deleteMarcada} onReload={reloadFicha}
                   sessionId={fichaData.session_id}
                 />
