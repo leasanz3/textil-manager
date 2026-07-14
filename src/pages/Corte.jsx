@@ -936,22 +936,18 @@ export default function Corte({ onMenuClick }) {
     }
   }
 
-  const [tab, setTab] = useState('corte')
-
   return (
     <div style={S.wrap}>
       <div style={S.tbar}>
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           <button style={S.btn} onClick={onMenuClick}>☰</button>
           <span style={{ fontWeight:700, fontSize:13 }}>✂ Corte</span>
-          <button style={{ ...S.btn, fontWeight: tab==='corte' ? 700:400, background: tab==='corte' ? '#ffffcc':'linear-gradient(to bottom,#fff,#e0dcd4)', border: tab==='corte' ? '2px solid #808080':'1px solid #8a8a8a' }} onClick={() => setTab('corte')}>✂ Corte</button>
-          <button style={{ ...S.btn, fontWeight: tab==='marcada' ? 700:400, background: tab==='marcada' ? '#ffffcc':'linear-gradient(to bottom,#fff,#e0dcd4)', border: tab==='marcada' ? '2px solid #808080':'1px solid #8a8a8a' }} onClick={() => setTab('marcada')}>📐 Marcada</button>
         </div>
-        {tab === 'corte' && <button style={S.btnP} onClick={() => { resetNew(); setModalNew(true) }}>+ Nueva sesión</button>}
       </div>
 
-      {tab === 'marcada' && <MarcadaSimContent style={{ flex:1, overflow:'hidden' }} />}
-      {tab === 'corte' && <div style={S.body}>
+      <MarcadaSimContent style={{ flex:1, overflow:'hidden' }} />
+
+      {false && <div style={S.body}>
         <div style={S.left}>
           <div style={S.leftHead}>Sesiones</div>
           <div style={S.leftBody}>
