@@ -297,14 +297,15 @@ function TablaPorPar({ marcadaId, productoId, talles, piezas, pares, ajustes, on
 
 // ── ModificacionesSection ─────────────────────────────────────────────────────
 
-function ModificacionesSection({ marcadaId, productoId, piezas, talles, ajustes, onReload }) {
+function ModificacionesSection({ marcadaId, productoId, piezas, talles, ajustes, catalogPiezas, onReload }) {
   const [adding, setAdding] = useState(false)
   const [f, setF]           = useState({ de_pieza:'', a_pieza:'', de_talle:'', a_talle:'', cantidad:'', nota:'' })
   const [saving, setSaving] = useState(false)
   const upd = (k, v) => setF(x => ({ ...x, [k]: v }))
 
-  const piezaNames = [...new Set(piezas.map(p => p.pieza_nombre))]
-  const mine       = ajustes.filter(a => a.marcada_id === marcadaId && a.producto_id === productoId)
+  const piezaNames     = [...new Set(piezas.map(p => p.pieza_nombre))]
+  const allPiezaNombres = [...new Set([...piezaNames, ...(catalogPiezas||[]).map(p => p.nombre).filter(Boolean)])]
+  const mine           = ajustes.filter(a => a.marcada_id === marcadaId && a.producto_id === productoId)
 
   async function save() {
     if (!f.cantidad || !f.de_talle || !f.a_talle) return
@@ -354,12 +355,12 @@ function ModificacionesSection({ marcadaId, productoId, piezas, talles, ajustes,
 
       {adding && (
         <div style={{ display:'flex', gap:5, flexWrap:'wrap', alignItems:'flex-end', background:'#fff3d4', padding:'5px 6px', border:'1px solid #d4a040' }}>
-          {[['de_pieza','De pieza','pieza'],['de_talle','De talle','talle'],['a_pieza','A pieza','pieza'],['a_talle','A talle','talle']].map(([k,label,type]) => (
+          {[['de_pieza','De pieza',piezaNames],['de_talle','De talle',talles],['a_pieza','A pieza',allPiezaNombres],['a_talle','A talle',talles]].map(([k,label,opts]) => (
             <div key={k}>
               <span style={S.lbl}>{label}</span>
               <select style={S.sel} value={f[k]} onChange={e => upd(k, e.target.value)}>
                 <option value="">—</option>
-                {(type==='pieza' ? piezaNames : talles).map(x => <option key={x} value={x}>{x}</option>)}
+                {opts.map(x => <option key={x} value={x}>{x}</option>)}
               </select>
             </div>
           ))}
@@ -770,7 +771,7 @@ function CorteMarcadaSlim({ marcada, num, prodEntry, prod, allPiezas, allAjustes
           <ModificacionesSection
             marcadaId={marcada.id} productoId={prodEntry.producto_id}
             piezas={piezas} talles={talles} ajustes={allAjustes}
-            onReload={onReload}
+            catalogPiezas={catalogPiezas} onReload={onReload}
           />
           {tallesConPrendas.length > 0 && (
             <div style={{ marginTop:8, padding:'5px 10px', background:'#f0f8f0', border:'1px solid #6b9a3a', display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
