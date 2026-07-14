@@ -307,7 +307,8 @@ function CortePiezasPorPrendaSection({ marcadaId, productoId, catalogPiezas, pie
   const disponibles = (catalogPiezas || []).filter(p => !mineSet.has(p.nombre))
 
   async function addPieza(nombre) {
-    await supabase.from('cortes_piezas_req').insert({ marcada_id: marcadaId, producto_id: productoId, pieza_nombre: nombre, cant_prenda: 1 })
+    const { error } = await supabase.from('cortes_piezas_req').insert({ marcada_id: marcadaId, producto_id: productoId, pieza_nombre: nombre, cant_prenda: 1 })
+    if (error) { alert('Error pieza: ' + error.message); return }
     onReload()
   }
   async function delPieza(id) {
@@ -391,11 +392,15 @@ function CortePedidoSection({ marcadaId, productoId, talles, pedidoTalles, onRel
     saveTimers.current[key] = setTimeout(async () => {
       const cantidad = parseInt(val) || 0
       const ex = mineMap[talle]
+      let err
       if (ex) {
-        await supabase.from('cortes_pedido_talles').update({ cantidad }).eq('id', ex.id)
+        const r = await supabase.from('cortes_pedido_talles').update({ cantidad }).eq('id', ex.id)
+        err = r.error
       } else {
-        await supabase.from('cortes_pedido_talles').insert({ marcada_id: marcadaId, producto_id: productoId, talle, cantidad })
+        const r = await supabase.from('cortes_pedido_talles').insert({ marcada_id: marcadaId, producto_id: productoId, talle, cantidad })
+        err = r.error
       }
+      if (err) { alert('Error pedido: ' + err.message); return }
       onReload()
     }, 500)
   }
