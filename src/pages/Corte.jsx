@@ -695,6 +695,193 @@ function TelaSection({ tela, marcadas, allPiezas, allAjustes, onDeleteMarcada, o
   )
 }
 
+// ── CorteMarcadaSlim ──────────────────────────────────────────────────────────
+// Config + TablaPorPar + Mods para UN producto dentro de una marcada
+
+function CorteMarcadaSlim({ marcada, num, prodEntry, prod, allPiezas, allAjustes, onDeleteMarcada, onReload }) {
+  const [collapsed, setCollapsed] = useState(false)
+  const saveTimer = useRef(null)
+  const [cfg, setCfg] = useState({
+    metros: String(marcada.metros || ''), pliegues: String(marcada.pliegues || 1),
+    total_pliegues: String(marcada.total_pliegues || ''), nota: marcada.nota || '',
+  })
+  useEffect(() => {
+    setCfg({ metros: String(marcada.metros || ''), pliegues: String(marcada.pliegues || 1),
+      total_pliegues: String(marcada.total_pliegues || ''), nota: marcada.nota || '' })
+  }, [marcada.metros, marcada.pliegues, marcada.total_pliegues, marcada.nota])
+
+  function onCfgChange(k, v) {
+    const next = { ...cfg, [k]: v }; setCfg(next)
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(async () => {
+      await supabase.from('cortes_marcadas').update({
+        metros: parseFloat(next.metros)||0, pliegues: parseFloat(next.pliegues)||1,
+        total_pliegues: parseFloat(next.total_pliegues)||0, nota: next.nota.trim()||null,
+      }).eq('id', marcada.id); onReload()
+    }, 700)
+  }
+
+  const tabla   = prod?.tabla || 'adulto'
+  const talles  = TABLAS_TALLES[tabla] || TABLAS_TALLES.adulto
+  const pares   = (parseFloat(cfg.total_pliegues)||0) / (parseFloat(cfg.pliegues)||1)
+  const metrosT = (parseFloat(cfg.metros)||0) * (parseFloat(cfg.total_pliegues)||0)
+  const piezas  = allPiezas.filter(p => p.marcada_id === marcada.id && p.producto_id === prodEntry.producto_id)
+  const ajustes = allAjustes.filter(a => a.marcada_id === marcada.id && a.producto_id === prodEntry.producto_id)
+  const telaRol     = prodEntry.tela_rol
+  const catalogPiezas = (prod?.piezas || []).filter(p => !telaRol || p.tela_rol === telaRol)
+  const result      = buildResult(piezas, pares, ajustes)
+  const prendas     = calcPrendas(result, talles)
+  const tallesConPrendas = talles.filter(t => prendas[t] > 0)
+
+  return (
+    <div style={{ border:'1px solid #d8d8d0', marginBottom:6, background:'#fafafa' }}>
+      <div style={S.marcHead}>
+        <span style={{ fontWeight:700, cursor:'pointer', color:'#333' }} onClick={() => setCollapsed(c => !c)}>
+          {collapsed ? '▶' : '▼'} Marcada {num}
+        </span>
+        <span style={{ color:'#555', fontSize:11 }}>
+          {cfg.metros||'0'}m · {cfg.pliegues||1}pp/par · {cfg.total_pliegues||0} total
+          {' = '}<b style={{ color:'#1a3a6b' }}>{isNaN(pares)||!isFinite(pares) ? '—' : fmtN(pares,1)} pares</b>
+          {' · '}<b>{fmtN(metrosT)}m</b>
+        </span>
+        <button style={S.btnD} onClick={() => onDeleteMarcada(marcada.id)}>✕</button>
+      </div>
+      {!collapsed && (
+        <div style={{ padding:'8px' }}>
+          <div style={{ display:'flex', gap:10, alignItems:'flex-end', padding:'6px 8px', background:'#f4f8fc', border:'1px solid #c8d8e8', marginBottom:8, flexWrap:'wrap' }}>
+            {[['METROS','metros',70,0.01],['PLIEGUES/PAR','pliegues',60,1],['TOTAL PLIEGUES','total_pliegues',60,1]].map(([label,k,w,step]) => (
+              <div key={k}>
+                <span style={S.lbl}>{label}</span>
+                <input style={{ ...S.inp, width:w }} type="number" step={step} value={cfg[k]} onChange={e => onCfgChange(k, e.target.value)} />
+              </div>
+            ))}
+            <div><span style={S.lbl}>PARES</span><div style={{ fontSize:13, fontWeight:700, color:'#1a3a6b', paddingBottom:2 }}>{isNaN(pares)||!isFinite(pares)?'—':fmtN(pares,1)}</div></div>
+            <div><span style={S.lbl}>METROS TOTALES</span><div style={{ fontSize:13, fontWeight:700, color:'#1a3a6b', paddingBottom:2 }}>{fmtN(metrosT)} m</div></div>
+            <div style={{ flex:1, minWidth:100 }}>
+              <span style={S.lbl}>NOTA</span>
+              <input style={{ ...S.inp, width:'100%' }} value={cfg.nota} onChange={e => onCfgChange('nota', e.target.value)} placeholder="opcional" />
+            </div>
+          </div>
+          <TablaPorPar
+            marcadaId={marcada.id} productoId={prodEntry.producto_id}
+            talles={talles} piezas={piezas} pares={pares} ajustes={ajustes}
+            onReload={onReload} catalogPiezas={catalogPiezas}
+          />
+          <ModificacionesSection
+            marcadaId={marcada.id} productoId={prodEntry.producto_id}
+            piezas={piezas} talles={talles} ajustes={allAjustes}
+            onReload={onReload}
+          />
+          {tallesConPrendas.length > 0 && (
+            <div style={{ marginTop:8, padding:'5px 10px', background:'#f0f8f0', border:'1px solid #6b9a3a', display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
+              <span style={{ fontSize:10, fontWeight:700, color:'#1a5a1a', marginRight:2 }}>✓ Resultado:</span>
+              {tallesConPrendas.map(t => <span key={t} style={S.chipOk}>{t}/{Math.floor(prendas[t])}</span>)}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── CorteTelaSection ───────────────────────────────────────────────────────────
+
+function CorteTelaSection({ tela, items, prod, allPiezas, allAjustes, onDeleteMarcada, onReload, sessionId, productoId }) {
+  const [adding, setAdding] = useState(false)
+  const label = tela ? telaLabel(tela) : 'Sin tela'
+
+  async function addMarcada() {
+    setAdding(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data: nm, error } = await supabase.from('cortes_marcadas').insert({
+      session_id: sessionId, tela_id: tela?.id || null,
+      fecha: items[0]?.marcada.fecha || today(),
+      metros: 0, pliegues: 1, total_pliegues: 0, user_id: user?.id,
+    }).select().single()
+    if (!error && nm) {
+      const tela_rol = items[0]?.prodEntry.tela_rol || null
+      await supabase.from('cortes_marcadas_productos').insert({ marcada_id: nm.id, producto_id: productoId, tela_rol })
+    }
+    setAdding(false); onReload()
+  }
+
+  return (
+    <div style={{ ...S.secWrap, margin:'4px 0', border:'1px solid #b0bcd8' }}>
+      <div style={{ ...S.telaHead, background:'linear-gradient(to bottom,#eef0f8,#dde2f0)' }}>
+        <span style={{ flex:1, fontWeight:700, color:'#1a3a6b' }}>🧵 {label}
+          <span style={{ fontWeight:400, color:'#666', marginLeft:8, fontSize:10 }}>
+            {items.length} marcada{items.length!==1?'s':''}
+          </span>
+        </span>
+        <button style={S.btnP} onClick={addMarcada} disabled={adding}>{adding?'...':'+ Marcada'}</button>
+      </div>
+      <div style={{ padding:'6px 8px' }}>
+        {items.map(({ marcada, prodEntry }, i) => (
+          <CorteMarcadaSlim key={marcada.id} marcada={marcada} num={i+1}
+            prodEntry={prodEntry} prod={prod}
+            allPiezas={allPiezas} allAjustes={allAjustes}
+            onDeleteMarcada={onDeleteMarcada} onReload={onReload}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── CorteProductoSection ───────────────────────────────────────────────────────
+
+function CorteProductoSection({ prod, entries, allPiezas, allAjustes, onDeleteMarcada, onReload, sessionId }) {
+  const [collapsed, setCollapsed] = useState(false)
+  const tabla  = prod?.tabla || 'adulto'
+  const talles = TABLAS_TALLES[tabla] || TABLAS_TALLES.adulto
+
+  const telaMap = {}; const telaList = []
+  for (const entry of entries) {
+    const tid = entry.marcada.telas?.id || '__none__'
+    if (!telaMap[tid]) { telaMap[tid] = { tela: entry.marcada.telas, items: [] }; telaList.push(telaMap[tid]) }
+    telaMap[tid].items.push(entry)
+  }
+
+  const totals = {}
+  for (const { marcada, prodEntry } of entries) {
+    const piezas  = allPiezas.filter(p => p.marcada_id === marcada.id && p.producto_id === prodEntry.producto_id)
+    const ajustes = allAjustes.filter(a => a.marcada_id === marcada.id && a.producto_id === prodEntry.producto_id)
+    const result  = buildResult(piezas, calcPares(marcada), ajustes)
+    const prendas = calcPrendas(result, talles)
+    for (const t of talles) totals[t] = (totals[t] || 0) + (prendas[t] || 0)
+  }
+  const tallesConPrendas = talles.filter(t => totals[t] > 0)
+
+  return (
+    <div style={{ margin:'4px 6px', border:'2px solid #a0a8c0', background:'#f0f0f8', boxShadow:'1px 1px 0 #b8b8b8', marginBottom:8 }}>
+      <div style={{ background:'linear-gradient(to bottom,#e8ecf8,#d8dff0)', padding:'5px 10px', display:'flex', justifyContent:'space-between', alignItems:'center', cursor:'pointer', borderBottom:'1px solid #a0a8c0' }}
+        onClick={() => setCollapsed(c => !c)}>
+        <span style={{ fontWeight:700, fontSize:12, color:'#1a2a6b' }}>
+          {collapsed ? '▶' : '▼'} 📦 {prod?.nombre || '?'}
+          <span style={{ marginLeft:6, fontSize:10, color:'#888', fontWeight:400 }}>[{tabla.toUpperCase()}]</span>
+        </span>
+        {tallesConPrendas.length > 0 && (
+          <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
+            {tallesConPrendas.map(t => <span key={t} style={S.chipOk}>{t}/{Math.floor(totals[t])}</span>)}
+          </div>
+        )}
+      </div>
+      {!collapsed && (
+        <div style={{ padding:'8px 10px' }}>
+          {telaList.map(({ tela, items }) => (
+            <CorteTelaSection key={tela?.id || '__none__'}
+              tela={tela} items={items} prod={prod}
+              allPiezas={allPiezas} allAjustes={allAjustes}
+              onDeleteMarcada={onDeleteMarcada} onReload={onReload}
+              sessionId={sessionId} productoId={entries[0].prodEntry.producto_id}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── ResultadoGlobal ───────────────────────────────────────────────────────────
 
 function ResultadoGlobal({ marcadas, allPiezas, allAjustes }) {
@@ -917,12 +1104,19 @@ export default function Corte({ onMenuClick }) {
   }
 
   const telaGroups = []
+  const productGroups = []
   if (fichaData) {
-    const seen = {}
+    const seenTela = {}
+    const seenProd = {}
     for (const m of fichaData.marcadas) {
       const tid = m.telas?.id || '__none__'
-      if (!seen[tid]) { seen[tid] = { tela:m.telas, marcadas:[] }; telaGroups.push(seen[tid]) }
-      seen[tid].marcadas.push(m)
+      if (!seenTela[tid]) { seenTela[tid] = { tela:m.telas, marcadas:[] }; telaGroups.push(seenTela[tid]) }
+      seenTela[tid].marcadas.push(m)
+      for (const pe of (m.cortes_marcadas_productos || [])) {
+        const pid = pe.producto_id
+        if (!seenProd[pid]) { seenProd[pid] = { prod: pe.productos, entries: [] }; productGroups.push(seenProd[pid]) }
+        seenProd[pid].entries.push({ marcada: m, prodEntry: pe })
+      }
     }
   }
 
@@ -991,7 +1185,7 @@ export default function Corte({ onMenuClick }) {
                     ✂ Sesión {fmtF(fichaData.marcadas?.[0]?.fecha)}
                   </div>
                   <div style={{ fontSize:10, color:'#6a4a10', marginTop:2 }}>
-                    {fichaData.marcadas?.length} marcada{fichaData.marcadas?.length !== 1 ? 's' : ''} · {telaGroups.length} tela{telaGroups.length !== 1 ? 's' : ''}
+                    {fichaData.marcadas?.length} marcada{fichaData.marcadas?.length !== 1 ? 's' : ''} · {productGroups.length} producto{productGroups.length !== 1 ? 's' : ''}
                   </div>
                 </div>
                 <button style={S.btn} onClick={() => setModalTela(true)}>+ tela</button>
@@ -1012,16 +1206,14 @@ export default function Corte({ onMenuClick }) {
                 </div>
               </div>
 
-              {telaGroups.map((g, i) => (
-                <TelaSection key={g.tela?.id || i}
-                  tela={g.tela} marcadas={g.marcadas}
+              {productGroups.map(pg => (
+                <CorteProductoSection key={pg.prod?.id || 'noprod'}
+                  prod={pg.prod} entries={pg.entries}
                   allPiezas={fichaData.piezas} allAjustes={fichaData.ajustes}
                   onDeleteMarcada={deleteMarcada} onReload={reloadFicha}
                   sessionId={fichaData.session_id}
                 />
               ))}
-
-              <ResultadoGlobal marcadas={fichaData.marcadas} allPiezas={fichaData.piezas} allAjustes={fichaData.ajustes} />
               <div style={{ height:16 }} />
             </>
           ) : (
