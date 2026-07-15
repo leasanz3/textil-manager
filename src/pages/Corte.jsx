@@ -937,7 +937,7 @@ function TelaSection({ tela, marcadas, allPiezas, allAjustes, onDeleteMarcada, o
 // ── CorteMarcadaSlim ──────────────────────────────────────────────────────────
 // Config + TablaPorPar + Mods para UN producto dentro de una marcada
 
-function CorteMarcadaSlim({ marcada, num, prodEntry, prod, allPiezas, allAjustes, onDeleteMarcada, onReload }) {
+function CorteMarcadaSlim({ marcada, num, prodEntry, prod, talles: tallesProp, allPiezas, allAjustes, onDeleteMarcada, onReload }) {
   const [collapsed, setCollapsed] = useState(false)
   const saveTimer = useRef(null)
   const [cfg, setCfg] = useState({
@@ -961,7 +961,7 @@ function CorteMarcadaSlim({ marcada, num, prodEntry, prod, allPiezas, allAjustes
   }
 
   const tabla   = prod?.tabla || 'adulto'
-  const talles  = TABLAS_TALLES[tabla] || TABLAS_TALLES.adulto
+  const talles  = tallesProp || TABLAS_TALLES[tabla] || TABLAS_TALLES.adulto
   const pares   = (parseFloat(cfg.total_pliegues)||0) / (parseFloat(cfg.pliegues)||1)
   const metrosT = (parseFloat(cfg.metros)||0) * (parseFloat(cfg.total_pliegues)||0)
   const piezas  = allPiezas.filter(p => p.marcada_id === marcada.id && p.producto_id === prodEntry.producto_id)
@@ -1025,7 +1025,7 @@ function CorteMarcadaSlim({ marcada, num, prodEntry, prod, allPiezas, allAjustes
 
 // ── CorteTelaSection ───────────────────────────────────────────────────────────
 
-function CorteTelaSection({ tela, items, prod, allPiezas, allAjustes, piezasReq, onDeleteMarcada, onReload, sessionId, productoId }) {
+function CorteTelaSection({ tela, items, prod, talles: tallesProp, allPiezas, allAjustes, piezasReq, onDeleteMarcada, onReload, sessionId, productoId }) {
   const [adding, setAdding] = useState(false)
   const label = tela ? telaLabel(tela) : 'Sin tela'
   const metrosTotal = items.reduce((s, { marcada }) => s + (parseFloat(marcada.metros)||0) * (parseFloat(marcada.total_pliegues)||0), 0)
@@ -1070,7 +1070,7 @@ function CorteTelaSection({ tela, items, prod, allPiezas, allAjustes, piezasReq,
         )}
         {items.map(({ marcada, prodEntry }, i) => (
           <CorteMarcadaSlim key={marcada.id} marcada={marcada} num={i+1}
-            prodEntry={prodEntry} prod={prod}
+            prodEntry={prodEntry} prod={prod} talles={tallesProp}
             allPiezas={allPiezas} allAjustes={allAjustes}
             onDeleteMarcada={onDeleteMarcada} onReload={onReload}
           />
@@ -1084,8 +1084,16 @@ function CorteTelaSection({ tela, items, prod, allPiezas, allAjustes, piezasReq,
 
 function CorteProductoSection({ prod, entries, allPiezas, allAjustes, piezasReq, pedidoTalles, onDeleteMarcada, onReload, sessionId }) {
   const [collapsed, setCollapsed] = useState(false)
-  const tabla  = prod?.tabla || 'adulto'
-  const talles = TABLAS_TALLES[tabla] || TABLAS_TALLES.adulto
+  const tabla      = prod?.tabla || 'adulto'
+  const tablaExtra = entries.find(e => e.prodEntry.tabla_extra)?.prodEntry.tabla_extra || ''
+  const talles     = [...(TABLAS_TALLES[tabla]||TABLAS_TALLES.adulto), ...(tablaExtra ? TABLAS_TALLES[tablaExtra]||[] : [])]
+
+  async function setTablaExtra(val) {
+    for (const { prodEntry } of entries) {
+      await supabase.from('cortes_marcadas_productos').update({ tabla_extra: val||null }).eq('id', prodEntry.id)
+    }
+    onReload()
+  }
 
   const telaMap = {}; const telaList = []
   for (const entry of entries) {
@@ -1111,12 +1119,14 @@ function CorteProductoSection({ prod, entries, allPiezas, allAjustes, piezasReq,
         <span style={{ fontWeight:700, fontSize:12, color:'#1a2a6b' }}>
           {collapsed ? '▶' : '▼'} 📦 {prod?.nombre || '?'}
           <span style={{ marginLeft:6, fontSize:10, color:'#888', fontWeight:400 }}>[{tabla.toUpperCase()}]</span>
+          {tablaExtra && <span style={{ marginLeft:5, fontSize:10, fontWeight:700, color:'#6a1a6a' }}>+{tablaExtra.toUpperCase()}</span>}
         </span>
-        {tallesConPrendas.length > 0 && (
-          <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
-            {tallesConPrendas.map(t => <span key={t} style={S.chipOk}>{t}/{Math.floor(totals[t])}</span>)}
-          </div>
-        )}
+        <div style={{ display:'flex', gap:6, alignItems:'center', flexWrap:'wrap' }}>
+          {tallesConPrendas.length > 0 && tallesConPrendas.map(t => <span key={t} style={S.chipOk}>{t}/{Math.floor(totals[t])}</span>)}
+          <button style={{ ...S.btnS, fontSize:9 }} onClick={e => { e.stopPropagation(); setTablaExtra(tablaExtra ? '' : 'nino') }}>
+            {tablaExtra ? '✕ niño' : '+ niño'}
+          </button>
+        </div>
       </div>
       {!collapsed && (
         <div style={{ padding:'8px 10px' }}>
@@ -1126,7 +1136,7 @@ function CorteProductoSection({ prod, entries, allPiezas, allAjustes, piezasReq,
           />
           {telaList.map(({ tela, items }) => (
             <CorteTelaSection key={tela?.id || '__none__'}
-              tela={tela} items={items} prod={prod}
+              tela={tela} items={items} prod={prod} talles={talles}
               allPiezas={allPiezas} allAjustes={allAjustes}
               piezasReq={piezasReq}
               onDeleteMarcada={onDeleteMarcada} onReload={onReload}
@@ -1247,7 +1257,7 @@ export default function Corte({ onMenuClick }) {
       .from('cortes_marcadas')
       .select(`id, session_id, fecha, created_at, metros, pliegues, total_pliegues, nota,
         telas(id, tipo, color),
-        cortes_marcadas_productos!marcada_id(id, producto_id, tela_rol,
+        cortes_marcadas_productos!marcada_id(id, producto_id, tela_rol, tabla_extra,
           productos(id, nombre, tabla, cara_uso, piezas, tela1_id, tela2_id, rib_id))`)
       .eq('session_id', sid).order('created_at')
     if (!marcadas || marcadas.length === 0) {
