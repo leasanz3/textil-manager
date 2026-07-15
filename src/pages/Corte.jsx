@@ -307,9 +307,8 @@ function CortePiezasPorPrendaSection({ marcadaId, productoId, catalogPiezas, pie
   const disponibles = (catalogPiezas || []).filter(p => !mineSet.has(p.nombre))
 
   async function addPieza(nombre) {
-    const payload = { marcada_id: marcadaId, producto_id: productoId, pieza_nombre: nombre, cant_prenda: 1 }
-    const { error } = await supabase.from('cortes_piezas_req').insert(payload)
-    if (error) { alert('Error pieza: ' + error.message + '\n' + JSON.stringify(payload)); return }
+    const { error } = await supabase.from('cortes_piezas_req').insert({ marcada_id: marcadaId, producto_id: productoId, pieza_nombre: nombre, cant_prenda: 1 })
+    if (error) { alert('Error: ' + error.message); return }
     onReload()
   }
   async function delPieza(id) {
@@ -398,12 +397,10 @@ function CortePedidoSection({ marcadaId, productoId, talles, pedidoTalles, onRel
         const r = await supabase.from('cortes_pedido_talles').update({ cantidad }).eq('id', ex.id)
         err = r.error
       } else {
-        const payload = { marcada_id: marcadaId, producto_id: productoId, talle, cantidad }
-        const r = await supabase.from('cortes_pedido_talles').insert(payload)
+        const r = await supabase.from('cortes_pedido_talles').insert({ marcada_id: marcadaId, producto_id: productoId, talle, cantidad })
         err = r.error
-        if (err) { alert('Error pedido: ' + err.message + '\n' + JSON.stringify(payload)); return }
       }
-      if (err) { alert('Error pedido upd: ' + err.message); return }
+      if (err) { alert('Error: ' + err.message); return }
       onReload()
     }, 500)
   }
