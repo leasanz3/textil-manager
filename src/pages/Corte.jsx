@@ -939,6 +939,8 @@ function TelaSection({ tela, marcadas, allPiezas, allAjustes, onDeleteMarcada, o
 
 function CorteMarcadaSlim({ marcada, num, prodEntry, prod, talles: tallesProp, allPiezas, allAjustes, onDeleteMarcada, onReload }) {
   const [collapsed, setCollapsed] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const fileRef = useRef(null)
   const saveTimer = useRef(null)
   const [cfg, setCfg] = useState({
     metros: String(marcada.metros || ''), pliegues: String(marcada.pliegues || 1),
@@ -958,6 +960,24 @@ function CorteMarcadaSlim({ marcada, num, prodEntry, prod, talles: tallesProp, a
         total_pliegues: parseFloat(next.total_pliegues)||0, nota: next.nota.trim()||null,
       }).eq('id', marcada.id); onReload()
     }, 700)
+  }
+
+  async function uploadArchivo(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    const ext  = file.name.split('.').pop()
+    const path = `${marcada.id}/${Date.now()}.${ext}`
+    const { error: upErr } = await supabase.storage.from('marcada-archivos').upload(path, file, { upsert: true })
+    if (upErr) { alert('Error subiendo: ' + upErr.message); setUploading(false); return }
+    const { data: { publicUrl } } = supabase.storage.from('marcada-archivos').getPublicUrl(path)
+    await supabase.from('cortes_marcadas').update({ archivo_url: publicUrl }).eq('id', marcada.id)
+    setUploading(false); onReload()
+  }
+
+  async function deleteArchivo() {
+    await supabase.from('cortes_marcadas').update({ archivo_url: null }).eq('id', marcada.id)
+    onReload()
   }
 
   const tabla   = prod?.tabla || 'adulto'
@@ -1000,6 +1020,23 @@ function CorteMarcadaSlim({ marcada, num, prodEntry, prod, talles: tallesProp, a
               <span style={S.lbl}>NOTA</span>
               <input style={{ ...S.inp, width:'100%' }} value={cfg.nota} onChange={e => onCfgChange('nota', e.target.value)} placeholder="opcional" />
             </div>
+          </div>
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8, padding:'4px 8px', background:'#f8f4ec', border:'1px solid #d0c8b0' }}>
+            <span style={{ fontSize:10, fontWeight:700, color:'#5a4a10' }}>📎 Archivo:</span>
+            {marcada.archivo_url ? (
+              <>
+                <a href={marcada.archivo_url} target="_blank" rel="noreferrer"
+                  style={{ fontSize:10, color:'#1a3a6b', textDecoration:'underline', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                  {decodeURIComponent(marcada.archivo_url.split('/').pop().replace(/^\d+\./, ''))}
+                </a>
+                <button style={S.btnD} onClick={deleteArchivo}>✕</button>
+              </>
+            ) : (
+              <button style={{ ...S.btnS, fontSize:10 }} onClick={() => fileRef.current?.click()} disabled={uploading}>
+                {uploading ? 'Subiendo…' : '+ subir PDF / imagen'}
+              </button>
+            )}
+            <input ref={fileRef} type="file" accept=".pdf,image/*" style={{ display:'none' }} onChange={uploadArchivo} />
           </div>
           <TablaPorPar
             marcadaId={marcada.id} productoId={prodEntry.producto_id}
@@ -1255,7 +1292,7 @@ export default function Corte({ onMenuClick }) {
     if (!silent) { setLoadingFicha(true); setFichaData(null) }
     let { data:marcadas } = await supabase
       .from('cortes_marcadas')
-      .select(`id, session_id, fecha, created_at, metros, pliegues, total_pliegues, nota,
+      .select(`id, session_id, fecha, created_at, metros, pliegues, total_pliegues, nota, archivo_url,
         telas(id, tipo, color),
         cortes_marcadas_productos!marcada_id(id, producto_id, tela_rol, tabla_extra,
           productos(id, nombre, tabla, cara_uso, piezas, tela1_id, tela2_id, rib_id))`)
@@ -1263,9 +1300,9 @@ export default function Corte({ onMenuClick }) {
     if (!marcadas || marcadas.length === 0) {
       const { data:single } = await supabase
         .from('cortes_marcadas')
-        .select(`id, session_id, fecha, created_at, metros, pliegues, total_pliegues, nota,
+        .select(`id, session_id, fecha, created_at, metros, pliegues, total_pliegues, nota, archivo_url,
           telas(id, tipo, color),
-          cortes_marcadas_productos!marcada_id(id, producto_id, tela_rol,
+          cortes_marcadas_productos!marcada_id(id, producto_id, tela_rol, tabla_extra,
             productos(id, nombre, tabla, cara_uso, piezas, tela1_id, tela2_id, rib_id))`)
         .eq('id', sid)
       marcadas = single || []
