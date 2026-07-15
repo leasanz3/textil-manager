@@ -1472,7 +1472,16 @@ export default function Corte({ onMenuClick }) {
                 </div>
               </div>
 
-              {productGroups.map(pg => (
+              {productGroups.length === 0 ? (
+                telaGroups.map(({ tela, marcadas }) => (
+                  <TelaSection key={tela?.id || '__none__'}
+                    tela={tela} marcadas={marcadas}
+                    allPiezas={fichaData.piezas} allAjustes={fichaData.ajustes}
+                    onDeleteMarcada={deleteMarcada} onReload={reloadFicha}
+                    sessionId={fichaData.session_id}
+                  />
+                ))
+              ) : productGroups.map(pg => (
                 <CorteProductoSection key={pg.prod?.id || 'noprod'}
                   prod={pg.prod} entries={pg.entries}
                   allPiezas={fichaData.piezas} allAjustes={fichaData.ajustes}
