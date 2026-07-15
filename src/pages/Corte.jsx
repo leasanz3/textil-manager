@@ -1235,8 +1235,8 @@ export default function Corte({ onMenuClick }) {
     setSessions(list); setLoadingList(false)
   }
 
-  async function fetchFicha(sid) {
-    setLoadingFicha(true); setFichaData(null)
+  async function fetchFicha(sid, silent = false) {
+    if (!silent) { setLoadingFicha(true); setFichaData(null) }
     let { data:marcadas } = await supabase
       .from('cortes_marcadas')
       .select(`id, session_id, fecha, created_at, metros, pliegues, total_pliegues, nota,
@@ -1268,7 +1268,7 @@ export default function Corte({ onMenuClick }) {
   }
 
   function selectSession(sid) { setSelectedSid(sid); fetchFicha(sid) }
-  async function reloadFicha() { if (selectedSid) { await fetchFicha(selectedSid); await fetchSessions() } }
+  async function reloadFicha() { if (selectedSid) { await fetchFicha(selectedSid, true); await fetchSessions() } }
 
   async function createSession() {
     if (!nTelaId && !window.confirm('No seleccionaste tela. ¿Continuar igual?')) return
