@@ -1028,6 +1028,7 @@ function CorteMarcadaSlim({ marcada, num, prodEntry, prod, allPiezas, allAjustes
 function CorteTelaSection({ tela, items, prod, allPiezas, allAjustes, piezasReq, onDeleteMarcada, onReload, sessionId, productoId }) {
   const [adding, setAdding] = useState(false)
   const label = tela ? telaLabel(tela) : 'Sin tela'
+  const metrosTotal = items.reduce((s, { marcada }) => s + (parseFloat(marcada.metros)||0) * (parseFloat(marcada.total_pliegues)||0), 0)
 
   async function addMarcada() {
     setAdding(true)
@@ -1051,6 +1052,11 @@ function CorteTelaSection({ tela, items, prod, allPiezas, allAjustes, piezasReq,
           <span style={{ fontWeight:400, color:'#666', marginLeft:8, fontSize:10 }}>
             {items.length} marcada{items.length!==1?'s':''}
           </span>
+          {metrosTotal > 0 && (
+            <span style={{ marginLeft:10, fontSize:11, fontWeight:700, color:'#1a3a6b' }}>
+              {fmtN(metrosTotal)} m
+            </span>
+          )}
         </span>
         <button style={S.btnP} onClick={addMarcada} disabled={adding}>{adding?'...':'+ Marcada'}</button>
       </div>
