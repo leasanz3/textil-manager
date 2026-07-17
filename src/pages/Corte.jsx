@@ -472,13 +472,47 @@ function CorteResumenSection({ entries, allPiezas, allAjustes, piezasReq, pedido
   const piezas = Object.keys(reqMap)
   if (!piezas.length) return null
 
+  // prendas que se pueden armar por talle (mínimo entre todas las piezas)
+  const prendasOk = {}
+  const tallesActivos = talles.filter(t => (pedidoMap[t]||0) > 0 || piezas.some(p => (cortadoMap[p]?.[t]||0) > 0))
+  for (const t of tallesActivos) {
+    const min = Math.min(...piezas.map(p => Math.floor((cortadoMap[p]?.[t] || 0) / (reqMap[p] || 1))))
+    prendasOk[t] = isFinite(min) ? min : 0
+  }
+  const totalPedido   = tallesActivos.reduce((s, t) => s + (pedidoMap[t] || 0), 0)
+  const totalOk       = tallesActivos.reduce((s, t) => s + prendasOk[t], 0)
+  const totalFaltan   = tallesActivos.reduce((s, t) => s + Math.max(0, (pedidoMap[t]||0) - prendasOk[t]), 0)
+
   return (
     <div style={{ marginBottom:8, border:'1px solid #9898c0', background:'#f4f4fc' }}>
       <div style={{ background:'linear-gradient(to bottom,#e4e4f4,#d4d4ec)', padding:'4px 8px', display:'flex', justifyContent:'space-between', alignItems:'center', cursor:'pointer' }} onClick={() => setCollapsed(c => !c)}>
         <span style={{ fontWeight:700, fontSize:10, color:'#2a2a6b' }}>{collapsed ? '▶' : '▼'} RESUMEN DE CORTES</span>
+        {totalPedido > 0 && (
+          <span style={{ fontSize:10, color: totalFaltan === 0 ? '#1a6a1a' : '#aa1a1a', fontWeight:700 }}>
+            {totalOk}/{totalPedido} prendas {totalFaltan === 0 ? '✓' : `· faltan ${totalFaltan}`}
+          </span>
+        )}
       </div>
       {!collapsed && (
         <div style={{ padding:'6px 8px', overflowX:'auto' }}>
+          {tallesActivos.length > 0 && (
+            <div style={{ display:'flex', flexWrap:'wrap', gap:4, marginBottom:8, padding:'5px 8px', background:'#eeeef8', border:'1px solid #b0b0d8' }}>
+              <span style={{ fontSize:10, fontWeight:700, color:'#2a2a6b', marginRight:4, alignSelf:'center' }}>Prendas completas:</span>
+              {tallesActivos.map(t => {
+                const ok     = prendasOk[t]
+                const pedido = pedidoMap[t] || 0
+                const faltan = Math.max(0, pedido - ok)
+                const color  = faltan === 0 && pedido > 0 ? '#1a6a1a' : faltan > 0 ? '#aa1a1a' : '#444'
+                const bg     = faltan === 0 && pedido > 0 ? '#d0f0d0' : faltan > 0 ? '#f8d8d8' : '#e8e8e8'
+                return (
+                  <span key={t} style={{ fontSize:11, fontWeight:700, color, background:bg, border:`1px solid ${color}`, padding:'1px 7px' }}>
+                    {t}: {ok}{pedido > 0 ? `/${pedido}` : ''}
+                    {faltan > 0 && <span style={{ fontWeight:400, fontSize:10 }}> (−{faltan})</span>}
+                  </span>
+                )
+              })}
+            </div>
+          )}
           <table style={{ ...S.tbl, tableLayout:'auto' }}>
             <thead>
               <tr>
