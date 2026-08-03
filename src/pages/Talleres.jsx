@@ -361,7 +361,9 @@ function ModalEditar({ mov, onClose, onSave }) {
     for (const it of (mov.taller_movimientos_items || [])) {
       const pid = it.producto_id
       if (!byProd[pid]) {
-        byProd[pid] = { producto_id: pid, prodQ: it.productos?.nombre || '', prodRes: [], tabla: 'adulto', talles: TALLES_ADULTO, conNino: false, cantidades: {}, observacion: it.observacion || '' }
+        const tabla  = it.productos?.tabla || 'adulto'
+        const talles = TABLAS_TALLES[tabla] || TALLES_ADULTO
+        byProd[pid] = { producto_id: pid, prodQ: it.productos?.nombre || '', prodRes: [], tabla, talles, conNino: false, cantidades: {}, observacion: it.observacion || '' }
       }
       byProd[pid].cantidades[it.talle] = String(it.cantidad)
       if (TALLES_NINO.includes(it.talle)) {
@@ -1029,7 +1031,7 @@ export default function Talleres({ onMenuClick }) {
         .select(`id, tipo, fecha, nota, monto, created_at,
           contactos(id, nombre),
           taller_movimientos_items(id, producto_id, talle, cantidad, observacion,
-            productos(id, nombre))`)
+            productos(id, nombre, tabla))`)
         .order('fecha', { ascending: false })
         .order('created_at', { ascending: false }),
       supabase.from('taller_control_items')
