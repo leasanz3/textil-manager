@@ -894,30 +894,11 @@ export default function Productos({ onMenuClick }) {
                 )}
               </div>
 
-              {/* Molde y avíos vinculados */}
-              {(vistaFicha.molde || vistaFicha.avios_ids?.length > 0) && (
-                <div style={{ marginBottom: 16 }}>
-                  {vistaFicha.molde && (
-                    <div style={{ fontSize: 12, marginBottom: 6 }}>
-                      <span style={{ color: 'var(--text2)', marginRight: 6 }}>Molde:</span>
-                      <strong>{vistaFicha.molde}</strong>
-                    </div>
-                  )}
-                  {vistaFicha.avios_ids?.length > 0 && (
-                    <div>
-                      <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Avíos</div>
-                      {vistaFicha.avios_ids.map((av, i) => {
-                        const cat = avios.find(a => a.id === av.avio_id)
-                        return (
-                          <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '5px 0', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
-                            <span style={{ fontWeight: 600, flex: 2 }}>🧷 {av.nombre}</span>
-                            {av.cantidad && <span style={{ color: 'var(--text2)' }}>{av.cantidad} {cat?.unidad || av.unidad || 'u.'}</span>}
-                            {cat?.precio != null && <span style={{ color: 'var(--accent)', fontSize: 11 }}>ref. ${Number(cat.precio).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
+              {/* Molde */}
+              {vistaFicha.molde && (
+                <div style={{ fontSize: 12, marginBottom: 12 }}>
+                  <span style={{ color: 'var(--text2)', marginRight: 6 }}>Molde:</span>
+                  <strong>{vistaFicha.molde}</strong>
                 </div>
               )}
 
@@ -989,6 +970,23 @@ export default function Productos({ onMenuClick }) {
                   </div>
                 ) : null}
               </div>
+
+              {/* Avíos vinculados */}
+              {vistaFicha.avios_ids?.length > 0 && (
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: 1 }}>🧷 Avíos</div>
+                  {vistaFicha.avios_ids.map((av, i) => {
+                    const cat = avios.find(a => a.id === av.avio_id)
+                    return (
+                      <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
+                        <span style={{ fontWeight: 600, flex: 2 }}>{av.nombre}</span>
+                        {av.cantidad && <span style={{ color: 'var(--text2)' }}>{av.cantidad} {cat?.unidad || av.unidad || 'u.'}</span>}
+                        {cat?.precio != null && <span style={{ color: 'var(--accent)', fontSize: 11 }}>ref. ${Number(cat.precio).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
 
               {/* Piezas */}
               {vistaFicha.piezas?.length > 0 && (
@@ -1089,7 +1087,7 @@ export default function Productos({ onMenuClick }) {
                 const COSTO_KEYS = [
                   { key: 'costo_confeccion',  label: 'Confección'        },
                   { key: 'costo_corte',       label: 'Corte'             },
-                  { key: 'costo_elasticos',   label: 'Elásticos y avíos' },
+                  { key: 'costo_elasticos',   label: 'Elásticos'         },
                   { key: 'costo_otros',       label: 'Otros costos'      },
                 ]
                 const estampadosConPrecio = editandoCostos
@@ -1118,11 +1116,18 @@ export default function Productos({ onMenuClick }) {
                 })
 
                 const subtotalTelas = telasConCosto.reduce((a, t) => a + (t.costoUYU ?? 0), 0)
+                const aviosConCosto = (vistaFicha.avios_ids || []).map(av => {
+                  const cat = avios.find(a => a.id === av.avio_id)
+                  const precio = parseFloat(cat?.precio) || 0
+                  const cantidad = parseFloat(av.cantidad) || 1
+                  return { nombre: av.nombre, unidad: cat?.unidad || av.unidad || 'u.', cantidad, precio, costo: precio * cantidad }
+                })
+                const subtotalAvios = aviosConCosto.reduce((s, a) => s + a.costo, 0)
                 const subtotalOtros = COSTO_KEYS.reduce((a, c) => {
                   const v = editandoCostos ? costosDraft[c.key] : vistaFicha[c.key]
                   return a + (parseFloat(v) || 0)
                 }, 0) + estampadosConPrecio.reduce((a, e) => a + (parseFloat(e.precio) || 0), 0)
-                const costoTotal = subtotalTelas + subtotalOtros
+                const costoTotal = subtotalTelas + subtotalAvios + subtotalOtros
                 const fmtUYU  = n => '$ ' + Number(n || 0).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
                 const fmtUSD  = n => 'U$D ' + Number(n || 0).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -1224,6 +1229,25 @@ export default function Productos({ onMenuClick }) {
                           <td style={{ ...TD, textAlign: 'right', fontWeight: 700 }}>{fmtUYU(subtotalTelas)}</td>
                           <td style={TD}></td>
                         </tr>
+
+                        {/* — Avíos — */}
+                        {aviosConCosto.length > 0 && (<>
+                          <tr><td colSpan={5} style={SEC}>🧷 Avíos</td></tr>
+                          {aviosConCosto.map((av, i) => (
+                            <tr key={i} onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'} onMouseLeave={e => e.currentTarget.style.background = ''}>
+                              <td style={TD}>{av.nombre}</td>
+                              <td style={{ ...TD, textAlign: 'center' }}>{av.cantidad} {av.unidad}</td>
+                              <td style={{ ...TD, textAlign: 'right', color: '#555' }}>{av.precio > 0 ? fmtUYU(av.precio) : '—'}</td>
+                              <td style={{ ...TD, textAlign: 'right', fontWeight: 700 }}>{av.costo > 0 ? fmtUYU(av.costo) : '—'}</td>
+                              <td style={{ ...TD, color: '#888', fontStyle: 'italic', fontSize: 10 }}>precio catálogo</td>
+                            </tr>
+                          ))}
+                          <tr style={{ background: '#f4f8f0' }}>
+                            <td colSpan={3} style={{ ...TD, fontWeight: 700 }}>Subtotal avíos</td>
+                            <td style={{ ...TD, textAlign: 'right', fontWeight: 700 }}>{fmtUYU(subtotalAvios)}</td>
+                            <td style={TD}></td>
+                          </tr>
+                        </>)}
 
                         {/* — Otros costos — */}
                         <tr><td colSpan={5} style={SEC}>✂ Confección / Estampado / Otros</td></tr>
