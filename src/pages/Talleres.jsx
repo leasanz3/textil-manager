@@ -13,8 +13,14 @@ const TIPOS = [
 ]
 const TIPO_BY_ID = Object.fromEntries(TIPOS.map(t => [t.id, t]))
 
-const TALLES_ADULTO = ['XS', 'S', 'M', 'L', 'XL', 'XXL']
-const TALLES_NINO   = ['2', '4', '6', '8', '10', '12', '14', '16']
+const TABLAS_TALLES = {
+  adulto:   ['XS', 'S', 'M', 'L', 'XL', 'XXL'],
+  nino:     ['2', '4', '6', '8', '10', '12', '14', '16'],
+  malla:    ['40', '42', '44', '46', '48', '50', '52'],
+  mallaesp: ['54', '56', '58'],
+}
+const TALLES_ADULTO = TABLAS_TALLES.adulto
+const TALLES_NINO   = TABLAS_TALLES.nino
 
 const S = {
   wrap:     { display: 'flex', flexDirection: 'column', height: '100vh', fontFamily: F, fontSize: 11, color: '#000', background: '#d4d0c8' },
@@ -72,7 +78,7 @@ function ItemProd({ item, index, tipo, onChange, onRemove, timers }) {
   }
 
   function pickProd(p) {
-    const talles = p.tabla === 'nino' ? TALLES_NINO : TALLES_ADULTO
+    const talles = TABLAS_TALLES[p.tabla] || TALLES_ADULTO
     onChange(index, { ...item, producto_id: p.id, prodQ: p.nombre, prodRes: [], tabla: p.tabla, talles, conNino: false, cantidades: {}, observacion: '' })
   }
 
@@ -94,7 +100,7 @@ function ItemProd({ item, index, tipo, onChange, onRemove, timers }) {
           <input style={{ ...S.inp, width: '100%' }} value={item.prodQ} onChange={e => onProdInput(e.target.value)} placeholder="Buscar producto..." />
           <AcList items={item.prodRes || []} onPick={pickProd} label={r => r.nombre} />
         </div>
-        {item.producto_id && item.tabla !== 'nino' && (
+        {item.producto_id && item.tabla === 'adulto' && (
           <button style={{ ...S.btn, fontSize: 10, background: item.conNino ? '#4a2a6a' : undefined, color: item.conNino ? '#fff' : undefined }}
             onClick={toggleNino}>{item.conNino ? '✕ niño' : '+ niño'}</button>
         )}
