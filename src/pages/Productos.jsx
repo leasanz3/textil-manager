@@ -1362,7 +1362,8 @@ export default function Productos({ onMenuClick }) {
                               </td>
                             </tr>
                           )
-                          const margen = costoTotal > 0 ? ((pv - costoTotal) / costoTotal) * 100 : null
+                          const pvSinIva = vistaFicha.precio_iva === 'inc' ? pv / 1.22 : pv
+                          const margen = costoTotal > 0 ? ((pvSinIva - costoTotal) / costoTotal) * 100 : null
                           const margenColor = margen == null ? '#888' : margen >= 0 ? '#1a7a1a' : '#c06060'
                           return (
                             <tr style={{ background: '#f0f8f0' }}>
