@@ -279,6 +279,7 @@ export default function Productos({ onMenuClick }) {
     tipo_cambio: '',
     estampados: [],
     precio_venta: '',
+    precio_iva: 'exc',
     cara_uso: '',
     costo_confeccion: '', costo_corte: '', costo_elasticos: '', costo_otros: '',
   }
@@ -460,6 +461,7 @@ export default function Productos({ onMenuClick }) {
       costo_elasticos:         p.costo_elasticos         != null ? String(p.costo_elasticos)         : '',
       estampados:              p.estampados              || [],
       precio_venta:            p.precio_venta            != null ? String(p.precio_venta)            : '',
+      precio_iva:              p.precio_iva              || 'exc',
       cara_uso:                p.cara_uso                || '',
       costo_otros:             p.costo_otros             != null ? String(p.costo_otros)             : '',
     })
@@ -702,6 +704,7 @@ export default function Productos({ onMenuClick }) {
       costo_elasticos:          parseFloat(form.costo_elasticos)         || 0,
       estampados:               (form.estampados || []).map(e => ({ ...e, precio: parseFloat(e.precio) || 0 })),
       precio_venta:             parseFloat(form.precio_venta) || null,
+      precio_iva:               form.precio_iva || null,
       cara_uso:                 form.cara_uso.trim() || null,
       costo_otros:              parseFloat(form.costo_otros)             || 0,
     }
@@ -889,7 +892,12 @@ export default function Productos({ onMenuClick }) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <span style={{ color: 'var(--text2)' }}>Precio de venta:</span>
                   {vistaFicha.precio_venta != null
-                    ? <strong style={{ color: 'var(--success)', fontSize: 15 }}>$ {Number(vistaFicha.precio_venta).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                    ? <>
+                        <strong style={{ color: 'var(--success)', fontSize: 15 }}>$ {Number(vistaFicha.precio_venta).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                        <span style={{ fontSize: 11, color: vistaFicha.precio_iva === 'inc' ? 'var(--success)' : 'var(--text2)', fontWeight: 600, marginLeft: 4 }}>
+                          {vistaFicha.precio_iva === 'inc' ? 'IVA inc.' : '+ IVA'}
+                        </span>
+                      </>
                     : <span style={{ color: 'var(--text2)', fontStyle: 'italic' }}>— sin precio base</span>
                   }
                 </div>
@@ -1358,7 +1366,12 @@ export default function Productos({ onMenuClick }) {
                           const margenColor = margen == null ? '#888' : margen >= 0 ? '#1a7a1a' : '#c06060'
                           return (
                             <tr style={{ background: '#f0f8f0' }}>
-                              <td colSpan={3} style={{ ...TD, fontWeight: 700 }}>💲 Precio de venta</td>
+                              <td colSpan={3} style={{ ...TD, fontWeight: 700 }}>
+                                💲 Precio de venta
+                                <span style={{ fontSize: 10, fontWeight: 600, marginLeft: 5, color: vistaFicha.precio_iva === 'inc' ? '#1a7a1a' : '#888' }}>
+                                  {vistaFicha.precio_iva === 'inc' ? 'IVA inc.' : '+ IVA'}
+                                </span>
+                              </td>
                               <td style={{ ...TD, textAlign: 'right', fontWeight: 700, color: '#1a5a1a', fontSize: 13 }}>{fmtUYU(pv)}</td>
                               <td style={{ ...TD, fontWeight: 700, color: margenColor }}>
                                 {margen != null ? `${margen >= 0 ? '+' : ''}${margen.toFixed(1)}% margen` : '—'}
@@ -1747,12 +1760,19 @@ export default function Productos({ onMenuClick }) {
               <div className="form-grid">
                 <div className="form-group">
                   <label>💲 Precio de venta $</label>
-                  <input
-                    type="number"
-                    value={form.precio_venta}
-                    onChange={e => setForm(f => ({ ...f, precio_venta: e.target.value }))}
-                    placeholder="ej: 1500"
-                  />
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <input
+                      type="number"
+                      value={form.precio_venta}
+                      onChange={e => setForm(f => ({ ...f, precio_venta: e.target.value }))}
+                      placeholder="ej: 1500"
+                      style={{ flex: 1 }}
+                    />
+                    <select value={form.precio_iva} onChange={e => setForm(f => ({ ...f, precio_iva: e.target.value }))} style={{ width: 110 }}>
+                      <option value="exc">+ IVA</option>
+                      <option value="inc">IVA inc.</option>
+                    </select>
+                  </div>
                 </div>
                 <div className="form-group">
                   <label>✂ Cara de uso</label>
