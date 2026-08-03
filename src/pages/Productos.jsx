@@ -741,8 +741,13 @@ export default function Productos({ onMenuClick }) {
       if (te.tela_id != null && te.consumo != null)
         consumos[Number(te.tela_id)] = String(te.consumo)
     })
+    const avios_cantidades = {}
+    ;(vistaFicha.avios_ids || []).forEach(av => {
+      avios_cantidades[av.avio_id] = av.cantidad != null ? String(av.cantidad) : ''
+    })
     setCostosDraft({
       consumos,
+      avios_cantidades,
       tipo_cambio:             vistaFicha.tipo_cambio             != null ? String(vistaFicha.tipo_cambio)             : '',
       costo_confeccion:        vistaFicha.costo_confeccion        != null ? String(vistaFicha.costo_confeccion)        : '',
       costo_corte:             vistaFicha.costo_corte             != null ? String(vistaFicha.costo_corte)             : '',
@@ -771,6 +776,12 @@ export default function Productos({ onMenuClick }) {
       costo_elasticos:         parseFloat(costosDraft.costo_elasticos)         || 0,
       estampados:              (costosDraft.estampados || []).map(e => ({ ...e, precio: parseFloat(e.precio) || 0 })),
       costo_otros:             parseFloat(costosDraft.costo_otros)             || 0,
+      avios_ids: (vistaFicha.avios_ids || []).map(av => ({
+        ...av,
+        cantidad: costosDraft.avios_cantidades?.[av.avio_id] != null
+          ? costosDraft.avios_cantidades[av.avio_id]
+          : av.cantidad,
+      })),
     }
     await supabase.from('productos').update(datos).eq('id', vistaFicha.id)
     const { data } = await supabase.from('productos').select('*').eq('id', vistaFicha.id).single()
@@ -1119,8 +1130,11 @@ export default function Productos({ onMenuClick }) {
                 const aviosConCosto = (vistaFicha.avios_ids || []).map(av => {
                   const cat = avios.find(a => a.id === av.avio_id)
                   const precio = parseFloat(cat?.precio) || 0
-                  const cantidad = parseFloat(av.cantidad) || 1
-                  return { nombre: av.nombre, unidad: cat?.unidad || av.unidad || 'u.', cantidad, precio, costo: precio * cantidad }
+                  const cantBase = editandoCostos
+                    ? (costosDraft.avios_cantidades?.[av.avio_id] ?? av.cantidad)
+                    : av.cantidad
+                  const cantidad = parseFloat(cantBase) || 1
+                  return { avio_id: av.avio_id, nombre: av.nombre, unidad: cat?.unidad || av.unidad || 'u.', cantidad, precio, costo: precio * cantidad }
                 })
                 const subtotalAvios = aviosConCosto.reduce((s, a) => s + a.costo, 0)
                 const subtotalOtros = COSTO_KEYS.reduce((a, c) => {
@@ -1236,7 +1250,19 @@ export default function Productos({ onMenuClick }) {
                           {aviosConCosto.map((av, i) => (
                             <tr key={i} onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'} onMouseLeave={e => e.currentTarget.style.background = ''}>
                               <td style={TD}>{av.nombre}</td>
-                              <td style={{ ...TD, textAlign: 'center' }}>{av.cantidad} {av.unidad}</td>
+                              <td style={{ ...TD, textAlign: 'center' }}>
+                                {editandoCostos ? (
+                                  <input
+                                    type="number"
+                                    value={costosDraft.avios_cantidades?.[av.avio_id] ?? ''}
+                                    onChange={e => setCostosDraft(d => ({ ...d, avios_cantidades: { ...(d.avios_cantidades || {}), [av.avio_id]: e.target.value } }))}
+                                    placeholder="cant."
+                                    style={{ width: 60, textAlign: 'right', fontSize: 11 }}
+                                  />
+                                ) : (
+                                  <span>{av.cantidad} {av.unidad}</span>
+                                )}
+                              </td>
                               <td style={{ ...TD, textAlign: 'right', color: '#555' }}>{av.precio > 0 ? fmtUYU(av.precio) : '—'}</td>
                               <td style={{ ...TD, textAlign: 'right', fontWeight: 700 }}>{av.costo > 0 ? fmtUYU(av.costo) : '—'}</td>
                               <td style={{ ...TD, color: '#888', fontStyle: 'italic', fontSize: 10 }}>precio catálogo</td>
