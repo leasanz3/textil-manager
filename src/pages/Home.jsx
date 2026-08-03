@@ -159,18 +159,21 @@ export default function Home({ onMenuClick }) {
     const p = `${y}-${String(m + 1).padStart(2, '0')}-01`
     const u = `${y}-${String(m + 1).padStart(2, '0')}-${String(new Date(y, m + 1, 0).getDate()).padStart(2, '0')}`
 
-    const [{ data: compras }, { data: etapas }, { data: entregas }, { data: bloqueos }] = await Promise.all([
+    const [{ data: compras }, { data: etapas }, { data: entregas }, { data: bloqueos }, { data: tallerMovs }] = await Promise.all([
       supabase.from('compras').select('fecha, proveedor').gte('fecha', p).lte('fecha', u),
       supabase.from('produccion_etapas').select('fecha_ingreso, responsable').gte('fecha_ingreso', p).lte('fecha_ingreso', u),
       supabase.from('pedidos').select('fecha_entrega, cliente').gte('fecha_entrega', p).lte('fecha_entrega', u).not('fecha_entrega', 'is', null),
       supabase.from('pedidos').select('fecha_pedido, cliente').eq('bloqueado', true).not('fecha_pedido', 'is', null).gte('fecha_pedido', p).lte('fecha_pedido', u),
+      supabase.from('taller_movimientos').select('fecha, tipo, contactos(nombre)').gte('fecha', p).lte('fecha', u),
     ])
 
+    const TALLER_ICON = { envio: '📤', recepcion: '📥', devolucion: '🔁' }
     const evs = []
-    ;(compras  || []).forEach(c => evs.push({ fecha: c.fecha,          tipo: 'tela',    label: '🔵 ' + (c.proveedor   || 'Tela')   }))
-    ;(etapas   || []).forEach(e => evs.push({ fecha: e.fecha_ingreso,  tipo: 'taller',  label: '🟡 ' + (e.responsable || 'Taller') }))
-    ;(entregas || []).forEach(e => evs.push({ fecha: e.fecha_entrega,  tipo: 'cliente', label: '🟢 ' + (e.cliente     || '')       }))
-    ;(bloqueos || []).forEach(b => evs.push({ fecha: b.fecha_pedido,   tipo: 'bloqueo', label: '🔴 ' + (b.cliente     || '') + ' bloq.' }))
+    ;(compras     || []).forEach(c => evs.push({ fecha: c.fecha,          tipo: 'tela',    label: '🔵 ' + (c.proveedor   || 'Tela')   }))
+    ;(etapas      || []).forEach(e => evs.push({ fecha: e.fecha_ingreso,  tipo: 'taller',  label: '🟡 ' + (e.responsable || 'Taller') }))
+    ;(entregas    || []).forEach(e => evs.push({ fecha: e.fecha_entrega,  tipo: 'cliente', label: '🟢 ' + (e.cliente     || '')       }))
+    ;(bloqueos    || []).forEach(b => evs.push({ fecha: b.fecha_pedido,   tipo: 'bloqueo', label: '🔴 ' + (b.cliente     || '') + ' bloq.' }))
+    ;(tallerMovs  || []).forEach(t => evs.push({ fecha: t.fecha, tipo: 'taller', label: (TALLER_ICON[t.tipo] || '🧵') + ' ' + (t.contactos?.nombre || 'Taller') }))
     setEventos(evs)
   }
 

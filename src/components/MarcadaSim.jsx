@@ -241,8 +241,7 @@ function TablaPorPar({ marcadaId, productoId, talles, piezas, pares, ajustes, on
   const dbPiezaNames  = [...new Set(piezas.map(p => p.pieza_nombre))]
   const dbSet         = new Set(dbPiezaNames)
   const pendingShown  = pendingPiezas.filter(n => !dbSet.has(n))
-  const reqNames      = (piezasReq || []).map(p => p.pieza_nombre)
-  const piezaNames    = [...new Set([...dbPiezaNames, ...reqNames, ...pendingShown])]
+  const piezaNames    = [...new Set([...dbPiezaNames, ...pendingShown])]
   const result        = buildResult(piezas, pares, ajustes)
   const addedNames    = new Set(piezaNames)
   const availableCat  = (catalogPiezas || []).filter(p => !addedNames.has(p.nombre))
@@ -911,6 +910,70 @@ function ResumenMetros({ marcadas }) {
   )
 }
 
+// ── SinProductosFallback ───────────────────────────────────────────────────────
+
+function SinProductosFallback({ marcadas, sessionId, onReload }) {
+  const [q, setQ] = useState('')
+  const [res, setRes] = useState([])
+  const [saving, setSaving] = useState(false)
+  const timer = useRef(null)
+
+  function onInput(val) {
+    setQ(val)
+    if (timer.current) clearTimeout(timer.current)
+    if (!val.trim()) { setRes([]); return }
+    timer.current = setTimeout(async () => {
+      const { data } = await supabase.from('productos').select('id, nombre, tabla').ilike('nombre', `%${val.trim()}%`).limit(8)
+      setRes(data || [])
+    }, 250)
+  }
+
+  async function assignProduct(prod) {
+    setSaving(true); setRes([]); setQ(prod.nombre)
+    for (const m of marcadas) {
+      await supabase.from('marcadas_sim_productos').insert({ marcada_id: m.id, producto_id: prod.id })
+    }
+    setSaving(false); onReload()
+  }
+
+  const telaGroups = []
+  const seenTela = {}
+  for (const m of marcadas) {
+    const tid = m.telas?.id || '__none__'
+    if (!seenTela[tid]) { seenTela[tid] = { tela: m.telas, marcadas: [] }; telaGroups.push(seenTela[tid]) }
+    seenTela[tid].marcadas.push(m)
+  }
+
+  return (
+    <div style={{ margin:'4px 6px' }}>
+      <div style={{ background:'#fff8e8', border:'2px solid #c8a040', padding:'10px 14px', marginBottom:8 }}>
+        <div style={{ fontWeight:700, color:'#7a5000', marginBottom:6, fontSize:12 }}>Asignar producto a la sesión</div>
+        <div style={{ position:'relative' }}>
+          <input style={{ ...S.inp, width:'100%' }} value={q} onChange={e => onInput(e.target.value)}
+            placeholder="Buscar producto..." disabled={saving} />
+          <AcList items={res} onPick={assignProduct} label={r => r.nombre} />
+        </div>
+        {saving && <div style={{ fontSize:10, color:'#7a5000', marginTop:4 }}>Guardando...</div>}
+      </div>
+      {telaGroups.map(({ tela, marcadas: ms }) => (
+        <div key={tela?.id || '__none__'} style={{ border:'1px solid #b0bcd8', marginBottom:6, background:'#f4f6fc' }}>
+          <div style={{ padding:'5px 10px', fontWeight:700, color:'#1a3a6b', fontSize:11, borderBottom:'1px solid #b0bcd8' }}>
+            🧵 {tela ? telaLabel(tela) : 'Sin tela'} · {ms.length} marcada{ms.length !== 1 ? 's' : ''}
+          </div>
+          <div style={{ padding:'6px 10px' }}>
+            {ms.map((m, i) => (
+              <div key={m.id} style={{ fontSize:11, color:'#333', padding:'2px 0', borderBottom:'1px solid #e0e0e0' }}>
+                Marcada {i+1} · {m.metros||0}m · {m.total_pliegues||0} pliegues
+                {m.nota && <span style={{ color:'#888', marginLeft:6 }}>{m.nota}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ── MarcadaSimContent ──────────────────────────────────────────────────────────
 // Reusable two-panel: session list (left) + ficha (right).
 // Can be embedded inside any page.
@@ -962,8 +1025,8 @@ export default function MarcadaSimContent({ style }) {
     setSessions(list); setLoadingList(false)
   }
 
-  async function fetchFicha(sid) {
-    setLoadingFicha(true); setFichaData(null)
+  async function fetchFicha(sid, silent = false) {
+    if (!silent) { setLoadingFicha(true); setFichaData(null) }
     let { data:marcadas } = await supabase
       .from('marcadas_sim')
       .select(`id, session_id, fecha, created_at, metros, pliegues, total_pliegues, metros_reales, nota, rol,
@@ -981,7 +1044,7 @@ export default function MarcadaSimContent({ style }) {
         .eq('id', sid)
       marcadas = single || []
     }
-    if (!marcadas.length) { setLoadingFicha(false); return }
+    if (!marcadas.length) { if (!silent) setLoadingFicha(false); return }
     const ids = marcadas.map(m => m.id)
     const [{ data: piezas }, { data: ajustes }, { data: piezasReq }, { data: pedido }] = await Promise.all([
       supabase.from('marcadas_sim_piezas').select('*').in('marcada_id', ids),
@@ -990,11 +1053,15 @@ export default function MarcadaSimContent({ style }) {
       supabase.from('marcadas_sim_pedido').select('*').in('marcada_id', ids),
     ])
     setFichaData({ session_id:sid, marcadas, piezas: piezas||[], ajustes: ajustes||[], piezasReq: piezasReq||[], pedido: pedido||[] })
-    setLoadingFicha(false)
+    if (!silent) setLoadingFicha(false)
   }
 
   function selectSession(sid) { setSelectedSid(sid); fetchFicha(sid) }
-  async function reloadFicha() { if (selectedSid) { await fetchFicha(selectedSid); await fetchSessions() } }
+  async function reloadFicha(withSessions = false) {
+    if (!selectedSid) return
+    await fetchFicha(selectedSid, true)
+    if (withSessions) await fetchSessions()
+  }
 
   async function createSession() {
     setSaving(true)
@@ -1022,7 +1089,7 @@ export default function MarcadaSimContent({ style }) {
     if (error) { alert('Error: '+error.message); setSaving(false); return }
     setSaving(false); setModalTela(false)
     setANota(''); setATelaId(null); setATelaQ(''); setATelaRes([])
-    reloadFicha()
+    reloadFicha(true)
   }
 
   async function deleteMarcada(mid) {
@@ -1033,7 +1100,7 @@ export default function MarcadaSimContent({ style }) {
     await supabase.from('marcadas_sim_pedido').delete().eq('marcada_id', mid)
     await supabase.from('marcadas_sim_productos').delete().eq('marcada_id', mid)
     await supabase.from('marcadas_sim').delete().eq('id', mid)
-    reloadFicha()
+    reloadFicha(true)
   }
 
   function onNProvInput(val) {
@@ -1140,7 +1207,9 @@ export default function MarcadaSimContent({ style }) {
               <button style={S.btn} onClick={() => setModalTela(true)}>+ tela</button>
             </div>
             <ResumenMetros marcadas={fichaData.marcadas} />
-            {productGroups.map(pg => (
+            {productGroups.length === 0 ? (
+              <SinProductosFallback marcadas={fichaData.marcadas} sessionId={fichaData.session_id} onReload={reloadFicha} />
+            ) : productGroups.map(pg => (
               <ProductoSection key={pg.prod?.id || 'noprod'}
                 prod={pg.prod} entries={pg.entries}
                 allPiezas={fichaData.piezas} allAjustes={fichaData.ajustes}

@@ -24,6 +24,7 @@ import Cotizacion from './pages/Cotizacion'
 import CuentaCorriente from './pages/CuentaCorriente'
 import Corte from './pages/Corte'
 import Marcada from './pages/Marcada'
+import Talleres from './pages/Talleres'
 
 export default function App() {
   const [session, setSession] = useState(undefined) // undefined = cargando
@@ -75,6 +76,7 @@ export default function App() {
             <Route path="/cuenta-corriente" element={<CuentaCorriente onMenuClick={menu} />} />
             <Route path="/corte" element={<Corte onMenuClick={menu} />} />
             <Route path="/marcada" element={<Marcada onMenuClick={menu} />} />
+            <Route path="/talleres" element={<Talleres onMenuClick={menu} />} />
             <Route path="/contactos" element={<Contactos onMenuClick={menu} />} />
             <Route path="/diario" element={<Diario onMenuClick={menu} />} />
             <Route path="/bitacora" element={<Navigate to="/diario" replace />} />
