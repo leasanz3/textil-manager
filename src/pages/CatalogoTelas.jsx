@@ -15,7 +15,7 @@ export default function CatalogoTelas({ onMenuClick, onNavigate }) {
   const [productosUsandoTela, setProductosUsandoTela] = useState([])
 
   const emptyForm = {
-    tipo: '', codigo: '', color: '', proveedor_id: '',
+    tipo: '', codigo: '', color: '', ancho: '', proveedor_id: '',
     unidad: 'kg', rendimiento: '', precio_ref: '', moneda_ref: 'USD', notas: ''
   }
   const [form, setForm] = useState(emptyForm)
@@ -63,6 +63,7 @@ export default function CatalogoTelas({ onMenuClick, onNavigate }) {
       tipo: t.tipo || '',
       codigo: t.codigo || '',
       color: t.color || '',
+      ancho: t.ancho != null ? String(t.ancho) : '',
       proveedor_id: t.proveedor_id || '',
       unidad: t.unidad || 'kg',
       rendimiento: t.rendimiento || '',
@@ -101,7 +102,8 @@ export default function CatalogoTelas({ onMenuClick, onNavigate }) {
       rendimiento: parseFloat(form.rendimiento) || null,
       precio: parseFloat(form.precio_ref) || null,
       moneda: form.moneda_ref,
-      notas: form.notas || null
+      notas: form.notas || null,
+      ancho: parseFloat(form.ancho) || null,
     }
     if (editing) {
       await supabase.from('telas').update(datos).eq('id', editing)
@@ -181,6 +183,7 @@ export default function CatalogoTelas({ onMenuClick, onNavigate }) {
                     <th>Tipo / nombre</th>
                     <th>Código</th>
                     <th>Color</th>
+                    <th>Ancho (m)</th>
                     <th>Proveedor</th>
                     <th>Unidad</th>
                     <th>Rendimiento</th>
@@ -197,6 +200,7 @@ export default function CatalogoTelas({ onMenuClick, onNavigate }) {
                         <td><strong>{t.tipo || '—'}</strong></td>
                         <td style={{ fontSize: 11, color: 'var(--accent)' }}>{t.codigo || '—'}</td>
                         <td>{t.color || '—'}</td>
+                        <td>{t.ancho != null ? `${t.ancho} m` : '—'}</td>
                         <td>{t.proveedor || '—'}</td>
                         <td>{t.unidad || 'kg'}</td>
                         <td>
@@ -350,6 +354,10 @@ export default function CatalogoTelas({ onMenuClick, onNavigate }) {
                 <div className="form-group">
                   <label>Color / descripción</label>
                   <input value={form.color} onChange={e => setF('color', e.target.value)} placeholder="ej: Amarillo, Blanco..." />
+                </div>
+                <div className="form-group">
+                  <label>Ancho (m)</label>
+                  <input type="number" value={form.ancho} onChange={e => setF('ancho', e.target.value)} placeholder="ej: 1.50" step="0.01" />
                 </div>
                 <div className="form-group">
                   <label>Código del proveedor</label>
