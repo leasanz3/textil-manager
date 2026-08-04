@@ -1136,7 +1136,7 @@ function StockEnMiTaller({ movimientos, onEntregar }) {
   const stock = {} // { pid: { prodNombre, talles: { talle: n } } }
 
   for (const mov of movimientos) {
-    if (mov.tipo === 'pago') continue
+    if (mov.tipo === 'pago' || mov.tipo === 'envio') continue
     const sign = mov.tipo === 'recepcion' ? 1 : -1
     for (const it of (mov.taller_movimientos_items || [])) {
       const pid  = it.producto_id
