@@ -1284,11 +1284,23 @@ function ModalEntregarCliente({ miStockItems, onClose, onSave }) {
 
 // ── Resumen: stock en mi taller ───────────────────────────────────────────────
 
-function StockEnMiTaller({ movimientos, onEntregar }) {
+function StockEnMiTaller({ movimientos, controlMap, onEntregar }) {
   const [open, setOpen] = useState(true)
 
-  // recepcion suma, envio/devolucion/entrega restan
-  const stock = {} // { pid: { prodNombre, talles: { talle: n } } }
+  // recepcion suma, devolucion y entrega restan (envio se ignora)
+  const stock = {} // { pid: { prodNombre, talles: { talle: { ok, falla } } } }
+
+  // Fallas pendientes de envío: controlMap items con cant_falla > 0 y enviado_taller = false
+  // agrupadas por producto_id + talle
+  const fallasPendientes = {} // { `${pid}__${talle}`: cant }
+  for (const items of Object.values(controlMap)) {
+    for (const c of items) {
+      if (c.cant_falla > 0 && !c.enviado_taller) {
+        const k = `${c.producto_id}__${c.talle}`
+        fallasPendientes[k] = (fallasPendientes[k] || 0) + c.cant_falla
+      }
+    }
+  }
 
   for (const mov of movimientos) {
     if (mov.tipo === 'pago' || mov.tipo === 'envio') continue
@@ -1298,12 +1310,19 @@ function StockEnMiTaller({ movimientos, onEntregar }) {
       const cant = (it.cantidad || 0) * sign
       if (!stock[pid]) stock[pid] = { prodNombre: it.productos?.nombre || '?', pid, talles: {} }
       const t = it.talle
-      stock[pid].talles[t] = (stock[pid].talles[t] || 0) + cant
+      if (!stock[pid].talles[t]) stock[pid].talles[t] = { ok: 0 }
+      stock[pid].talles[t].ok = (stock[pid].talles[t].ok || 0) + cant
     }
   }
 
   const prodList = Object.values(stock).map(({ prodNombre, pid, talles }) => {
-    const filas = Object.entries(talles).filter(([, n]) => n > 0).map(([talle, n]) => ({ talle, n, producto_id: pid, prodNombre }))
+    const filas = Object.entries(talles)
+      .map(([talle, v]) => {
+        const falla = fallasPendientes[`${pid}__${talle}`] || 0
+        const ok = Math.max(0, (v.ok || 0)) - falla
+        return { talle, ok: Math.max(0, ok), falla, n: Math.max(0, ok) + falla, producto_id: pid, prodNombre }
+      })
+      .filter(f => f.ok > 0 || f.falla > 0)
     const total = filas.reduce((s, f) => s + f.n, 0)
     return { prodNombre, filas, total }
   }).filter(p => p.filas.length > 0)
@@ -1333,10 +1352,19 @@ function StockEnMiTaller({ movimientos, onEntregar }) {
               <div style={{ fontWeight: 700, fontSize: 12, color: '#7a3a00', marginBottom: 4, borderBottom: '1px solid #e8d8c8', paddingBottom: 3 }}>
                 {p.prodNombre} · <span style={{ fontWeight: 400, fontSize: 11 }}>{p.total} u.</span>
               </div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                 {p.filas.map(f => (
-                  <span key={f.talle} style={{ fontSize: 11, background: '#f0e4d4', padding: '1px 6px', border: '1px solid #c8a888' }}>
-                    {f.talle} × {f.n}
+                  <span key={f.talle} style={{ fontSize: 11, display: 'inline-flex', gap: 2 }}>
+                    {f.ok > 0 && (
+                      <span style={{ background: '#f0e4d4', padding: '1px 6px', border: '1px solid #c8a888' }}>
+                        {f.talle} × {f.ok}
+                      </span>
+                    )}
+                    {f.falla > 0 && (
+                      <span style={{ background: '#fff0e8', padding: '1px 6px', border: '1px solid #d08060', color: '#8a2000', fontWeight: 700 }}>
+                        ⚠️ {f.talle} × {f.falla}
+                      </span>
+                    )}
                   </span>
                 ))}
               </div>
@@ -1433,7 +1461,7 @@ export default function Talleres({ onMenuClick }) {
 
       <div style={S.body}>
         <StockEnTalleres movimientos={movimientos} onRecibirStock={(taller, stockItems) => setRecibiendoStock({ taller, stockItems })} />
-        <StockEnMiTaller movimientos={movimientos} onEntregar={items => setEntregando(items)} />
+        <StockEnMiTaller movimientos={movimientos} controlMap={controlMap} onEntregar={items => setEntregando(items)} />
         <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <select style={S.sel} value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}>
             <option value="">Todos los tipos</option>
