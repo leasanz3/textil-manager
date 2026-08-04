@@ -694,11 +694,137 @@ function ModalEnviarFalla({ falla, onClose, onSave }) {
   )
 }
 
+// ── Modal: Entregar a cliente desde recepción ─────────────────────────────────
+
+function ModalEntregarDesdeRecepcion({ recepcion, entregasVinculadas, onClose, onSave }) {
+  const [fecha,      setFecha]      = useState(today())
+  const [clienteQ,   setClienteQ]   = useState('')
+  const [clienteId,  setClienteId]  = useState(null)
+  const [clienteRes, setClienteRes] = useState([])
+  const [nota,       setNota]       = useState('')
+  const [saving,     setSaving]     = useState(false)
+  const timers = useRef({})
+
+  // Calcular ya entregado por producto+talle de entregas anteriores vinculadas
+  const yaEntregado = {}
+  for (const e of (entregasVinculadas || [])) {
+    for (const it of (e.taller_movimientos_items || [])) {
+      const k = `${it.producto_id}__${it.talle}`
+      yaEntregado[k] = (yaEntregado[k] || 0) + (it.cantidad || 0)
+    }
+  }
+
+  const [filas] = useState(() =>
+    (recepcion.taller_movimientos_items || []).map(it => {
+      const k = `${it.producto_id}__${it.talle}`
+      const entregado = yaEntregado[k] || 0
+      const disponible = Math.max(0, (it.cantidad || 0) - entregado)
+      return { producto_id: it.producto_id, prodNombre: it.productos?.nombre || '?', talle: it.talle, recibido: it.cantidad, entregado, disponible, cantidad: '' }
+    })
+  )
+  const [vals, setVals] = useState(() => filas.map(() => ''))
+
+  function setVal(i, v) { setVals(prev => prev.map((x, j) => j === i ? v : x)) }
+
+  function onClienteInput(val) {
+    setClienteQ(val); setClienteId(null)
+    clearTimeout(timers.current.cli)
+    if (!val.trim()) { setClienteRes([]); return }
+    timers.current.cli = setTimeout(async () => {
+      const { data } = await supabase.from('contactos').select('id, nombre').ilike('nombre', `%${val.trim()}%`).limit(8)
+      setClienteRes(data || [])
+    }, 250)
+  }
+
+  async function save() {
+    if (!clienteId) { alert('Seleccioná un cliente'); return }
+    const rows = filas.map((f, i) => ({ ...f, cantidad: parseInt(vals[i]) || 0 })).filter(f => f.cantidad > 0)
+    if (!rows.length) { alert('Ingresá al menos una cantidad'); return }
+    for (const r of rows) {
+      if (r.cantidad > r.disponible) { alert(`Cantidad mayor al disponible para ${r.prodNombre} talle ${r.talle}`); return }
+    }
+    setSaving(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data: mov, error } = await supabase.from('taller_movimientos')
+      .insert({ tipo: 'entrega', fecha, contacto_id: clienteId, nota: nota.trim() || null, user_id: user?.id, origen_movimiento_id: recepcion.id })
+      .select().single()
+    if (error) { alert('Error: ' + error.message); setSaving(false); return }
+    for (const r of rows) {
+      await supabase.from('taller_movimientos_items').insert({ movimiento_id: mov.id, producto_id: r.producto_id, talle: r.talle, cantidad: r.cantidad })
+    }
+    setSaving(false); onSave()
+  }
+
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={{ ...S.modal, width: 620 }} onClick={e => e.stopPropagation()}>
+        <div style={{ ...S.modalH, background: 'linear-gradient(to bottom,#7a3a00,#5a2000)' }}>
+          <span>🛍️ Entregar a cliente — {recepcion.contactos?.nombre} {fmtF(recepcion.fecha)}</span>
+          <button style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: F }} onClick={onClose}>✕</button>
+        </div>
+        <div style={S.modalB}>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
+            <div>
+              <span style={S.lbl}>Fecha</span>
+              <input style={S.inp} type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
+            </div>
+            <div style={{ flex: 1, position: 'relative' }}>
+              <span style={S.lbl}>Cliente</span>
+              <input style={{ ...S.inp, width: '100%' }} value={clienteQ} onChange={e => onClienteInput(e.target.value)} placeholder="Buscar en Contactos..." />
+              {clienteId && <span style={{ fontSize: 10, color: '#2a6a2a' }}>✓ {clienteQ}</span>}
+              <AcList items={clienteRes} onPick={r => { setClienteId(r.id); setClienteQ(r.nombre); setClienteRes([]) }} label={r => r.nombre} />
+            </div>
+          </div>
+          <table style={S.tbl}>
+            <thead><tr>
+              <th style={S.thL}>Producto</th>
+              <th style={S.th}>Talle</th>
+              <th style={S.th}>Recibido</th>
+              <th style={S.th}>Ya entregado</th>
+              <th style={S.th}>Disponible</th>
+              <th style={S.th}>A entregar</th>
+            </tr></thead>
+            <tbody>
+              {filas.map((f, i) => (
+                <tr key={i} style={{ background: f.disponible === 0 ? '#f0f0f0' : parseInt(vals[i]) > 0 ? '#fef8f0' : 'transparent' }}>
+                  <td style={S.tdL}>{f.prodNombre}</td>
+                  <td style={{ ...S.td, fontWeight: 700 }}>{f.talle}</td>
+                  <td style={{ ...S.td, color: '#555' }}>{f.recibido}</td>
+                  <td style={{ ...S.td, color: f.entregado > 0 ? '#7a3a00' : '#aaa' }}>{f.entregado || '—'}</td>
+                  <td style={{ ...S.td, fontWeight: 700, color: f.disponible === 0 ? '#aaa' : '#1a5a1a' }}>{f.disponible}</td>
+                  <td style={S.td}>
+                    {f.disponible > 0
+                      ? <input style={{ ...S.inpC, width: 44, background: parseInt(vals[i]) > 0 ? '#fff8e8' : '#fff' }}
+                          type="number" min="0" max={f.disponible}
+                          value={vals[i]} onChange={e => setVal(i, e.target.value)} />
+                      : <span style={{ color: '#aaa', fontSize: 10 }}>—</span>
+                    }
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ marginTop: 10 }}>
+            <span style={S.lbl}>Nota</span>
+            <input style={{ ...S.inp, width: '100%' }} value={nota} onChange={e => setNota(e.target.value)} placeholder="opcional" />
+          </div>
+        </div>
+        <div style={{ padding: '8px 12px', borderTop: '1px solid #c0c0b0', display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+          <button style={S.btn} onClick={onClose}>Cancelar</button>
+          <button style={{ ...S.btnP, background: 'linear-gradient(to bottom,#7a3a00,#5a2000)', border: '1px solid #5a2000' }}
+            onClick={save} disabled={saving}>{saving ? 'Guardando...' : '🛍️ Registrar entrega'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Tarjeta de movimiento ─────────────────────────────────────────────────────
 
-function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, onEnviarFalla }) {
+function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, onEnviarFalla, entregasVinculadas }) {
   const [collapsed,       setCollapsed]       = useState(false)
   const [enviarFallaItem, setEnviarFallaItem] = useState(null)
+  const [entregando,      setEntregando]      = useState(false)
   const t = TIPO_BY_ID[mov.tipo] || {}
   const esRecepcion = mov.tipo === 'recepcion'
   const esPago      = mov.tipo === 'pago'
@@ -725,6 +851,7 @@ function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, on
         <div style={{ display: 'flex', gap: 4 }}>
           {mov.tipo === 'envio' && <button style={{ ...S.btn, fontSize: 10, padding: '1px 6px', color: '#1a5a1a', fontWeight: 700 }} onClick={() => onRecibir(mov)}>📥 Recibir</button>}
           {esRecepcion && <button style={{ ...S.btn, fontSize: 10, padding: '1px 6px' }} onClick={() => onCalidad(mov)}>🔍 Calidad</button>}
+          {esRecepcion && <button style={{ ...S.btn, fontSize: 10, padding: '1px 6px', color: '#7a3a00', fontWeight: 700 }} onClick={() => setEntregando(true)}>🛍️ Entregar</button>}
           <button style={{ ...S.btn, fontSize: 10, padding: '1px 6px' }} onClick={() => onEdit(mov)}>✏️</button>
           <button style={S.btnD} onClick={() => onDelete(mov.id)}>✕</button>
         </div>
@@ -838,11 +965,34 @@ function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, on
               )}
             </div>
           )}
+          {/* Entregas realizadas desde esta recepción */}
+          {esRecepcion && entregasVinculadas?.length > 0 && (
+            <div style={{ marginTop: 8, borderTop: '1px solid #e0d8c8', paddingTop: 6 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#7a3a00', marginBottom: 4 }}>🛍️ Entregas realizadas</div>
+              {entregasVinculadas.map(e => {
+                const totalE = (e.taller_movimientos_items || []).reduce((s, it) => s + (it.cantidad || 0), 0)
+                return (
+                  <div key={e.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 4, fontSize: 11 }}>
+                    <span style={{ color: '#888', minWidth: 56 }}>{fmtF(e.fecha)}</span>
+                    <span style={{ fontWeight: 700, color: '#7a3a00', minWidth: 100 }}>{e.contactos?.nombre || '?'}</span>
+                    <span style={{ color: '#555', flex: 1 }}>
+                      {(e.taller_movimientos_items || []).map(it => `${it.productos?.nombre || '?'} ${it.talle} × ${it.cantidad}`).join(', ')}
+                    </span>
+                    <span style={{ fontWeight: 700, color: '#333' }}>{totalE} u.</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
       {enviarFallaItem && (
         <ModalEnviarFalla falla={enviarFallaItem} onClose={() => setEnviarFallaItem(null)}
           onSave={() => { setEnviarFallaItem(null); onEnviarFalla() }} />
+      )}
+      {entregando && (
+        <ModalEntregarDesdeRecepcion recepcion={mov} entregasVinculadas={entregasVinculadas}
+          onClose={() => setEntregando(false)} onSave={() => { setEntregando(false); onEnviarFalla() }} />
       )}
     </div>
   )
@@ -1198,6 +1348,7 @@ function StockEnMiTaller({ movimientos, onEntregar }) {
 export default function Talleres({ onMenuClick }) {
   const [movimientos,   setMovimientos]   = useState([])
   const [controlMap,    setControlMap]    = useState({})
+  const [entregasMap,   setEntregasMap]   = useState({}) // recepcionId → entrega[]
   const [loading,       setLoading]       = useState(true)
   const [modal,         setModal]         = useState(false)
   const [editando,      setEditando]      = useState(null)
@@ -1212,7 +1363,7 @@ export default function Talleres({ onMenuClick }) {
 
   async function fetchAll() {
     setLoading(true)
-    const [{ data: movs }, { data: ctrl }] = await Promise.all([
+    const [{ data: movs }, { data: ctrl }, { data: entregas }] = await Promise.all([
       supabase.from('taller_movimientos')
         .select(`id, tipo, fecha, nota, monto, created_at,
           contactos(id, nombre),
@@ -1223,6 +1374,12 @@ export default function Talleres({ onMenuClick }) {
       supabase.from('taller_control_items')
         .select(`id, movimiento_id, producto_id, talle, cant_ok, cant_falla, observacion, enviado_taller, enviado_fecha, enviado_contacto_id,
           productos(id, nombre)`),
+      supabase.from('taller_movimientos')
+        .select(`id, tipo, fecha, nota, origen_movimiento_id,
+          contactos(id, nombre),
+          taller_movimientos_items(id, producto_id, talle, cantidad, productos(id, nombre))`)
+        .eq('tipo', 'entrega')
+        .not('origen_movimiento_id', 'is', null),
     ])
     setMovimientos(movs || [])
     const map = {}
@@ -1231,6 +1388,13 @@ export default function Talleres({ onMenuClick }) {
       map[c.movimiento_id].push(c)
     }
     setControlMap(map)
+    const eMap = {}
+    for (const e of (entregas || [])) {
+      const rid = e.origen_movimiento_id
+      if (!eMap[rid]) eMap[rid] = []
+      eMap[rid].push(e)
+    }
+    setEntregasMap(eMap)
     setLoading(false)
   }
 
@@ -1284,7 +1448,8 @@ export default function Talleres({ onMenuClick }) {
           </div>
         ) : filtered.map(m => (
           <MovCard key={m.id} mov={m} onDelete={deleteMov} onEdit={setEditando}
-            onCalidad={setCalidad} onRecibir={setRecibiendo} controlItems={controlMap[m.id]} onEnviarFalla={fetchAll} />
+            onCalidad={setCalidad} onRecibir={setRecibiendo} controlItems={controlMap[m.id]} onEnviarFalla={fetchAll}
+            entregasVinculadas={entregasMap[m.id]} />
         ))}
       </div>
 
