@@ -227,7 +227,7 @@ function FormMovimiento({ tipo, setTipo, fecha, setFecha, tallerQ, setTallerQ, t
           <input style={S.inp} type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
         </div>
         <div style={{ flex: 1, position: 'relative' }}>
-          <span style={S.lbl}>Taller</span>
+          <span style={S.lbl}>{tipo === 'entrega' ? 'Cliente' : 'Taller'}</span>
           <input style={{ ...S.inp, width: '100%' }} value={tallerQ} onChange={e => onTallerInput(e.target.value)} placeholder="Buscar en Contactos..." />
           {tallerId && <span style={{ fontSize: 10, color: '#2a6a2a' }}>✓ {tallerQ}</span>}
           <AcList items={tallerRes} onPick={r => { setTallerId(r.id); setTallerQ(r.nombre); setTallerRes([]) }} label={r => r.nombre} />
@@ -825,6 +825,7 @@ function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, on
   const [collapsed,       setCollapsed]       = useState(false)
   const [enviarFallaItem, setEnviarFallaItem] = useState(null)
   const [entregando,      setEntregando]      = useState(false)
+  const [editandoEntrega, setEditandoEntrega] = useState(null)
   const t = TIPO_BY_ID[mov.tipo] || {}
   const esRecepcion = mov.tipo === 'recepcion'
   const esPago      = mov.tipo === 'pago'
@@ -972,13 +973,14 @@ function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, on
               {entregasVinculadas.map(e => {
                 const totalE = (e.taller_movimientos_items || []).reduce((s, it) => s + (it.cantidad || 0), 0)
                 return (
-                  <div key={e.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 4, fontSize: 11 }}>
+                  <div key={e.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4, fontSize: 11 }}>
                     <span style={{ color: '#888', minWidth: 56 }}>{fmtF(e.fecha)}</span>
                     <span style={{ fontWeight: 700, color: '#7a3a00', minWidth: 100 }}>{e.contactos?.nombre || '?'}</span>
                     <span style={{ color: '#555', flex: 1 }}>
                       {(e.taller_movimientos_items || []).map(it => `${it.productos?.nombre || '?'} ${it.talle} × ${it.cantidad}`).join(', ')}
                     </span>
                     <span style={{ fontWeight: 700, color: '#333' }}>{totalE} u.</span>
+                    <button style={{ ...S.btn, fontSize: 10, padding: '1px 5px' }} onClick={() => setEditandoEntrega(e)}>✏️</button>
                   </div>
                 )
               })}
@@ -993,6 +995,9 @@ function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, on
       {entregando && (
         <ModalEntregarDesdeRecepcion recepcion={mov} entregasVinculadas={entregasVinculadas}
           onClose={() => setEntregando(false)} onSave={() => { setEntregando(false); onEnviarFalla() }} />
+      )}
+      {editandoEntrega && (
+        <ModalEditar mov={editandoEntrega} onClose={() => setEditandoEntrega(null)} onSave={() => { setEditandoEntrega(null); onEnviarFalla() }} />
       )}
     </div>
   )
