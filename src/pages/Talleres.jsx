@@ -10,6 +10,7 @@ const TIPOS = [
   { id: 'recepcion',  label: 'Recepción del taller', icon: '📥', color: '#1a5a1a' },
   { id: 'devolucion', label: 'Devolución al taller', icon: '🔁', color: '#6a006a' },
   { id: 'pago',       label: 'Pago al taller',       icon: '💰', color: '#5a3a00' },
+  { id: 'entrega',    label: 'Entrega a cliente',    icon: '🛍️', color: '#7a3a00' },
 ]
 const TIPO_BY_ID = Object.fromEntries(TIPOS.map(t => [t.id, t]))
 
@@ -941,7 +942,7 @@ function StockEnTalleres({ movimientos, onRecibirStock }) {
   const stock = {} // { cid: { nombre, cid, prods: { pid: { prodNombre, talles: { talle: n } } } } }
 
   for (const mov of movimientos) {
-    if (mov.tipo === 'pago') continue
+    if (mov.tipo === 'pago' || mov.tipo === 'entrega') continue
     const cid    = mov.contactos?.id
     const nombre = mov.contactos?.nombre || '?'
     const sign   = (mov.tipo === 'envio' || mov.tipo === 'devolucion') ? 1 : -1
@@ -1008,6 +1009,177 @@ function StockEnTalleres({ movimientos, onRecibirStock }) {
   )
 }
 
+// ── Modal: Entregar a cliente ─────────────────────────────────────────────────
+
+function ModalEntregarCliente({ miStockItems, onClose, onSave }) {
+  const [fecha,      setFecha]      = useState(today())
+  const [clienteQ,   setClienteQ]   = useState('')
+  const [clienteId,  setClienteId]  = useState(null)
+  const [clienteRes, setClienteRes] = useState([])
+  const [nota,       setNota]       = useState('')
+  const [saving,     setSaving]     = useState(false)
+  const [filas,      setFilas]      = useState(() =>
+    miStockItems.map(it => ({ ...it, cantidad: '' }))
+  )
+  const timers = useRef({})
+
+  function onClienteInput(val) {
+    setClienteQ(val); setClienteId(null)
+    clearTimeout(timers.current.cli)
+    if (!val.trim()) { setClienteRes([]); return }
+    timers.current.cli = setTimeout(async () => {
+      const { data } = await supabase.from('contactos').select('id, nombre').ilike('nombre', `%${val.trim()}%`).limit(8)
+      setClienteRes(data || [])
+    }, 250)
+  }
+
+  function setCant(i, val) {
+    setFilas(prev => prev.map((f, j) => j === i ? { ...f, cantidad: val } : f))
+  }
+
+  async function save() {
+    if (!clienteId) { alert('Seleccioná un cliente'); return }
+    const rows = filas.filter(f => parseInt(f.cantidad) > 0)
+    if (!rows.length) { alert('Ingresá al menos una cantidad'); return }
+    setSaving(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data: mov, error } = await supabase.from('taller_movimientos')
+      .insert({ tipo: 'entrega', fecha, contacto_id: clienteId, nota: nota.trim() || null, user_id: user?.id })
+      .select().single()
+    if (error) { alert('Error: ' + error.message); setSaving(false); return }
+    for (const r of rows) {
+      await supabase.from('taller_movimientos_items').insert({
+        movimiento_id: mov.id, producto_id: r.producto_id,
+        talle: r.talle, cantidad: parseInt(r.cantidad),
+      })
+    }
+    setSaving(false); onSave()
+  }
+
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={{ ...S.modal, width: 600 }} onClick={e => e.stopPropagation()}>
+        <div style={{ ...S.modalH, background: 'linear-gradient(to bottom,#7a3a00,#5a2000)' }}>
+          <span>🛍️ Entregar a cliente</span>
+          <button style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: F }} onClick={onClose}>✕</button>
+        </div>
+        <div style={S.modalB}>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
+            <div>
+              <span style={S.lbl}>Fecha</span>
+              <input style={S.inp} type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
+            </div>
+            <div style={{ flex: 1, position: 'relative' }}>
+              <span style={S.lbl}>Cliente</span>
+              <input style={{ ...S.inp, width: '100%' }} value={clienteQ} onChange={e => onClienteInput(e.target.value)} placeholder="Buscar en Contactos..." />
+              {clienteId && <span style={{ fontSize: 10, color: '#2a6a2a' }}>✓ {clienteQ}</span>}
+              <AcList items={clienteRes} onPick={r => { setClienteId(r.id); setClienteQ(r.nombre); setClienteRes([]) }} label={r => r.nombre} />
+            </div>
+          </div>
+          <div style={{ fontSize: 10, color: '#555', marginBottom: 6 }}>Ingresá las cantidades a entregar (máx. stock disponible).</div>
+          <table style={S.tbl}>
+            <thead><tr>
+              <th style={S.thL}>Producto</th>
+              <th style={S.th}>Talle</th>
+              <th style={S.th}>En mi taller</th>
+              <th style={S.th}>A entregar</th>
+            </tr></thead>
+            <tbody>
+              {filas.map((f, i) => (
+                <tr key={i} style={{ background: parseInt(f.cantidad) > 0 ? '#fef8f0' : 'transparent' }}>
+                  <td style={S.tdL}>{f.prodNombre}</td>
+                  <td style={{ ...S.td, fontWeight: 700 }}>{f.talle}</td>
+                  <td style={{ ...S.td, color: '#555' }}>{f.n}</td>
+                  <td style={S.td}>
+                    <input style={{ ...S.inpC, width: 44, background: parseInt(f.cantidad) > 0 ? '#fff8e8' : '#fff' }}
+                      type="number" min="0" max={f.n}
+                      value={f.cantidad} onChange={e => setCant(i, e.target.value)} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ marginTop: 10 }}>
+            <span style={S.lbl}>Nota</span>
+            <input style={{ ...S.inp, width: '100%' }} value={nota} onChange={e => setNota(e.target.value)} placeholder="opcional" />
+          </div>
+        </div>
+        <div style={{ padding: '8px 12px', borderTop: '1px solid #c0c0b0', display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+          <button style={S.btn} onClick={onClose}>Cancelar</button>
+          <button style={{ ...S.btnP, background: 'linear-gradient(to bottom,#7a3a00,#5a2000)', border: '1px solid #5a2000' }}
+            onClick={save} disabled={saving}>{saving ? 'Guardando...' : '🛍️ Registrar entrega'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Resumen: stock en mi taller ───────────────────────────────────────────────
+
+function StockEnMiTaller({ movimientos, onEntregar }) {
+  const [open, setOpen] = useState(true)
+
+  // recepcion suma, envio/devolucion/entrega restan
+  const stock = {} // { pid: { prodNombre, talles: { talle: n } } }
+
+  for (const mov of movimientos) {
+    if (mov.tipo === 'pago') continue
+    const sign = mov.tipo === 'recepcion' ? 1 : -1
+    for (const it of (mov.taller_movimientos_items || [])) {
+      const pid  = it.producto_id
+      const cant = (it.cantidad || 0) * sign
+      if (!stock[pid]) stock[pid] = { prodNombre: it.productos?.nombre || '?', pid, talles: {} }
+      const t = it.talle
+      stock[pid].talles[t] = (stock[pid].talles[t] || 0) + cant
+    }
+  }
+
+  const prodList = Object.values(stock).map(({ prodNombre, pid, talles }) => {
+    const filas = Object.entries(talles).filter(([, n]) => n > 0).map(([talle, n]) => ({ talle, n, producto_id: pid, prodNombre }))
+    const total = filas.reduce((s, f) => s + f.n, 0)
+    return { prodNombre, filas, total }
+  }).filter(p => p.filas.length > 0)
+
+  const totalPrendas = prodList.reduce((s, p) => s + p.total, 0)
+  const miStockItems = prodList.flatMap(p => p.filas)
+
+  if (!prodList.length) return null
+
+  return (
+    <div style={{ border: '2px solid #7a3a00', background: '#fdf5ee', marginBottom: 10 }}>
+      <div style={{ background: 'linear-gradient(to bottom,#7a3a00,#5a2000)', color: '#fff', padding: '5px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
+        onClick={() => setOpen(o => !o)}>
+        <span style={{ fontWeight: 700, fontSize: 12 }}>{open ? '▼' : '▶'} 🏭 En mi taller</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 10 }}>{totalPrendas} prenda{totalPrendas !== 1 ? 's' : ''}</span>
+          <button style={{ ...S.btn, fontSize: 10, padding: '1px 8px', background: '#fff', color: '#7a3a00', fontWeight: 700, border: '1px solid #fff' }}
+            onClick={e => { e.stopPropagation(); onEntregar(miStockItems) }}>
+            🛍️ Entregar a cliente
+          </button>
+        </div>
+      </div>
+      {open && (
+        <div style={{ padding: '8px 10px', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          {prodList.map(p => (
+            <div key={p.prodNombre} style={{ border: '1px solid #c8a888', background: '#fff', padding: '6px 10px', minWidth: 200, flex: '1 1 200px' }}>
+              <div style={{ fontWeight: 700, fontSize: 12, color: '#7a3a00', marginBottom: 4, borderBottom: '1px solid #e8d8c8', paddingBottom: 3 }}>
+                {p.prodNombre} · <span style={{ fontWeight: 400, fontSize: 11 }}>{p.total} u.</span>
+              </div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {p.filas.map(f => (
+                  <span key={f.talle} style={{ fontSize: 11, background: '#f0e4d4', padding: '1px 6px', border: '1px solid #c8a888' }}>
+                    {f.talle} × {f.n}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Página principal ──────────────────────────────────────────────────────────
 
 export default function Talleres({ onMenuClick }) {
@@ -1021,6 +1193,7 @@ export default function Talleres({ onMenuClick }) {
   const [filtroTipo,    setFiltroTipo]    = useState('')
   const [filtroQ,       setFiltroQ]       = useState('')
   const [recibiendoStock, setRecibiendoStock] = useState(null) // { taller, stockItems }
+  const [entregando,      setEntregando]      = useState(null) // miStockItems[]
 
   useEffect(() => { fetchAll() }, [])
 
@@ -1078,6 +1251,7 @@ export default function Talleres({ onMenuClick }) {
 
       <div style={S.body}>
         <StockEnTalleres movimientos={movimientos} onRecibirStock={(taller, stockItems) => setRecibiendoStock({ taller, stockItems })} />
+        <StockEnMiTaller movimientos={movimientos} onEntregar={items => setEntregando(items)} />
         <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <select style={S.sel} value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}>
             <option value="">Todos los tipos</option>
@@ -1106,6 +1280,7 @@ export default function Talleres({ onMenuClick }) {
       {calidad    && <ModalCalidad mov={calidad}     onClose={() => setCalidad(null)}    onSave={() => { setCalidad(null);    fetchAll() }} />}
       {recibiendo && <ModalRecibir envio={recibiendo} onClose={() => setRecibiendo(null)} onSave={() => { setRecibiendo(null); fetchAll() }} />}
       {recibiendoStock && <ModalRecibirStock taller={recibiendoStock.taller} stockItems={recibiendoStock.stockItems} onClose={() => setRecibiendoStock(null)} onSave={() => { setRecibiendoStock(null); fetchAll() }} />}
+      {entregando && <ModalEntregarCliente miStockItems={entregando} onClose={() => setEntregando(null)} onSave={() => { setEntregando(null); fetchAll() }} />}
     </div>
   )
 }
