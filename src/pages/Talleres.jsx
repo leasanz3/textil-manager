@@ -937,29 +937,33 @@ function ModalRecibirStock({ taller, stockItems, onClose, onSave }) {
 function StockEnTalleres({ movimientos, onRecibirStock }) {
   const [open, setOpen] = useState(true)
 
-  // Acumular por contacto (id) → producto (id) → talle
-  // envio y devolucion suman, recepcion resta
-  const stock = {} // { cid: { nombre, cid, prods: { pid: { prodNombre, talles: { talle: n } } } } }
+  // Acumular por contacto → producto → talle, separando normal (envio) y falla (devolucion)
+  const stock = {} // { cid: { nombre, cid, prods: { pid: { prodNombre, talles: { talle: { normal, falla } } } } } }
 
   for (const mov of movimientos) {
     if (mov.tipo === 'pago' || mov.tipo === 'entrega') continue
     const cid    = mov.contactos?.id
     const nombre = mov.contactos?.nombre || '?'
-    const sign   = (mov.tipo === 'envio' || mov.tipo === 'devolucion') ? 1 : -1
+    const esFalla = mov.tipo === 'devolucion'
+    const sign    = (mov.tipo === 'envio' || mov.tipo === 'devolucion') ? 1 : -1
     for (const it of (mov.taller_movimientos_items || [])) {
       const pid  = it.producto_id
       const cant = (it.cantidad || 0) * sign
       if (!stock[cid]) stock[cid] = { nombre, cid, prods: {} }
       if (!stock[cid].prods[pid]) stock[cid].prods[pid] = { prodNombre: it.productos?.nombre || '?', pid, talles: {} }
       const t = it.talle
-      stock[cid].prods[pid].talles[t] = (stock[cid].prods[pid].talles[t] || 0) + cant
+      if (!stock[cid].prods[pid].talles[t]) stock[cid].prods[pid].talles[t] = { normal: 0, falla: 0 }
+      if (esFalla) stock[cid].prods[pid].talles[t].falla += cant
+      else         stock[cid].prods[pid].talles[t].normal += cant
     }
   }
 
   // Aplanar y filtrar positivos
   const talleres = Object.values(stock).map(({ nombre, cid, prods }) => {
     const prodList = Object.values(prods).map(({ prodNombre, pid, talles }) => {
-      const filas = Object.entries(talles).filter(([, n]) => n > 0).map(([talle, n]) => ({ talle, n, producto_id: pid, prodNombre }))
+      const filas = Object.entries(talles)
+        .filter(([, v]) => v.normal > 0 || v.falla > 0)
+        .map(([talle, v]) => ({ talle, normal: Math.max(0, v.normal), falla: Math.max(0, v.falla), n: Math.max(0, v.normal) + Math.max(0, v.falla), producto_id: pid, prodNombre }))
       const total = filas.reduce((s, f) => s + f.n, 0)
       return { prodNombre, filas, total }
     }).filter(p => p.filas.length > 0)
@@ -991,10 +995,19 @@ function StockEnTalleres({ movimientos, onRecibirStock }) {
               {t.prodList.map(p => (
                 <div key={p.prodNombre} style={{ marginBottom: 6 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 2 }}>{p.prodNombre}</div>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {p.filas.map(f => (
-                      <span key={f.talle} style={{ fontSize: 11, background: '#e0e8f4', padding: '1px 6px', border: '1px solid #a0b0c8' }}>
-                        {f.talle} × {f.n}
+                      <span key={f.talle} style={{ fontSize: 11, display: 'inline-flex', gap: 2, alignItems: 'center' }}>
+                        {f.normal > 0 && (
+                          <span style={{ background: '#e0e8f4', padding: '1px 6px', border: '1px solid #a0b0c8' }}>
+                            {f.talle} × {f.normal}
+                          </span>
+                        )}
+                        {f.falla > 0 && (
+                          <span style={{ background: '#fff0e8', padding: '1px 6px', border: '1px solid #d08060', color: '#8a2000', fontWeight: 700 }}>
+                            ⚠️ {f.talle} × {f.falla}
+                          </span>
+                        )}
                       </span>
                     ))}
                     <span style={{ fontSize: 10, color: '#555', alignSelf: 'center' }}>= {p.total}</span>
