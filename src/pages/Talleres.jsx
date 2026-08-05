@@ -953,7 +953,15 @@ function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, on
                           <td style={{ ...S.tdL, color: '#666', fontStyle: 'italic' }}>{c.observacion || ''}</td>
                           <td style={S.td}>
                             {c.enviado_taller
-                              ? <span style={{ fontSize: 10, color: '#6a006a', fontWeight: 700 }}>📤 Enviado {c.enviado_fecha ? fmtF(c.enviado_fecha) : ''}</span>
+                              ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                  <span style={{ fontSize: 10, color: '#6a006a', fontWeight: 700 }}>📤 Enviado {c.enviado_fecha ? fmtF(c.enviado_fecha) : ''}</span>
+                                  <button style={{ ...S.btn, fontSize: 9, padding: '0px 4px', color: '#888' }}
+                                    title="Deshacer — marcar como no enviado"
+                                    onClick={async () => {
+                                      await supabase.from('taller_control_items').update({ enviado_taller: false, enviado_fecha: null, enviado_contacto_id: null }).eq('id', c.id)
+                                      onEnviarFalla()
+                                    }}>✕</button>
+                                </span>
                               : <button style={{ ...S.btn, fontSize: 10, padding: '1px 5px', color: '#6a006a' }}
                                   onClick={() => setEnviarFallaItem(c)}>📤 Al taller</button>
                             }
