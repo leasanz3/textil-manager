@@ -1060,10 +1060,13 @@ function ModalRecibirStock({ taller, stockItems, onClose, onSave }) {
             </tr></thead>
             <tbody>
               {filas.map((f, i) => (
-                <tr key={i}>
+                <tr key={i} style={{ background: f.falla > 0 ? '#fff4f0' : 'transparent' }}>
                   <td style={S.tdL}>{f.prodNombre}</td>
                   <td style={{ ...S.td, fontWeight: 700 }}>{f.talle}</td>
-                  <td style={{ ...S.td, color: '#888' }}>{f.n}</td>
+                  <td style={S.td}>
+                    {f.normal > 0 && <span style={{ color: '#555', marginRight: 4 }}>{f.normal}</span>}
+                    {f.falla > 0 && <span style={{ color: '#8a2000', fontWeight: 700 }}>⚠️ {f.falla}</span>}
+                  </td>
                   <td style={S.td}>
                     <input style={{ ...S.inpC, width: 44 }} type="number" min="0" max={f.n}
                       value={f.cantidad} onChange={e => setCant(i, e.target.value)} />
@@ -1108,8 +1111,17 @@ function StockEnTalleres({ movimientos, onRecibirStock }) {
       if (!stock[cid].prods[pid]) stock[cid].prods[pid] = { prodNombre: it.productos?.nombre || '?', pid, talles: {} }
       const t = it.talle
       if (!stock[cid].prods[pid].talles[t]) stock[cid].prods[pid].talles[t] = { normal: 0, falla: 0 }
-      if (esFalla) stock[cid].prods[pid].talles[t].falla += cant
-      else         stock[cid].prods[pid].talles[t].normal += cant
+      if (esFalla) {
+        stock[cid].prods[pid].talles[t].falla += cant
+      } else if (sign === -1) {
+        // recepcion: descontar primero de falla, luego de normal
+        const qty = it.cantidad || 0
+        const desdeF = Math.min(stock[cid].prods[pid].talles[t].falla, qty)
+        stock[cid].prods[pid].talles[t].falla  -= desdeF
+        stock[cid].prods[pid].talles[t].normal -= (qty - desdeF)
+      } else {
+        stock[cid].prods[pid].talles[t].normal += cant
+      }
     }
   }
 
