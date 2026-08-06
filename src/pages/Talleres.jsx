@@ -424,6 +424,20 @@ function ModalEditar({ mov, onClose, onSave }) {
   const [saving, setSaving] = useState(false)
   const timers = useRef({})
 
+  useEffect(() => {
+    if (mov.tipo !== 'recepcion') return
+    const ids = [...new Set((mov.taller_movimientos_items || []).map(it => it.producto_id).filter(Boolean))]
+    if (!ids.length) return
+    supabase.from('productos').select('id, precio_confeccion').in('id', ids).then(({ data }) => {
+      if (!data) return
+      const map = {}
+      data.forEach(p => { map[p.id] = p.precio_confeccion })
+      setItems(prev => prev.map(it => it.producto_id && map[it.producto_id] != null
+        ? { ...it, precio_confeccion: map[it.producto_id] }
+        : it))
+    })
+  }, [])
+
   async function save() {
     if (!tallerId) { alert('Seleccioná un taller'); return }
     if (tipo === 'pago' || tipo === 'concepto') {
@@ -1518,7 +1532,7 @@ export default function Talleres({ onMenuClick }) {
         .select(`id, tipo, fecha, nota, monto, created_at,
           contactos(id, nombre),
           taller_movimientos_items(id, producto_id, talle, cantidad, observacion,
-            productos(id, nombre, tabla, precio_confeccion))`)
+            productos(id, nombre, tabla))`)
         .order('fecha', { ascending: false })
         .order('created_at', { ascending: false }),
       supabase.from('taller_control_items')
