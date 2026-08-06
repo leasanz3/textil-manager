@@ -875,7 +875,8 @@ function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, on
   const okItems     = controlItems?.filter(c => c.cant_ok > 0)    || []
   const fallaItems  = controlItems?.filter(c => c.cant_falla > 0) || []
 
-  const fmtMonto = (m) => m != null ? '$ ' + Number(m).toLocaleString('es-AR', { minimumFractionDigits: 0 }) : null
+  const esConcepto  = mov.tipo === 'concepto'
+  const tieneItems  = !esPago && !esConcepto
 
   return (
     <div style={{ ...S.card, borderColor: t.color || '#a0a8b8' }}>
