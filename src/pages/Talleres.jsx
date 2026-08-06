@@ -895,6 +895,15 @@ function RecibirFallaInline({ item, onSave }) {
 
   async function save() {
     setSaving(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data: mov } = await supabase.from('taller_movimientos')
+      .insert({ tipo: 'recepcion', fecha, contacto_id: item.enviado_contacto_id, nota: '🔁 Falla arreglada', user_id: user?.id })
+      .select().single()
+    if (mov) {
+      await supabase.from('taller_movimientos_items').insert({
+        movimiento_id: mov.id, producto_id: item.producto_id, talle: item.talle, cantidad: item.cant_falla,
+      })
+    }
     await supabase.from('taller_control_items').update({ devuelto_taller: true, devuelto_fecha: fecha }).eq('id', item.id)
     setSaving(false)
     setOpen(false)
@@ -1203,7 +1212,7 @@ function ModalRecibirStock({ taller, stockItems, onClose, onSave }) {
 
 // ── Resumen: stock actual en talleres ────────────────────────────────────────
 
-function StockEnTalleres({ movimientos, controlMap, onRecibirStock }) {
+function StockEnTalleres({ movimientos, onRecibirStock }) {
   const [open, setOpen] = useState(true)
 
   // Acumular por contacto → producto → talle, separando normal (envio) y falla (devolucion)
@@ -1237,19 +1246,6 @@ function StockEnTalleres({ movimientos, controlMap, onRecibirStock }) {
         stock[cid].prods[pid].talles[t].normal -= (qty - desdeF)
       } else {
         stock[cid].prods[pid].talles[t].normal += cant
-      }
-    }
-  }
-
-  // Restar fallas ya devueltas por el taller (marcadas devuelto_taller=true)
-  for (const items of Object.values(controlMap)) {
-    for (const c of items) {
-      if (!c.devuelto_taller || !c.enviado_contacto_id) continue
-      const cid = c.enviado_contacto_id
-      const pid = c.producto_id
-      const t   = c.talle
-      if (stock[cid]?.prods[pid]?.talles[t]) {
-        stock[cid].prods[pid].talles[t].falla = Math.max(0, stock[cid].prods[pid].talles[t].falla - c.cant_falla)
       }
     }
   }
@@ -1647,7 +1643,7 @@ export default function Talleres({ onMenuClick }) {
       </div>
 
       <div style={S.body}>
-        <StockEnTalleres movimientos={movimientos} controlMap={controlMap} onRecibirStock={(taller, stockItems) => setRecibiendoStock({ taller, stockItems })} />
+        <StockEnTalleres movimientos={movimientos} onRecibirStock={(taller, stockItems) => setRecibiendoStock({ taller, stockItems })} />
         <StockEnMiTaller movimientos={movimientos} controlMap={controlMap} onEntregar={items => setEntregando(items)} />
         <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <select style={S.sel} value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}>
