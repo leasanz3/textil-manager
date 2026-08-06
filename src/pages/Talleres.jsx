@@ -95,6 +95,9 @@ function ItemProd({ item, index, tipo, onChange, onRemove, timers }) {
   }
 
   const talles = item.talles || TALLES_ADULTO
+  const qty = Object.values(item.cantidades || {}).reduce((s, v) => s + (parseInt(v) || 0), 0)
+  const precioUnit = parseFloat(item.precio_confeccion) || 0
+  const subtotal = qty * precioUnit
 
   return (
     <div style={{ border: '1px solid #c0c8d8', background: '#f8f8fc', padding: '6px 8px', marginBottom: 8 }}>
@@ -125,6 +128,21 @@ function ItemProd({ item, index, tipo, onChange, onRemove, timers }) {
               </tr></tbody>
             </table>
           </div>
+          {tipo === 'recepcion' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, background: '#eaf4ea', border: '1px solid #b0d0b0', padding: '4px 6px' }}>
+              <span style={{ fontSize: 11, color: '#555' }}>Precio/u:</span>
+              <span style={{ fontWeight: 700, fontSize: 12 }}>$</span>
+              <input style={{ ...S.inp, width: 80, fontSize: 12, fontWeight: 700 }} type="number" min="0" step="0.01"
+                value={item.precio_confeccion != null ? item.precio_confeccion : ''}
+                onChange={e => onChange(index, { ...item, precio_confeccion: e.target.value === '' ? null : e.target.value })}
+                placeholder="0.00" />
+              {qty > 0 && precioUnit > 0 && (
+                <span style={{ fontSize: 12, color: '#1a5a1a', fontWeight: 700, marginLeft: 4 }}>
+                  × {qty} u. = {fmtMoneda(subtotal)}
+                </span>
+              )}
+            </div>
+          )}
           <div style={{ marginTop: 4 }}>
             <input style={{ ...S.inp, width: '100%' }} value={item.observacion || ''}
               onChange={e => onChange(index, { ...item, observacion: e.target.value })}
@@ -286,27 +304,10 @@ function FormMovimiento({ tipo, setTipo, fecha, setFecha, tallerQ, setTallerQ, t
         </div>
       )}
 
-      {esRecepcion && items.some(it => it.producto_id) && (
+      {esRecepcion && refPrecio > 0 && (
         <div style={{ marginBottom: 10, background: '#f0f8f0', border: '1px solid #b0d0b0', padding: '6px 10px' }}>
-          <span style={S.lbl}>Valor a pagar al taller</span>
-          {items.filter(it => it.producto_id).map((it, i) => {
-            const qty = Object.values(it.cantidades || {}).reduce((s, v) => s + (parseInt(v) || 0), 0)
-            const ref = parseFloat(it.precio_confeccion) || 0
-            return qty > 0 ? (
-              <div key={i} style={{ fontSize: 10, color: '#555', marginBottom: 2 }}>
-                {it.prodQ} × {qty} u.
-                {ref > 0 && <span style={{ color: '#888', marginLeft: 6 }}>ref: {fmtMoneda(ref)}/u. = {fmtMoneda(qty * ref)}</span>}
-              </div>
-            ) : null
-          })}
-          {refPrecio > 0 && <div style={{ fontSize: 11, color: '#2a5a2a', fontWeight: 700, marginTop: 4 }}>Total referencia: {fmtMoneda(refPrecio)}</div>}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
-            <span style={{ fontWeight: 700, fontSize: 13 }}>$</span>
-            <input style={{ ...S.inp, width: 120, fontSize: 13, fontWeight: 700 }}
-              type="number" min="0" step="0.01"
-              value={monto} onChange={e => setMonto(e.target.value)} placeholder={refPrecio > 0 ? String(refPrecio) : '0.00'} />
-            {refPrecio > 0 && !monto && <button style={{ ...S.btn, fontSize: 10 }} onClick={() => setMonto(String(refPrecio))}>Usar ref.</button>}
-          </div>
+          <span style={S.lbl}>Total a pagar al taller</span>
+          <div style={{ fontSize: 16, fontWeight: 700, color: '#1a5a1a' }}>{fmtMoneda(refPrecio)}</div>
         </div>
       )}
 
@@ -352,7 +353,12 @@ function ModalNuevo({ onClose, onSave, tipoInicial }) {
     if (!rows.length) { alert('Ingresá al menos una cantidad'); return }
     setSaving(true)
     const { data: { user } } = await supabase.auth.getUser()
-    const montoVal = monto && parseFloat(monto) > 0 ? parseFloat(monto) : null
+    const montoVal = tipo === 'recepcion'
+      ? (items.reduce((sum, it) => {
+          const qty = Object.values(it.cantidades || {}).reduce((s, v) => s + (parseInt(v) || 0), 0)
+          return sum + qty * (parseFloat(it.precio_confeccion) || 0)
+        }, 0) || null)
+      : (monto && parseFloat(monto) > 0 ? parseFloat(monto) : null)
     const { data: mov, error } = await supabase.from('taller_movimientos')
       .insert({ tipo, fecha, contacto_id: tallerId, nota: nota.trim() || null, monto: montoVal, user_id: user?.id })
       .select().single()
@@ -405,7 +411,7 @@ function ModalEditar({ mov, onClose, onSave }) {
       if (!byProd[pid]) {
         const tabla  = it.productos?.tabla || 'adulto'
         const talles = TABLAS_TALLES[tabla] || TALLES_ADULTO
-        byProd[pid] = { producto_id: pid, prodQ: it.productos?.nombre || '', prodRes: [], tabla, talles, conNino: false, cantidades: {}, observacion: it.observacion || '' }
+        byProd[pid] = { producto_id: pid, prodQ: it.productos?.nombre || '', prodRes: [], tabla, talles, conNino: false, cantidades: {}, observacion: it.observacion || '', precio_confeccion: it.productos?.precio_confeccion ?? null }
       }
       byProd[pid].cantidades[it.talle] = String(it.cantidad)
       if (TALLES_NINO.includes(it.talle)) {
@@ -429,7 +435,12 @@ function ModalEditar({ mov, onClose, onSave }) {
     const rows = buildRows(tipo, tabItems, items, fallasSel)
     if (!rows.length) { alert('Ingresá al menos una cantidad'); return }
     setSaving(true)
-    const montoVal = monto && parseFloat(monto) > 0 ? parseFloat(monto) : null
+    const montoVal = tipo === 'recepcion'
+      ? (items.reduce((sum, it) => {
+          const qty = Object.values(it.cantidades || {}).reduce((s, v) => s + (parseInt(v) || 0), 0)
+          return sum + qty * (parseFloat(it.precio_confeccion) || 0)
+        }, 0) || null)
+      : (monto && parseFloat(monto) > 0 ? parseFloat(monto) : null)
     await supabase.from('taller_movimientos').update({ tipo, fecha, contacto_id: tallerId, nota: nota.trim() || null, monto: montoVal }).eq('id', mov.id)
     await supabase.from('taller_movimientos_items').delete().eq('movimiento_id', mov.id)
     for (const r of rows) await supabase.from('taller_movimientos_items').insert({ movimiento_id: mov.id, ...r })
@@ -1507,7 +1518,7 @@ export default function Talleres({ onMenuClick }) {
         .select(`id, tipo, fecha, nota, monto, created_at,
           contactos(id, nombre),
           taller_movimientos_items(id, producto_id, talle, cantidad, observacion,
-            productos(id, nombre, tabla))`)
+            productos(id, nombre, tabla, precio_confeccion))`)
         .order('fecha', { ascending: false })
         .order('created_at', { ascending: false }),
       supabase.from('taller_control_items')
