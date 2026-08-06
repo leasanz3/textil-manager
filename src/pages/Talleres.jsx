@@ -904,7 +904,7 @@ function RecibirFallaInline({ item, onSave }) {
         movimiento_id: mov.id, producto_id: item.producto_id, talle: item.talle, cantidad: item.cant_falla,
       })
     }
-    await supabase.from('taller_control_items').update({ devuelto_taller: true, devuelto_fecha: fecha }).eq('id', item.id)
+    await supabase.from('taller_control_items').update({ devuelto_taller: true, devuelto_fecha: fecha, devuelto_recepcion_id: mov?.id || null }).eq('id', item.id)
     setSaving(false)
     setOpen(false)
     onSave()
@@ -1072,7 +1072,19 @@ function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, on
                                   )}
                                 </span>
                                 {c.devuelto_taller
-                                  ? <span style={{ fontSize: 10, color: '#1a5a1a', fontWeight: 700 }}>✓ Devuelto {c.devuelto_fecha ? fmtF(c.devuelto_fecha) : ''}</span>
+                                  ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                      <span style={{ fontSize: 10, color: '#1a5a1a', fontWeight: 700 }}>✓ Devuelto {c.devuelto_fecha ? fmtF(c.devuelto_fecha) : ''}</span>
+                                      <button style={{ ...S.btn, fontSize: 9, padding: '0px 4px', color: '#888' }}
+                                        title="Deshacer — marcar como no devuelto"
+                                        onClick={async () => {
+                                          if (c.devuelto_recepcion_id) {
+                                            await supabase.from('taller_movimientos_items').delete().eq('movimiento_id', c.devuelto_recepcion_id)
+                                            await supabase.from('taller_movimientos').delete().eq('id', c.devuelto_recepcion_id)
+                                          }
+                                          await supabase.from('taller_control_items').update({ devuelto_taller: false, devuelto_fecha: null, devuelto_recepcion_id: null }).eq('id', c.id)
+                                          onEnviarFalla()
+                                        }}>✕</button>
+                                    </span>
                                   : <RecibirFallaInline item={c} onSave={onEnviarFalla} />
                                 }
                               </div>
@@ -1588,7 +1600,7 @@ export default function Talleres({ onMenuClick }) {
         .order('fecha', { ascending: false })
         .order('created_at', { ascending: false }),
       supabase.from('taller_control_items')
-        .select(`id, movimiento_id, producto_id, talle, cant_ok, cant_falla, observacion, enviado_taller, enviado_fecha, enviado_contacto_id, devuelto_taller, devuelto_fecha,
+        .select(`id, movimiento_id, producto_id, talle, cant_ok, cant_falla, observacion, enviado_taller, enviado_fecha, enviado_contacto_id, devuelto_taller, devuelto_fecha, devuelto_recepcion_id,
           productos(id, nombre)`),
       supabase.from('taller_movimientos')
         .select(`id, tipo, fecha, nota, origen_movimiento_id,
