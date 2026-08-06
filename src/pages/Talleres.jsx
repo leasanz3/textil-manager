@@ -1451,8 +1451,8 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
   const tieneSaldo = debe > 0 || haber > 0
 
   const sorted = [...movs].sort((a, b) => {
-    const d = a.fecha.localeCompare(b.fecha)
-    return d !== 0 ? d : (a.created_at || '').localeCompare(b.created_at || '')
+    const d = b.fecha.localeCompare(a.fecha)
+    return d !== 0 ? d : (b.created_at || '').localeCompare(a.created_at || '')
   })
 
   const saldoColor = saldo > 0 ? '#8a2000' : saldo < 0 ? '#1a5a1a' : '#555'
