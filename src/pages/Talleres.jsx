@@ -1171,7 +1171,12 @@ function StockEnTalleres({ movimientos, onRecibirStock }) {
   // Acumular por contacto → producto → talle, separando normal (envio) y falla (devolucion)
   const stock = {} // { cid: { nombre, cid, prods: { pid: { prodNombre, talles: { talle: { normal, falla } } } } } }
 
-  for (const mov of movimientos) {
+  const movsAsc = [...movimientos].sort((a, b) => {
+    const d = a.fecha.localeCompare(b.fecha)
+    return d !== 0 ? d : (a.created_at || '').localeCompare(b.created_at || '')
+  })
+
+  for (const mov of movsAsc) {
     if (mov.tipo === 'pago' || mov.tipo === 'entrega') continue
     const cid    = mov.contactos?.id
     const nombre = mov.contactos?.nombre || '?'
