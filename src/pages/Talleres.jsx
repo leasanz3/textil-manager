@@ -886,6 +886,34 @@ function ModalEntregarDesdeRecepcion({ recepcion, entregasVinculadas, onClose, o
   )
 }
 
+// ── Inline: marcar falla como recibida de vuelta ─────────────────────────────
+
+function RecibirFallaInline({ item, onSave }) {
+  const [open,   setOpen]   = useState(false)
+  const [fecha,  setFecha]  = useState(today())
+  const [saving, setSaving] = useState(false)
+
+  async function save() {
+    setSaving(true)
+    await supabase.from('taller_control_items').update({ devuelto_taller: true, devuelto_fecha: fecha }).eq('id', item.id)
+    setSaving(false)
+    setOpen(false)
+    onSave()
+  }
+
+  if (!open) return (
+    <button style={{ ...S.btn, fontSize: 10, padding: '1px 5px', color: '#1a5a1a' }}
+      onClick={() => setOpen(true)}>✓ Recibí</button>
+  )
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <input style={{ ...S.inp, width: 110, fontSize: 10, padding: '1px 4px' }} type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
+      <button style={{ ...S.btnP, fontSize: 10, padding: '1px 6px' }} onClick={save} disabled={saving}>{saving ? '...' : '✓'}</button>
+      <button style={{ ...S.btn, fontSize: 10, padding: '1px 4px' }} onClick={() => setOpen(false)}>✕</button>
+    </span>
+  )
+}
+
 // ── Tarjeta de movimiento ─────────────────────────────────────────────────────
 
 function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, onEnviarFalla, entregasVinculadas }) {
@@ -1016,20 +1044,30 @@ function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, on
                           <td style={{ ...S.td, fontWeight: 700 }}>{c.talle}</td>
                           <td style={{ ...S.td, color: '#8a0000', fontWeight: 700 }}>{c.cant_falla}</td>
                           <td style={{ ...S.tdL, color: '#666', fontStyle: 'italic' }}>{c.observacion || ''}</td>
-                          <td style={S.td}>
-                            {c.enviado_taller
-                              ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <td style={{ ...S.td, minWidth: 160 }}>
+                            {!c.enviado_taller && (
+                              <button style={{ ...S.btn, fontSize: 10, padding: '1px 5px', color: '#6a006a' }}
+                                onClick={() => setEnviarFallaItem(c)}>📤 Al taller</button>
+                            )}
+                            {c.enviado_taller && (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                                   <span style={{ fontSize: 10, color: '#6a006a', fontWeight: 700 }}>📤 Enviado {c.enviado_fecha ? fmtF(c.enviado_fecha) : ''}</span>
-                                  <button style={{ ...S.btn, fontSize: 9, padding: '0px 4px', color: '#888' }}
-                                    title="Deshacer — marcar como no enviado"
-                                    onClick={async () => {
-                                      await supabase.from('taller_control_items').update({ enviado_taller: false, enviado_fecha: null, enviado_contacto_id: null }).eq('id', c.id)
-                                      onEnviarFalla()
-                                    }}>✕</button>
+                                  {!c.devuelto_taller && (
+                                    <button style={{ ...S.btn, fontSize: 9, padding: '0px 4px', color: '#888' }}
+                                      title="Deshacer — marcar como no enviado"
+                                      onClick={async () => {
+                                        await supabase.from('taller_control_items').update({ enviado_taller: false, enviado_fecha: null, enviado_contacto_id: null }).eq('id', c.id)
+                                        onEnviarFalla()
+                                      }}>✕</button>
+                                  )}
                                 </span>
-                              : <button style={{ ...S.btn, fontSize: 10, padding: '1px 5px', color: '#6a006a' }}
-                                  onClick={() => setEnviarFallaItem(c)}>📤 Al taller</button>
-                            }
+                                {c.devuelto_taller
+                                  ? <span style={{ fontSize: 10, color: '#1a5a1a', fontWeight: 700 }}>✓ Devuelto {c.devuelto_fecha ? fmtF(c.devuelto_fecha) : ''}</span>
+                                  : <RecibirFallaInline item={c} onSave={onEnviarFalla} />
+                                }
+                              </div>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -1165,7 +1203,7 @@ function ModalRecibirStock({ taller, stockItems, onClose, onSave }) {
 
 // ── Resumen: stock actual en talleres ────────────────────────────────────────
 
-function StockEnTalleres({ movimientos, onRecibirStock }) {
+function StockEnTalleres({ movimientos, controlMap, onRecibirStock }) {
   const [open, setOpen] = useState(true)
 
   // Acumular por contacto → producto → talle, separando normal (envio) y falla (devolucion)
@@ -1199,6 +1237,19 @@ function StockEnTalleres({ movimientos, onRecibirStock }) {
         stock[cid].prods[pid].talles[t].normal -= (qty - desdeF)
       } else {
         stock[cid].prods[pid].talles[t].normal += cant
+      }
+    }
+  }
+
+  // Restar fallas ya devueltas por el taller (marcadas devuelto_taller=true)
+  for (const items of Object.values(controlMap)) {
+    for (const c of items) {
+      if (!c.devuelto_taller || !c.enviado_contacto_id) continue
+      const cid = c.enviado_contacto_id
+      const pid = c.producto_id
+      const t   = c.talle
+      if (stock[cid]?.prods[pid]?.talles[t]) {
+        stock[cid].prods[pid].talles[t].falla = Math.max(0, stock[cid].prods[pid].talles[t].falla - c.cant_falla)
       }
     }
   }
@@ -1541,7 +1592,7 @@ export default function Talleres({ onMenuClick }) {
         .order('fecha', { ascending: false })
         .order('created_at', { ascending: false }),
       supabase.from('taller_control_items')
-        .select(`id, movimiento_id, producto_id, talle, cant_ok, cant_falla, observacion, enviado_taller, enviado_fecha, enviado_contacto_id,
+        .select(`id, movimiento_id, producto_id, talle, cant_ok, cant_falla, observacion, enviado_taller, enviado_fecha, enviado_contacto_id, devuelto_taller, devuelto_fecha,
           productos(id, nombre)`),
       supabase.from('taller_movimientos')
         .select(`id, tipo, fecha, nota, origen_movimiento_id,
@@ -1596,7 +1647,7 @@ export default function Talleres({ onMenuClick }) {
       </div>
 
       <div style={S.body}>
-        <StockEnTalleres movimientos={movimientos} onRecibirStock={(taller, stockItems) => setRecibiendoStock({ taller, stockItems })} />
+        <StockEnTalleres movimientos={movimientos} controlMap={controlMap} onRecibirStock={(taller, stockItems) => setRecibiendoStock({ taller, stockItems })} />
         <StockEnMiTaller movimientos={movimientos} controlMap={controlMap} onEntregar={items => setEntregando(items)} />
         <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <select style={S.sel} value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}>
