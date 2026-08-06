@@ -11,7 +11,9 @@ const TIPOS = [
   { id: 'devolucion', label: 'Devolución al taller', icon: '🔁', color: '#6a006a' },
   { id: 'pago',       label: 'Pago al taller',       icon: '💰', color: '#5a3a00' },
   { id: 'entrega',    label: 'Entrega a cliente',    icon: '🛍️', color: '#7a3a00' },
+  { id: 'concepto',   label: 'Concepto libre',       icon: '📋', color: '#2a5a6a' },
 ]
+const fmtMoneda = (m) => m != null ? '$ ' + Number(m).toLocaleString('es-AR', { minimumFractionDigits: 0 }) : '—'
 const TIPO_BY_ID = Object.fromEntries(TIPOS.map(t => [t.id, t]))
 
 const TABLAS_TALLES = {
@@ -73,14 +75,14 @@ function ItemProd({ item, index, tipo, onChange, onRemove, timers }) {
     clearTimeout(timers.current[`prod${index}`])
     if (!val.trim()) return
     timers.current[`prod${index}`] = setTimeout(async () => {
-      const { data } = await supabase.from('productos').select('id, nombre, tabla').ilike('nombre', `%${val.trim()}%`).limit(8)
+      const { data } = await supabase.from('productos').select('id, nombre, tabla, precio_confeccion').ilike('nombre', `%${val.trim()}%`).limit(8)
       onChange(index, { ...item, prodQ: val, producto_id: null, prodRes: data || [] })
     }, 250)
   }
 
   function pickProd(p) {
     const talles = TABLAS_TALLES[p.tabla] || TALLES_ADULTO
-    onChange(index, { ...item, producto_id: p.id, prodQ: p.nombre, prodRes: [], tabla: p.tabla, talles, conNino: false, cantidades: {}, observacion: '' })
+    onChange(index, { ...item, producto_id: p.id, prodQ: p.nombre, prodRes: [], tabla: p.tabla, talles, conNino: false, cantidades: {}, observacion: '', precio_confeccion: p.precio_confeccion || null })
   }
 
   function toggleNino() {
@@ -187,7 +189,15 @@ function TabFalladas({ selected, onToggle }) {
 // ── Formulario base de movimiento (compartido entre Nuevo y Editar) ───────────
 
 function FormMovimiento({ tipo, setTipo, fecha, setFecha, tallerQ, setTallerQ, tallerId, setTallerId, tallerRes, setTallerRes, items, setItems, nota, setNota, monto, setMonto, tabItems, setTabItems, fallasSel, setFallasSel, timers, modoEditar }) {
-  const conFallasTab = tipo === 'envio' || tipo === 'devolucion'
+  const conFallasTab  = tipo === 'envio' || tipo === 'devolucion'
+  const esMonoMonto   = tipo === 'pago' || tipo === 'concepto'
+  const esRecepcion   = tipo === 'recepcion'
+
+  // Referencia de precio para recepciones
+  const refPrecio = esRecepcion ? items.reduce((sum, it) => {
+    const qty = Object.values(it.cantidades || {}).reduce((s, v) => s + (parseInt(v) || 0), 0)
+    return sum + qty * (parseFloat(it.precio_confeccion) || 0)
+  }, 0) : 0
 
   function updateItem(i, val) { setItems(prev => prev.map((it, j) => j === i ? val : it)) }
   function removeItem(i)      { setItems(prev => prev.filter((_, j) => j !== i)) }
@@ -261,9 +271,12 @@ function FormMovimiento({ tipo, setTipo, fecha, setFecha, tallerQ, setTallerQ, t
         </div>
       )}
 
-      {tipo === 'pago' && (
+      {esMonoMonto && (
         <div style={{ marginBottom: 10 }}>
-          <span style={S.lbl}>Monto</span>
+          <span style={S.lbl}>{tipo === 'concepto' ? 'Concepto / descripción' : 'Monto'}</span>
+          {tipo === 'concepto' && (
+            <input style={{ ...S.inp, width: '100%', marginBottom: 6 }} value={nota} onChange={e => setNota(e.target.value)} placeholder="Ej: Boxers natación tela económica × 20 u." />
+          )}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ fontWeight: 700, fontSize: 14 }}>$</span>
             <input style={{ ...S.inp, width: 120, fontSize: 14, fontWeight: 700 }}
@@ -273,10 +286,36 @@ function FormMovimiento({ tipo, setTipo, fecha, setFecha, tallerQ, setTallerQ, t
         </div>
       )}
 
-      <div style={{ marginTop: 6 }}>
-        <span style={S.lbl}>Nota</span>
-        <input style={{ ...S.inp, width: '100%' }} value={nota} onChange={e => setNota(e.target.value)} placeholder="opcional" />
-      </div>
+      {esRecepcion && items.some(it => it.producto_id) && (
+        <div style={{ marginBottom: 10, background: '#f0f8f0', border: '1px solid #b0d0b0', padding: '6px 10px' }}>
+          <span style={S.lbl}>Valor a pagar al taller</span>
+          {items.filter(it => it.producto_id).map((it, i) => {
+            const qty = Object.values(it.cantidades || {}).reduce((s, v) => s + (parseInt(v) || 0), 0)
+            const ref = parseFloat(it.precio_confeccion) || 0
+            return qty > 0 ? (
+              <div key={i} style={{ fontSize: 10, color: '#555', marginBottom: 2 }}>
+                {it.prodQ} × {qty} u.
+                {ref > 0 && <span style={{ color: '#888', marginLeft: 6 }}>ref: {fmtMoneda(ref)}/u. = {fmtMoneda(qty * ref)}</span>}
+              </div>
+            ) : null
+          })}
+          {refPrecio > 0 && <div style={{ fontSize: 11, color: '#2a5a2a', fontWeight: 700, marginTop: 4 }}>Total referencia: {fmtMoneda(refPrecio)}</div>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
+            <span style={{ fontWeight: 700, fontSize: 13 }}>$</span>
+            <input style={{ ...S.inp, width: 120, fontSize: 13, fontWeight: 700 }}
+              type="number" min="0" step="0.01"
+              value={monto} onChange={e => setMonto(e.target.value)} placeholder={refPrecio > 0 ? String(refPrecio) : '0.00'} />
+            {refPrecio > 0 && !monto && <button style={{ ...S.btn, fontSize: 10 }} onClick={() => setMonto(String(refPrecio))}>Usar ref.</button>}
+          </div>
+        </div>
+      )}
+
+      {tipo !== 'concepto' && (
+        <div style={{ marginTop: 6 }}>
+          <span style={S.lbl}>Nota</span>
+          <input style={{ ...S.inp, width: '100%' }} value={nota} onChange={e => setNota(e.target.value)} placeholder="opcional" />
+        </div>
+      )}
     </>
   )
 }
@@ -299,8 +338,9 @@ function ModalNuevo({ onClose, onSave, tipoInicial }) {
 
   async function save() {
     if (!tallerId) { alert('Seleccioná un taller'); return }
-    if (tipo === 'pago') {
+    if (tipo === 'pago' || tipo === 'concepto') {
       if (!monto || parseFloat(monto) <= 0) { alert('Ingresá un monto'); return }
+      if (tipo === 'concepto' && !nota.trim()) { alert('Ingresá un concepto / descripción'); return }
       setSaving(true)
       const { data: { user } } = await supabase.auth.getUser()
       const { error } = await supabase.from('taller_movimientos')
@@ -312,8 +352,9 @@ function ModalNuevo({ onClose, onSave, tipoInicial }) {
     if (!rows.length) { alert('Ingresá al menos una cantidad'); return }
     setSaving(true)
     const { data: { user } } = await supabase.auth.getUser()
+    const montoVal = monto && parseFloat(monto) > 0 ? parseFloat(monto) : null
     const { data: mov, error } = await supabase.from('taller_movimientos')
-      .insert({ tipo, fecha, contacto_id: tallerId, nota: nota.trim() || null, user_id: user?.id })
+      .insert({ tipo, fecha, contacto_id: tallerId, nota: nota.trim() || null, monto: montoVal, user_id: user?.id })
       .select().single()
     if (error) { alert('Error: ' + error.message); setSaving(false); return }
     for (const r of rows) await supabase.from('taller_movimientos_items').insert({ movimiento_id: mov.id, ...r })
@@ -379,7 +420,7 @@ function ModalEditar({ mov, onClose, onSave }) {
 
   async function save() {
     if (!tallerId) { alert('Seleccioná un taller'); return }
-    if (tipo === 'pago') {
+    if (tipo === 'pago' || tipo === 'concepto') {
       if (!monto || parseFloat(monto) <= 0) { alert('Ingresá un monto'); return }
       setSaving(true)
       await supabase.from('taller_movimientos').update({ tipo, fecha, contacto_id: tallerId, nota: nota.trim() || null, monto: parseFloat(monto) }).eq('id', mov.id)
@@ -388,7 +429,8 @@ function ModalEditar({ mov, onClose, onSave }) {
     const rows = buildRows(tipo, tabItems, items, fallasSel)
     if (!rows.length) { alert('Ingresá al menos una cantidad'); return }
     setSaving(true)
-    await supabase.from('taller_movimientos').update({ tipo, fecha, contacto_id: tallerId, nota: nota.trim() || null, monto: null }).eq('id', mov.id)
+    const montoVal = monto && parseFloat(monto) > 0 ? parseFloat(monto) : null
+    await supabase.from('taller_movimientos').update({ tipo, fecha, contacto_id: tallerId, nota: nota.trim() || null, monto: montoVal }).eq('id', mov.id)
     await supabase.from('taller_movimientos_items').delete().eq('movimiento_id', mov.id)
     for (const r of rows) await supabase.from('taller_movimientos_items').insert({ movimiento_id: mov.id, ...r })
     setSaving(false); onSave()
@@ -842,12 +884,12 @@ function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, on
           <span style={{ fontSize: 14 }}>{collapsed ? '▶' : '▼'}</span>
           <span style={S.tag(t.color)}>{t.icon} {t.label}</span>
           <span style={{ fontWeight: 700, fontSize: 12 }}>{fmtF(mov.fecha)}</span>
-          <span style={{ color: '#555' }}>— {mov.contactos?.nombre || '?'}</span>
-          {esPago
-            ? <span style={{ fontWeight: 700, fontSize: 13, color: '#5a3a00' }}>{fmtMonto(mov.monto)}</span>
+          {(esPago || esConcepto)
+            ? <span style={{ fontWeight: 700, fontSize: 13, color: t.color }}>{fmtMoneda(mov.monto)}</span>
             : <span style={{ fontSize: 10, color: '#888' }}>{mov.taller_movimientos_items?.length || 0} ítem{mov.taller_movimientos_items?.length !== 1 ? 's' : ''}</span>
           }
-          {esRecepcion && hasControl && <span style={{ fontSize: 10, color: '#2a6a10', fontWeight: 700 }}>✓ controlado</span>}
+          {esRecepcion && mov.monto != null && <span style={{ fontSize: 11, color: '#1a5a1a', fontWeight: 700 }}>→ {fmtMoneda(mov.monto)}</span>}
+          {esRecepcion && hasControl && <span style={{ fontSize: 10, color: '#2a6a10', fontWeight: 700 }}>✓ ctrl</span>}
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
           {mov.tipo === 'envio' && <button style={{ ...S.btn, fontSize: 10, padding: '1px 6px', color: '#1a5a1a', fontWeight: 700 }} onClick={() => onRecibir(mov)}>📥 Recibir</button>}
@@ -861,15 +903,12 @@ function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, on
         <div style={{ padding: '6px 10px' }}>
           {mov.nota && <div style={{ fontSize: 10, color: '#555', marginBottom: 6, fontStyle: 'italic' }}>📝 {mov.nota}</div>}
 
-          {/* Pago: solo muestra monto */}
-          {esPago && (
-            <div style={{ fontSize: 12, color: '#5a3a00', fontWeight: 700 }}>
-              Monto: {fmtMonto(mov.monto)}
-            </div>
+          {(esPago || esConcepto) && (
+            <div style={{ fontSize: 12, color: t.color, fontWeight: 700 }}>{fmtMoneda(mov.monto)}</div>
           )}
 
           {/* Items */}
-          {!esPago && (() => {
+          {tieneItems && (() => {
             const its = mov.taller_movimientos_items || []
             const total = its.reduce((s, it) => s + (it.cantidad || 0), 0)
             const hasObs = its.some(it => it.observacion)
@@ -1396,6 +1435,52 @@ function StockEnMiTaller({ movimientos, controlMap, onEntregar }) {
   )
 }
 
+// ── Bloque por taller ────────────────────────────────────────────────────────
+
+function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, onCalidad, onRecibir, onEnviarFalla }) {
+  const [open, setOpen] = useState(true)
+
+  // Saldo: debe = recepciones.monto + conceptos.monto  |  haber = pagos.monto
+  let debe = 0, haber = 0
+  for (const m of movs) {
+    if ((m.tipo === 'recepcion' || m.tipo === 'concepto') && m.monto != null) debe += m.monto
+    if (m.tipo === 'pago' && m.monto != null) haber += m.monto
+  }
+  const saldo = debe - haber
+  const tieneSaldo = debe > 0 || haber > 0
+
+  const sorted = [...movs].sort((a, b) => {
+    const d = a.fecha.localeCompare(b.fecha)
+    return d !== 0 ? d : (a.created_at || '').localeCompare(b.created_at || '')
+  })
+
+  const saldoColor = saldo > 0 ? '#8a2000' : saldo < 0 ? '#1a5a1a' : '#555'
+  const saldoLabel = saldo > 0 ? `Adeudado: ${fmtMoneda(saldo)}` : saldo < 0 ? `A tu favor: ${fmtMoneda(-saldo)}` : '✓ Al día'
+
+  return (
+    <div style={{ border: '2px solid #7a8898', background: '#f4f4f0', marginBottom: 12 }}>
+      <div style={{ background: 'linear-gradient(to bottom,#4a5a6a,#2a3a4a)', color: '#fff', padding: '6px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
+        onClick={() => setOpen(o => !o)}>
+        <span style={{ fontWeight: 700, fontSize: 13 }}>{open ? '▼' : '▶'} {nombre}</span>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          {tieneSaldo && <span style={{ fontSize: 11, fontWeight: 700, color: saldo > 0 ? '#ffb0a0' : saldo < 0 ? '#a0ffb0' : '#ccc' }}>{saldoLabel}</span>}
+          <span style={{ fontSize: 10, color: '#ccc' }}>{sorted.length} movimientos</span>
+        </div>
+      </div>
+      {open && (
+        <div style={{ padding: '6px 8px' }}>
+          {sorted.map(m => (
+            <MovCard key={m.id} mov={m} onDelete={onDelete} onEdit={onEdit}
+              onCalidad={onCalidad} onRecibir={onRecibir}
+              controlItems={controlMap[m.id]} onEnviarFalla={onEnviarFalla}
+              entregasVinculadas={entregasMap[m.id]} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Página principal ──────────────────────────────────────────────────────────
 
 export default function Talleres({ onMenuClick }) {
@@ -1499,11 +1584,23 @@ export default function Talleres({ onMenuClick }) {
             <div style={{ fontSize: 28, marginBottom: 6 }}>🧵</div>
             <div>Sin movimientos{filtroTipo || filtroQ ? ' con ese filtro' : '. Creá el primero con + Movimiento'}.</div>
           </div>
-        ) : filtered.map(m => (
-          <MovCard key={m.id} mov={m} onDelete={deleteMov} onEdit={setEditando}
-            onCalidad={setCalidad} onRecibir={setRecibiendo} controlItems={controlMap[m.id]} onEnviarFalla={fetchAll}
-            entregasVinculadas={entregasMap[m.id]} />
-        ))}
+        ) : (() => {
+          // Agrupar por taller (contacto_id), ordenar por movimiento más reciente
+          const grupos = {}
+          for (const m of filtered) {
+            const cid = m.contactos?.id || '__sin__'
+            if (!grupos[cid]) grupos[cid] = { nombre: m.contactos?.nombre || '(sin taller)', movs: [], lastFecha: '' }
+            grupos[cid].movs.push(m)
+            if (m.fecha > grupos[cid].lastFecha) grupos[cid].lastFecha = m.fecha
+          }
+          const lista = Object.values(grupos).sort((a, b) => b.lastFecha.localeCompare(a.lastFecha))
+          return lista.map(g => (
+            <TallerBlock key={g.nombre} nombre={g.nombre} movs={g.movs}
+              controlMap={controlMap} entregasMap={entregasMap}
+              onDelete={deleteMov} onEdit={setEditando}
+              onCalidad={setCalidad} onRecibir={setRecibiendo} onEnviarFalla={fetchAll} />
+          ))
+        })()}
       </div>
 
       {modal      && <ModalNuevo   onClose={() => setModal(false)}       onSave={() => { setModal(false);       fetchAll() }} />}
