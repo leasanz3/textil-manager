@@ -507,9 +507,8 @@ function buildRows(tipo, tabItems, items, fallasSel) {
 
 // ── Modal: Control de calidad ─────────────────────────────────────────────────
 
-function ModalCalidad({ mov, entregasVinculadas, onClose, onSave }) {
+function ModalCalidad({ mov, entregasVinculadas, controlItems, onClose, onSave }) {
   const [entries, setEntries] = useState(() => {
-    // Calcular entregado por (producto_id, talle)
     const entregado = {}
     for (const e of (entregasVinculadas || [])) {
       for (const ei of (e.taller_movimientos_items || [])) {
@@ -517,13 +516,25 @@ function ModalCalidad({ mov, entregasVinculadas, onClose, onSave }) {
         entregado[k] = (entregado[k] || 0) + (ei.cantidad || 0)
       }
     }
+    // Pre-cargar valores existentes de control de calidad
+    const ctrlMap = {}
+    for (const c of (controlItems || [])) {
+      ctrlMap[`${c.producto_id}__${c.talle}`] = c
+    }
     const rows = []
     for (const it of (mov.taller_movimientos_items || [])) {
       const k = `${it.producto_id}__${it.talle}`
+      const existing = ctrlMap[k]
       const disponible = Math.max(0, it.cantidad - (entregado[k] || 0))
-      rows.push({ producto_id: it.producto_id, prodNombre: it.productos?.nombre || '?', talle: it.talle, recibido: it.cantidad, disponible, cant_ok: '', cant_falla: '', observacion: '' })
+      rows.push({
+        producto_id: it.producto_id, prodNombre: it.productos?.nombre || '?',
+        talle: it.talle, recibido: it.cantidad, disponible,
+        cant_ok:    existing ? String(existing.cant_ok)    : '',
+        cant_falla: existing ? String(existing.cant_falla) : '',
+        observacion: existing?.observacion || '',
+      })
     }
-    return rows.filter(r => r.disponible > 0)
+    return rows.filter(r => r.disponible > 0 || (ctrlMap[`${r.producto_id}__${r.talle}`]))
   })
   const [saving, setSaving] = useState(false)
 
@@ -987,7 +998,7 @@ function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, on
             const total = its.reduce((s, it) => s + (it.cantidad || 0), 0)
 
             if (esRecepcion) {
-              // Calcular entregado por (producto_id, talle)
+              // Calcular entregado y falla por (producto_id, talle)
               const entregado = {}
               for (const e of (entregasVinculadas || [])) {
                 for (const ei of (e.taller_movimientos_items || [])) {
@@ -995,23 +1006,30 @@ function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, on
                   entregado[k] = (entregado[k] || 0) + (ei.cantidad || 0)
                 }
               }
+              const fallaCtrl = {}
+              for (const c of (controlItems || [])) {
+                const k = `${c.producto_id}__${c.talle}`
+                fallaCtrl[k] = (fallaCtrl[k] || 0) + (c.cant_falla || 0)
+              }
               // Agrupar por producto
               const byProd = {}
               for (const it of its) {
                 const pid = it.producto_id
                 if (!byProd[pid]) byProd[pid] = { nombre: it.productos?.nombre || '?', pid, rows: [] }
                 const k = `${pid}__${it.talle}`
-                byProd[pid].rows.push({ ...it, entregadoQ: entregado[k] || 0 })
+                byProd[pid].rows.push({ ...it, entregadoQ: entregado[k] || 0, fallaQ: fallaCtrl[k] || 0 })
               }
               const grupos = Object.values(byProd)
               const totalEntregado = Object.values(entregado).reduce((s, v) => s + v, 0)
-              const totalDisp = total - totalEntregado
+              const totalFalla = Object.values(fallaCtrl).reduce((s, v) => s + v, 0)
+              const totalDisp = total - totalEntregado - totalFalla
               return (
                 <div>
                   {grupos.map(g => {
-                    const gRec = g.rows.reduce((s, r) => s + r.cantidad, 0)
-                    const gEnt = g.rows.reduce((s, r) => s + r.entregadoQ, 0)
-                    const gDisp = gRec - gEnt
+                    const gRec  = g.rows.reduce((s, r) => s + r.cantidad, 0)
+                    const gEnt  = g.rows.reduce((s, r) => s + r.entregadoQ, 0)
+                    const gFall = g.rows.reduce((s, r) => s + r.fallaQ, 0)
+                    const gDisp = gRec - gEnt - gFall
                     const expanded = !!expandedProds[g.pid]
                     return (
                       <div key={g.pid} style={{ marginBottom: 4 }}>
@@ -1020,9 +1038,10 @@ function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, on
                           onClick={() => setExpandedProds(p => ({ ...p, [g.pid]: !p[g.pid] }))}
                         >
                           <span style={{ fontWeight: 700, fontSize: 11 }}>{g.nombre}</span>
-                          <span style={{ fontSize: 10, display: 'flex', gap: 10, alignItems: 'center' }}>
+                          <span style={{ fontSize: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
                             <span style={{ color: '#555' }}>{gRec} recibidos</span>
-                            {gEnt > 0 && <span style={{ color: '#7a3a00' }}>· {gEnt} entregados</span>}
+                            {gEnt  > 0 && <span style={{ color: '#7a3a00' }}>· {gEnt} entregados</span>}
+                            {gFall > 0 && <span style={{ color: '#8a2000' }}>· ⚠️ {gFall} con falla</span>}
                             <span style={{ color: gDisp > 0 ? '#1a5a1a' : '#888', fontWeight: 700 }}>· {gDisp} disponibles</span>
                             <span style={{ color: '#888' }}>{expanded ? '▲' : '▼'}</span>
                           </span>
@@ -1033,16 +1052,18 @@ function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, on
                               <th style={S.th}>Talle</th>
                               <th style={S.th}>Recibido</th>
                               <th style={S.th}>Entregado</th>
+                              <th style={S.th}>⚠️ Falla</th>
                               <th style={S.th}>Disponible</th>
                             </tr></thead>
                             <tbody>
                               {g.rows.map(r => {
-                                const disp = r.cantidad - r.entregadoQ
+                                const disp = r.cantidad - r.entregadoQ - r.fallaQ
                                 return (
                                   <tr key={r.id} style={{ background: disp === 0 ? '#f0f0ec' : 'transparent' }}>
                                     <td style={{ ...S.td, fontWeight: 700 }}>{r.talle}</td>
                                     <td style={S.td}>{r.cantidad}</td>
                                     <td style={{ ...S.td, color: r.entregadoQ > 0 ? '#7a3a00' : '#bbb' }}>{r.entregadoQ || '—'}</td>
+                                    <td style={{ ...S.td, color: r.fallaQ > 0 ? '#8a2000' : '#bbb', fontWeight: r.fallaQ > 0 ? 700 : 400 }}>{r.fallaQ || '—'}</td>
                                     <td style={{ ...S.td, fontWeight: 700, color: disp > 0 ? '#1a5a1a' : '#aaa' }}>{disp}</td>
                                   </tr>
                                 )
@@ -1053,10 +1074,11 @@ function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, on
                       </div>
                     )
                   })}
-                  <div style={{ fontSize: 10, color: '#555', marginTop: 4, display: 'flex', gap: 12 }}>
-                    <span>Total recibido: <strong>{total}</strong></span>
-                    {totalEntregado > 0 && <span style={{ color: '#7a3a00' }}>Entregado: <strong>{totalEntregado}</strong></span>}
-                    {totalDisp > 0 && <span style={{ color: '#1a5a1a', fontWeight: 700 }}>Disponible: {totalDisp}</span>}
+                  <div style={{ fontSize: 10, color: '#555', marginTop: 4, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                    <span>Recibido: <strong>{total}</strong></span>
+                    {totalEntregado > 0 && <span style={{ color: '#7a3a00' }}>· Entregado: <strong>{totalEntregado}</strong></span>}
+                    {totalFalla > 0 && <span style={{ color: '#8a2000' }}>· ⚠️ Falla: <strong>{totalFalla}</strong></span>}
+                    <span style={{ color: totalDisp > 0 ? '#1a5a1a' : '#888', fontWeight: 700 }}>· Disponible: {totalDisp}</span>
                   </div>
                 </div>
               )
@@ -1716,6 +1738,7 @@ export default function Talleres({ onMenuClick }) {
   useEffect(() => { fetchAll() }, [])
 
   async function fetchAll() {
+    const scrollY = window.scrollY
     setLoading(true)
     const [{ data: movs }, { data: ctrl }, { data: entregas }] = await Promise.all([
       supabase.from('taller_movimientos')
@@ -1750,6 +1773,7 @@ export default function Talleres({ onMenuClick }) {
     }
     setEntregasMap(eMap)
     setLoading(false)
+    requestAnimationFrame(() => window.scrollTo(0, scrollY))
   }
 
   async function deleteMov(id) {
@@ -1821,7 +1845,7 @@ export default function Talleres({ onMenuClick }) {
 
       {modal      && <ModalNuevo   onClose={() => setModal(false)}       onSave={() => { setModal(false);       fetchAll() }} />}
       {editando   && <ModalEditar  mov={editando}   onClose={() => setEditando(null)}   onSave={() => { setEditando(null);   fetchAll() }} />}
-      {calidad    && <ModalCalidad mov={calidad} entregasVinculadas={entregasMap[calidad.id] || []} onClose={() => setCalidad(null)} onSave={() => { setCalidad(null); fetchAll() }} />}
+      {calidad    && <ModalCalidad mov={calidad} entregasVinculadas={entregasMap[calidad.id] || []} controlItems={controlMap[calidad.id] || []} onClose={() => setCalidad(null)} onSave={() => { setCalidad(null); fetchAll() }} />}
       {recibiendo && <ModalRecibir envio={recibiendo} onClose={() => setRecibiendo(null)} onSave={() => { setRecibiendo(null); fetchAll() }} />}
       {recibiendoStock && <ModalRecibirStock taller={recibiendoStock.taller} stockItems={recibiendoStock.stockItems} fallaControlItems={recibiendoStock.fallaControlItems} onClose={() => setRecibiendoStock(null)} onSave={() => { setRecibiendoStock(null); fetchAll() }} />}
       {entregando && <ModalEntregarCliente miStockItems={entregando} onClose={() => setEntregando(null)} onSave={() => { setEntregando(null); fetchAll() }} />}
