@@ -507,13 +507,23 @@ function buildRows(tipo, tabItems, items, fallasSel) {
 
 // ── Modal: Control de calidad ─────────────────────────────────────────────────
 
-function ModalCalidad({ mov, onClose, onSave }) {
+function ModalCalidad({ mov, entregasVinculadas, onClose, onSave }) {
   const [entries, setEntries] = useState(() => {
+    // Calcular entregado por (producto_id, talle)
+    const entregado = {}
+    for (const e of (entregasVinculadas || [])) {
+      for (const ei of (e.taller_movimientos_items || [])) {
+        const k = `${ei.producto_id}__${ei.talle}`
+        entregado[k] = (entregado[k] || 0) + (ei.cantidad || 0)
+      }
+    }
     const rows = []
     for (const it of (mov.taller_movimientos_items || [])) {
-      rows.push({ producto_id: it.producto_id, prodNombre: it.productos?.nombre || '?', talle: it.talle, recibido: it.cantidad, cant_ok: '', cant_falla: '', observacion: '' })
+      const k = `${it.producto_id}__${it.talle}`
+      const disponible = Math.max(0, it.cantidad - (entregado[k] || 0))
+      rows.push({ producto_id: it.producto_id, prodNombre: it.productos?.nombre || '?', talle: it.talle, recibido: it.cantidad, disponible, cant_ok: '', cant_falla: '', observacion: '' })
     }
-    return rows
+    return rows.filter(r => r.disponible > 0)
   })
   const [saving, setSaving] = useState(false)
 
@@ -550,7 +560,7 @@ function ModalCalidad({ mov, onClose, onSave }) {
             <thead><tr>
               <th style={S.thL}>Producto</th>
               <th style={S.th}>Talle</th>
-              <th style={S.th}>Recibido</th>
+              <th style={S.th}>Disponible</th>
               <th style={S.th}>✅ OK</th>
               <th style={S.th}>⚠️ Falla</th>
               <th style={S.thL}>Observación</th>
@@ -560,14 +570,14 @@ function ModalCalidad({ mov, onClose, onSave }) {
                 <tr key={i} style={{ background: parseInt(e.cant_falla) > 0 ? '#fff4f0' : 'transparent' }}>
                   <td style={S.tdL}>{e.prodNombre}</td>
                   <td style={{ ...S.td, fontWeight: 700 }}>{e.talle}</td>
-                  <td style={S.td}>{e.recibido}</td>
+                  <td style={S.td}>{e.disponible}</td>
                   <td style={S.td}>
-                    <input style={{ ...S.inpC, width: 40 }} type="number" min="0" max={e.recibido}
+                    <input style={{ ...S.inpC, width: 40 }} type="number" min="0" max={e.disponible}
                       value={e.cant_ok} onChange={ev => setField(i, 'cant_ok', ev.target.value)} />
                   </td>
                   <td style={S.td}>
                     <input style={{ ...S.inpC, width: 40, background: parseInt(e.cant_falla) > 0 ? '#ffe8e0' : '#fff' }}
-                      type="number" min="0" max={e.recibido}
+                      type="number" min="0" max={e.disponible}
                       value={e.cant_falla} onChange={ev => setField(i, 'cant_falla', ev.target.value)} />
                   </td>
                   <td style={S.tdL}>
@@ -1811,7 +1821,7 @@ export default function Talleres({ onMenuClick }) {
 
       {modal      && <ModalNuevo   onClose={() => setModal(false)}       onSave={() => { setModal(false);       fetchAll() }} />}
       {editando   && <ModalEditar  mov={editando}   onClose={() => setEditando(null)}   onSave={() => { setEditando(null);   fetchAll() }} />}
-      {calidad    && <ModalCalidad mov={calidad}     onClose={() => setCalidad(null)}    onSave={() => { setCalidad(null);    fetchAll() }} />}
+      {calidad    && <ModalCalidad mov={calidad} entregasVinculadas={entregasMap[calidad.id] || []} onClose={() => setCalidad(null)} onSave={() => { setCalidad(null); fetchAll() }} />}
       {recibiendo && <ModalRecibir envio={recibiendo} onClose={() => setRecibiendo(null)} onSave={() => { setRecibiendo(null); fetchAll() }} />}
       {recibiendoStock && <ModalRecibirStock taller={recibiendoStock.taller} stockItems={recibiendoStock.stockItems} fallaControlItems={recibiendoStock.fallaControlItems} onClose={() => setRecibiendoStock(null)} onSave={() => { setRecibiendoStock(null); fetchAll() }} />}
       {entregando && <ModalEntregarCliente miStockItems={entregando} onClose={() => setEntregando(null)} onSave={() => { setEntregando(null); fetchAll() }} />}
