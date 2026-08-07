@@ -1137,10 +1137,15 @@ function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, on
 
 // ── Modal: Recibir desde resumen de stock ────────────────────────────────────
 
-function ModalRecibirStock({ taller, stockItems, onClose, onSave }) {
-  // stockItems: [{ producto_id, prodNombre, talle, n }]
+function ModalRecibirStock({ taller, stockItems, fallaControlItems, onClose, onSave }) {
+  // stockItems: [{ producto_id, prodNombre, talle, n, normal, falla }]
+  // fallaControlItems: taller_control_items[] con falla pendiente (opcional)
+  const esFalla = fallaControlItems?.length > 0
+  const obsTexto = esFalla
+    ? [...new Set(fallaControlItems.map(c => c.observacion).filter(Boolean))].join(' / ')
+    : ''
   const [fecha,   setFecha]   = useState(today())
-  const [nota,    setNota]    = useState('')
+  const [nota,    setNota]    = useState(esFalla ? '🔁 Falla arreglada' + (obsTexto ? ` — ${obsTexto}` : '') : '')
   const [saving,  setSaving]  = useState(false)
   const [filas,   setFilas]   = useState(() =>
     stockItems.map(it => ({ ...it, cantidad: String(it.n) }))
@@ -1165,24 +1170,38 @@ function ModalRecibirStock({ taller, stockItems, onClose, onSave }) {
         talle: r.talle, cantidad: parseInt(r.cantidad) || 0,
       })
     }
+    if (esFalla && mov) {
+      for (const c of fallaControlItems) {
+        await supabase.from('taller_control_items').update({
+          devuelto_taller: true, devuelto_fecha: fecha, devuelto_recepcion_id: mov.id,
+        }).eq('id', c.id)
+      }
+    }
     setSaving(false); onSave()
   }
 
   return (
     <div style={S.overlay} onClick={onClose}>
       <div style={{ ...S.modal, width: 560 }} onClick={e => e.stopPropagation()}>
-        <div style={{ ...S.modalH, background: 'linear-gradient(to bottom,#1a6a1a,#0a4a0a)' }}>
-          <span>📥 Recibir de {taller.nombre}</span>
+        <div style={{ ...S.modalH, background: esFalla ? 'linear-gradient(to bottom,#6a006a,#4a0050)' : 'linear-gradient(to bottom,#1a6a1a,#0a4a0a)' }}>
+          <span>{esFalla ? '🔁 Recibir falla arreglada' : '📥 Recibir'} — {taller.nombre}</span>
           <button style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: F }} onClick={onClose}>✕</button>
         </div>
         <div style={S.modalB}>
+          {esFalla && (
+            <div style={{ background: '#fff0f8', border: '1px solid #d080b0', padding: '6px 10px', marginBottom: 10, fontSize: 11 }}>
+              <strong>⚠️ Falla arreglada</strong>
+              {obsTexto && <span style={{ color: '#666', marginLeft: 6 }}>— {obsTexto}</span>}
+              <div style={{ fontSize: 10, color: '#888', marginTop: 2 }}>Se marcará como devuelto en el control de calidad.</div>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
             <div>
               <span style={S.lbl}>Fecha de recepción</span>
               <input style={S.inp} type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
             </div>
           </div>
-          <div style={{ fontSize: 10, color: '#555', marginBottom: 6 }}>Ajustá las cantidades recibidas (pueden ser menores a lo que tiene el taller).</div>
+          <div style={{ fontSize: 10, color: '#555', marginBottom: 6 }}>Ajustá las cantidades recibidas.</div>
           <table style={S.tbl}>
             <thead><tr>
               <th style={S.thL}>Producto</th>
@@ -1224,7 +1243,7 @@ function ModalRecibirStock({ taller, stockItems, onClose, onSave }) {
 
 // ── Resumen: stock actual en talleres ────────────────────────────────────────
 
-function StockEnTalleres({ movimientos, onRecibirStock }) {
+function StockEnTalleres({ movimientos, controlMap, onRecibirStock }) {
   const [open, setOpen] = useState(true)
 
   // Acumular por contacto → producto → talle, separando normal (envio) y falla (devolucion)
@@ -1296,28 +1315,41 @@ function StockEnTalleres({ movimientos, onRecibirStock }) {
                   📥 Recibir
                 </button>
               </div>
-              {t.prodList.map(p => (
-                <div key={p.prodNombre} style={{ marginBottom: 6 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 2 }}>{p.prodNombre}</div>
-                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                    {p.filas.map(f => (
-                      <span key={f.talle} style={{ fontSize: 11, display: 'inline-flex', gap: 2, alignItems: 'center' }}>
-                        {f.normal > 0 && (
-                          <span style={{ background: '#e0e8f4', padding: '1px 6px', border: '1px solid #a0b0c8' }}>
-                            {f.talle} × {f.normal}
-                          </span>
-                        )}
-                        {f.falla > 0 && (
-                          <span style={{ background: '#fff0e8', padding: '1px 6px', border: '1px solid #d08060', color: '#8a2000', fontWeight: 700 }}>
-                            ⚠️ {f.talle} × {f.falla}
-                          </span>
-                        )}
-                      </span>
-                    ))}
-                    <span style={{ fontSize: 10, color: '#555', alignSelf: 'center' }}>= {p.total}</span>
+              {t.prodList.map(p => {
+                const allCtrl = Object.values(controlMap).flat()
+                const fallaCtrl = allCtrl.filter(c =>
+                  c.enviado_contacto_id === t.cid &&
+                  c.producto_id === p.filas[0]?.producto_id &&
+                  !c.devuelto_taller && c.cant_falla > 0
+                )
+                const tieneFalla = p.filas.some(f => f.falla > 0)
+                return (
+                  <div key={p.prodNombre} style={{ marginBottom: 6 }}>
+                    <button
+                      style={{ fontSize: 11, fontWeight: 700, marginBottom: 2, background: 'none', border: 'none', cursor: 'pointer', fontFamily: F, padding: 0, textDecoration: 'underline dotted', color: tieneFalla ? '#8a2000' : '#1a3a6b', textAlign: 'left' }}
+                      title="Click para recibir solo este producto"
+                      onClick={() => onRecibirStock({ id: t.cid, nombre: t.nombre }, p.filas, fallaCtrl)}
+                    >{tieneFalla ? '⚠️ ' : ''}{p.prodNombre}</button>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                      {p.filas.map(f => (
+                        <span key={f.talle} style={{ fontSize: 11, display: 'inline-flex', gap: 2, alignItems: 'center' }}>
+                          {f.normal > 0 && (
+                            <span style={{ background: '#e0e8f4', padding: '1px 6px', border: '1px solid #a0b0c8' }}>
+                              {f.talle} × {f.normal}
+                            </span>
+                          )}
+                          {f.falla > 0 && (
+                            <span style={{ background: '#fff0e8', padding: '1px 6px', border: '1px solid #d08060', color: '#8a2000', fontWeight: 700 }}>
+                              ⚠️ {f.talle} × {f.falla}
+                            </span>
+                          )}
+                        </span>
+                      ))}
+                      <span style={{ fontSize: 10, color: '#555', alignSelf: 'center' }}>= {p.total}</span>
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           ))}
         </div>
@@ -1655,7 +1687,7 @@ export default function Talleres({ onMenuClick }) {
       </div>
 
       <div style={S.body}>
-        <StockEnTalleres movimientos={movimientos} onRecibirStock={(taller, stockItems) => setRecibiendoStock({ taller, stockItems })} />
+        <StockEnTalleres movimientos={movimientos} controlMap={controlMap} onRecibirStock={(taller, stockItems, fallaCtrl) => setRecibiendoStock({ taller, stockItems, fallaControlItems: fallaCtrl || [] })} />
         <StockEnMiTaller movimientos={movimientos} controlMap={controlMap} onEntregar={items => setEntregando(items)} />
         <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <select style={S.sel} value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}>
@@ -1697,7 +1729,7 @@ export default function Talleres({ onMenuClick }) {
       {editando   && <ModalEditar  mov={editando}   onClose={() => setEditando(null)}   onSave={() => { setEditando(null);   fetchAll() }} />}
       {calidad    && <ModalCalidad mov={calidad}     onClose={() => setCalidad(null)}    onSave={() => { setCalidad(null);    fetchAll() }} />}
       {recibiendo && <ModalRecibir envio={recibiendo} onClose={() => setRecibiendo(null)} onSave={() => { setRecibiendo(null); fetchAll() }} />}
-      {recibiendoStock && <ModalRecibirStock taller={recibiendoStock.taller} stockItems={recibiendoStock.stockItems} onClose={() => setRecibiendoStock(null)} onSave={() => { setRecibiendoStock(null); fetchAll() }} />}
+      {recibiendoStock && <ModalRecibirStock taller={recibiendoStock.taller} stockItems={recibiendoStock.stockItems} fallaControlItems={recibiendoStock.fallaControlItems} onClose={() => setRecibiendoStock(null)} onSave={() => { setRecibiendoStock(null); fetchAll() }} />}
       {entregando && <ModalEntregarCliente miStockItems={entregando} onClose={() => setEntregando(null)} onSave={() => { setEntregando(null); fetchAll() }} />}
     </div>
   )
