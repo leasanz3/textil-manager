@@ -927,6 +927,7 @@ function RecibirFallaInline({ item, onSave }) {
 
 function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, onEnviarFalla, entregasVinculadas }) {
   const [collapsed,       setCollapsed]       = useState(false)
+  const [expandedProds,   setExpandedProds]   = useState({})
   const [enviarFallaItem, setEnviarFallaItem] = useState(null)
   const [entregando,      setEntregando]      = useState(false)
   const [editandoEntrega, setEditandoEntrega] = useState(null)
@@ -974,8 +975,85 @@ function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, on
           {tieneItems && (() => {
             const its = mov.taller_movimientos_items || []
             const total = its.reduce((s, it) => s + (it.cantidad || 0), 0)
+
+            if (esRecepcion) {
+              // Calcular entregado por (producto_id, talle)
+              const entregado = {}
+              for (const e of (entregasVinculadas || [])) {
+                for (const ei of (e.taller_movimientos_items || [])) {
+                  const k = `${ei.producto_id}__${ei.talle}`
+                  entregado[k] = (entregado[k] || 0) + (ei.cantidad || 0)
+                }
+              }
+              // Agrupar por producto
+              const byProd = {}
+              for (const it of its) {
+                const pid = it.producto_id
+                if (!byProd[pid]) byProd[pid] = { nombre: it.productos?.nombre || '?', pid, rows: [] }
+                const k = `${pid}__${it.talle}`
+                byProd[pid].rows.push({ ...it, entregadoQ: entregado[k] || 0 })
+              }
+              const grupos = Object.values(byProd)
+              const totalEntregado = Object.values(entregado).reduce((s, v) => s + v, 0)
+              const totalDisp = total - totalEntregado
+              return (
+                <div>
+                  {grupos.map(g => {
+                    const gRec = g.rows.reduce((s, r) => s + r.cantidad, 0)
+                    const gEnt = g.rows.reduce((s, r) => s + r.entregadoQ, 0)
+                    const gDisp = gRec - gEnt
+                    const expanded = !!expandedProds[g.pid]
+                    return (
+                      <div key={g.pid} style={{ marginBottom: 4 }}>
+                        <button
+                          style={{ width: '100%', textAlign: 'left', background: expanded ? '#e8f0e8' : '#f4f4f0', border: '1px solid #c8c8c0', padding: '4px 8px', cursor: 'pointer', fontFamily: F, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                          onClick={() => setExpandedProds(p => ({ ...p, [g.pid]: !p[g.pid] }))}
+                        >
+                          <span style={{ fontWeight: 700, fontSize: 11 }}>{g.nombre}</span>
+                          <span style={{ fontSize: 10, display: 'flex', gap: 10, alignItems: 'center' }}>
+                            <span style={{ color: '#555' }}>{gRec} recibidos</span>
+                            {gEnt > 0 && <span style={{ color: '#7a3a00' }}>· {gEnt} entregados</span>}
+                            <span style={{ color: gDisp > 0 ? '#1a5a1a' : '#888', fontWeight: 700 }}>· {gDisp} disponibles</span>
+                            <span style={{ color: '#888' }}>{expanded ? '▲' : '▼'}</span>
+                          </span>
+                        </button>
+                        {expanded && (
+                          <table style={{ ...S.tbl, marginTop: 0 }}>
+                            <thead><tr>
+                              <th style={S.th}>Talle</th>
+                              <th style={S.th}>Recibido</th>
+                              <th style={S.th}>Entregado</th>
+                              <th style={S.th}>Disponible</th>
+                            </tr></thead>
+                            <tbody>
+                              {g.rows.map(r => {
+                                const disp = r.cantidad - r.entregadoQ
+                                return (
+                                  <tr key={r.id} style={{ background: disp === 0 ? '#f0f0ec' : 'transparent' }}>
+                                    <td style={{ ...S.td, fontWeight: 700 }}>{r.talle}</td>
+                                    <td style={S.td}>{r.cantidad}</td>
+                                    <td style={{ ...S.td, color: r.entregadoQ > 0 ? '#7a3a00' : '#bbb' }}>{r.entregadoQ || '—'}</td>
+                                    <td style={{ ...S.td, fontWeight: 700, color: disp > 0 ? '#1a5a1a' : '#aaa' }}>{disp}</td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                    )
+                  })}
+                  <div style={{ fontSize: 10, color: '#555', marginTop: 4, display: 'flex', gap: 12 }}>
+                    <span>Total recibido: <strong>{total}</strong></span>
+                    {totalEntregado > 0 && <span style={{ color: '#7a3a00' }}>Entregado: <strong>{totalEntregado}</strong></span>}
+                    {totalDisp > 0 && <span style={{ color: '#1a5a1a', fontWeight: 700 }}>Disponible: {totalDisp}</span>}
+                  </div>
+                </div>
+              )
+            }
+
+            // No-recepcion: tabla simple
             const hasObs = its.some(it => it.observacion)
-            // agrupar por producto para subtotales
             const byProd = {}
             for (const it of its) {
               const pid = it.producto_id
@@ -1098,21 +1176,27 @@ function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, on
               )}
             </div>
           )}
-          {/* Entregas realizadas desde esta recepción */}
+          {/* Entregas realizadas — listado compacto por cliente */}
           {esRecepcion && entregasVinculadas?.length > 0 && (
-            <div style={{ marginTop: 8, borderTop: '1px solid #e0d8c8', paddingTop: 6 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: '#7a3a00', marginBottom: 4 }}>🛍️ Entregas realizadas</div>
+            <div style={{ marginTop: 6, borderTop: '1px solid #e0d8c8', paddingTop: 4 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#7a3a00', marginBottom: 3 }}>🛍️ Entregas</div>
               {entregasVinculadas.map(e => {
                 const totalE = (e.taller_movimientos_items || []).reduce((s, it) => s + (it.cantidad || 0), 0)
+                const byProd = {}
+                for (const it of (e.taller_movimientos_items || [])) {
+                  const nm = it.productos?.nombre || '?'
+                  if (!byProd[nm]) byProd[nm] = []
+                  byProd[nm].push(`${it.talle}×${it.cantidad}`)
+                }
                 return (
-                  <div key={e.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 4, fontSize: 11 }}>
-                    <span style={{ color: '#888', minWidth: 56 }}>{fmtF(e.fecha)}</span>
-                    <span style={{ fontWeight: 700, color: '#7a3a00', minWidth: 100 }}>{e.contactos?.nombre || '?'}</span>
-                    <span style={{ color: '#555', flex: 1 }}>
-                      {(e.taller_movimientos_items || []).map(it => `${it.productos?.nombre || '?'} ${it.talle} × ${it.cantidad}`).join(', ')}
+                  <div key={e.id} style={{ display: 'flex', gap: 6, alignItems: 'baseline', marginBottom: 3, fontSize: 11, flexWrap: 'wrap' }}>
+                    <span style={{ color: '#888', fontSize: 10, minWidth: 52 }}>{fmtF(e.fecha)}</span>
+                    <span style={{ fontWeight: 700, color: '#7a3a00' }}>{e.contactos?.nombre || '?'}</span>
+                    <span style={{ color: '#666', flex: 1 }}>
+                      {Object.entries(byProd).map(([nm, talles]) => `${nm}: ${talles.join(' ')}`).join(' · ')}
                     </span>
-                    <span style={{ fontWeight: 700, color: '#333' }}>{totalE} u.</span>
-                    <button style={{ ...S.btn, fontSize: 10, padding: '1px 5px' }} onClick={() => setEditandoEntrega(e)}>✏️</button>
+                    <span style={{ color: '#555', fontWeight: 700, fontSize: 10 }}>{totalE} u.</span>
+                    <button style={{ ...S.btn, fontSize: 10, padding: '1px 4px' }} onClick={() => setEditandoEntrega(e)}>✏️</button>
                   </div>
                 )
               })}
