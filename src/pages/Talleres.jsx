@@ -1644,29 +1644,48 @@ function StockEnMiTaller({ movimientos, controlMap, onEntregar }) {
       </div>
       {open && (
         <div style={{ padding: '8px 10px', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          {prodList.map(p => (
-            <div key={p.prodNombre} style={{ border: '1px solid #c8a888', background: '#fff', padding: '6px 10px', minWidth: 200, flex: '1 1 200px' }}>
-              <div style={{ fontWeight: 700, fontSize: 12, color: '#7a3a00', marginBottom: 4, borderBottom: '1px solid #e8d8c8', paddingBottom: 3 }}>
-                {p.prodNombre} · <span style={{ fontWeight: 400, fontSize: 11 }}>{p.total} u.</span>
-              </div>
-              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                {p.filas.map(f => (
-                  <span key={f.talle} style={{ fontSize: 11, display: 'inline-flex', gap: 2 }}>
-                    {f.ok > 0 && (
-                      <span style={{ background: '#f0e4d4', padding: '1px 6px', border: '1px solid #c8a888' }}>
-                        {f.talle} × {f.ok}
-                      </span>
-                    )}
-                    {f.falla > 0 && (
-                      <span style={{ background: '#fff0e8', padding: '1px 6px', border: '1px solid #d08060', color: '#8a2000', fontWeight: 700 }}>
-                        ⚠️ {f.talle} × {f.falla}
-                      </span>
-                    )}
+          {prodList.map(p => {
+            const tieneFalla = p.filas.some(f => f.falla > 0)
+            const tieneOk    = p.filas.some(f => f.ok > 0)
+            return (
+              <div key={p.prodNombre} style={{ border: '1px solid #c8a888', background: '#fff', padding: '6px 10px', minWidth: 200, flex: '1 1 200px' }}>
+                <div style={{ marginBottom: 4, borderBottom: '1px solid #e8d8c8', paddingBottom: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontWeight: 700, fontSize: 12, color: tieneFalla ? '#8a2000' : '#7a3a00' }}>
+                    {tieneFalla ? '⚠️ ' : ''}{p.prodNombre}
                   </span>
-                ))}
+                  <span style={{ fontSize: 10, color: '#888' }}>{p.total} u.</span>
+                </div>
+                {tieneOk && (
+                  <div style={{ marginBottom: tieneFalla ? 4 : 0 }}>
+                    <button
+                      style={{ fontSize: 10, color: '#7a3a00', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer', fontFamily: F, padding: 0, textDecoration: 'underline dotted', marginBottom: 3 }}
+                      title="Click para entregar solo este producto"
+                      onClick={() => onEntregar(p.filas.filter(f => f.ok > 0))}
+                    >🛍️ Entregar</button>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                      {p.filas.filter(f => f.ok > 0).map(f => (
+                        <span key={f.talle} style={{ fontSize: 11, background: '#f0e4d4', padding: '1px 6px', border: '1px solid #c8a888' }}>
+                          {f.talle} × {f.ok}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {tieneFalla && (
+                  <div>
+                    <div style={{ fontSize: 10, color: '#8a2000', fontWeight: 700, marginBottom: 2 }}>⚠️ Con falla</div>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                      {p.filas.filter(f => f.falla > 0).map(f => (
+                        <span key={f.talle} style={{ fontSize: 11, background: '#fff0e8', padding: '1px 6px', border: '1px solid #d08060', color: '#8a2000', fontWeight: 700 }}>
+                          ⚠️ {f.talle} × {f.falla}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
