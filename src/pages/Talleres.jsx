@@ -1726,6 +1726,7 @@ export default function Talleres({ onMenuClick }) {
   const [controlMap,    setControlMap]    = useState({})
   const [entregasMap,   setEntregasMap]   = useState({}) // recepcionId → entrega[]
   const [loading,       setLoading]       = useState(true)
+  const initialLoad = React.useRef(true)
   const [modal,         setModal]         = useState(false)
   const [editando,      setEditando]      = useState(null)
   const [calidad,       setCalidad]       = useState(null)
@@ -1738,8 +1739,9 @@ export default function Talleres({ onMenuClick }) {
   useEffect(() => { fetchAll() }, [])
 
   async function fetchAll() {
+    const isRefresh = !initialLoad.current
     const scrollY = window.scrollY
-    setLoading(true)
+    if (!isRefresh) setLoading(true)
     const [{ data: movs }, { data: ctrl }, { data: entregas }] = await Promise.all([
       supabase.from('taller_movimientos')
         .select(`id, tipo, fecha, nota, monto, created_at,
@@ -1773,7 +1775,8 @@ export default function Talleres({ onMenuClick }) {
     }
     setEntregasMap(eMap)
     setLoading(false)
-    requestAnimationFrame(() => window.scrollTo(0, scrollY))
+    initialLoad.current = false
+    if (isRefresh) requestAnimationFrame(() => window.scrollTo(0, scrollY))
   }
 
   async function deleteMov(id) {
