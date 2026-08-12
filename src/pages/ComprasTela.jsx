@@ -89,7 +89,7 @@ export default function ComprasTela({ onMenuClick }) {
   async function fetchAll() {
     setLoading(true)
     const [{ data: c }, { data: t }, { data: f }, { data: p }] = await Promise.all([
-      supabase.from('compras_tela').select('*, telas(tipo, color, unidad), compras(factura, fecha, proveedor)').order('created_at', { ascending: false }),
+      supabase.from('compras_tela').select('*, telas(tipo, color, unidad), compras(factura, fecha, proveedor, proveedor_id)').order('created_at', { ascending: false }),
       supabase.from('telas').select('id, tipo, color, unidad, proveedor_id, precio, moneda').order('tipo'),
       supabase.from('compras').select('id, factura, fecha, proveedor, proveedor_id, dolar_costeo, moneda').order('fecha', { ascending: false }),
       supabase.from('proveedores').select('id, nombre').order('nombre')
@@ -270,7 +270,19 @@ export default function ComprasTela({ onMenuClick }) {
     fetchAll()
   }
 
+  const [search, setSearch] = useState('')
+  const [filterProv, setFilterProv] = useState('')
+
   const totalCantidad = compras.reduce((a, x) => a + parseFloat(x.cantidad || 0), 0)
+
+  const comprasFiltradas = compras.filter(c => {
+    const q = search.toLowerCase()
+    const ms = !q || (c.telas?.tipo || '').toLowerCase().includes(q)
+      || (c.telas?.color || '').toLowerCase().includes(q)
+      || (c.compras?.factura || '').toLowerCase().includes(q)
+    const mp = !filterProv || String(c.compras?.proveedor_id) === filterProv
+    return ms && mp
+  })
 
   return (
     <div>
@@ -290,6 +302,16 @@ export default function ComprasTela({ onMenuClick }) {
         </div>
 
         <div className="table-wrap">
+          <div className="table-toolbar">
+            <div className="search-input" style={{ flex: 1, maxWidth: 240 }}>
+              <input placeholder="Buscar tela o código..." value={search} onChange={e => setSearch(e.target.value)} />
+            </div>
+            <select value={filterProv} onChange={e => setFilterProv(e.target.value)} style={{ width: 180 }}>
+              <option value="">Todos los proveedores</option>
+              {proveedores.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+            </select>
+          </div>
+
           {loading ? <div className="loading"><div className="spinner" /> Cargando...</div>
           : compras.length === 0 ? (
             <div className="empty-state">
@@ -312,7 +334,7 @@ export default function ComprasTela({ onMenuClick }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {[...compras].sort((a, b) => {
+                  {[...comprasFiltradas].sort((a, b) => {
                     let va, vb
                     if (sortCol === 'tela')      { va = a.telas?.tipo || ''; vb = b.telas?.tipo || '' }
                     if (sortCol === 'proveedor') { va = a.compras?.proveedor || ''; vb = b.compras?.proveedor || '' }

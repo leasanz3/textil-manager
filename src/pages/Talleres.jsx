@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
+import { TABLAS_TALLES, TALLES_ADULTO, TALLES_NINO } from '../constants/talles'
 
 const F = 'Tahoma, Trebuchet MS, sans-serif'
 const today = () => new Date().toISOString().slice(0, 10)
@@ -15,15 +16,6 @@ const TIPOS = [
 ]
 const fmtMoneda = (m) => m != null ? '$ ' + Number(m).toLocaleString('es-AR', { minimumFractionDigits: 0 }) : '—'
 const TIPO_BY_ID = Object.fromEntries(TIPOS.map(t => [t.id, t]))
-
-const TABLAS_TALLES = {
-  adulto:   ['XS', 'S', 'M', 'L', 'XL', 'XXL'],
-  nino:     ['2', '4', '6', '8', '10', '12', '14', '16'],
-  malla:    ['40', '42', '44', '46', '48', '50', '52'],
-  mallaesp: ['54', '56', '58'],
-}
-const TALLES_ADULTO = TABLAS_TALLES.adulto
-const TALLES_NINO   = TABLAS_TALLES.nino
 
 const S = {
   wrap:     { display: 'flex', flexDirection: 'column', height: '100vh', fontFamily: F, fontSize: 11, color: '#000', background: '#d4d0c8' },
@@ -51,10 +43,14 @@ const S = {
   tab: (active) => ({ fontFamily: F, fontSize: 11, padding: '3px 10px', cursor: 'pointer', border: '1px solid #808080', borderBottom: active ? 'none' : '1px solid #808080', background: active ? '#f0f0e8' : '#d8d4c8', fontWeight: active ? 700 : 400, marginBottom: active ? -1 : 0, position: 'relative', zIndex: active ? 1 : 0 }),
 }
 
-function AcList({ items, onPick, label }) {
+function AcList({ items, onPick, label, anchorRef }) {
   if (!items.length) return null
+  const r = anchorRef?.current?.getBoundingClientRect()
+  const style = r
+    ? { position: 'fixed', top: r.bottom, left: r.left, width: r.width, zIndex: 9999, background: '#fff', border: '1px solid #808080', maxHeight: 180, overflowY: 'auto', boxShadow: '2px 2px 4px rgba(0,0,0,.3)' }
+    : { position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 9999, background: '#fff', border: '1px solid #808080', maxHeight: 180, overflowY: 'auto', boxShadow: '2px 2px 4px rgba(0,0,0,.3)' }
   return (
-    <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 200, background: '#fff', border: '1px solid #808080', maxHeight: 180, overflowY: 'auto', boxShadow: '2px 2px 4px rgba(0,0,0,.3)' }}>
+    <div style={style}>
       {items.map(r => (
         <div key={r.id} style={{ padding: '4px 8px', cursor: 'pointer', borderBottom: '1px solid #eee' }}
           onMouseDown={() => onPick(r)}>{label(r)}</div>
@@ -70,19 +66,21 @@ function newItem() {
 }
 
 function ItemProd({ item, index, tipo, onChange, onRemove, timers }) {
+  const prodInputRef = React.useRef(null)
   function onProdInput(val) {
     onChange(index, { ...item, prodQ: val, producto_id: null, prodRes: [] })
     clearTimeout(timers.current[`prod${index}`])
     if (!val.trim()) return
+    const capturedVal = val
     timers.current[`prod${index}`] = setTimeout(async () => {
-      const { data } = await supabase.from('productos').select('id, nombre, tabla, precio_confeccion').ilike('nombre', `%${val.trim()}%`).limit(8)
-      onChange(index, { ...item, prodQ: val, producto_id: null, prodRes: data || [] })
+      const { data, error } = await supabase.from('productos').select('id, nombre, tabla, costo_confeccion').ilike('nombre', `%${capturedVal.trim()}%`).limit(8)
+      onChange(index, { ...item, prodQ: capturedVal, producto_id: null, prodRes: data || [] })
     }, 250)
   }
 
   function pickProd(p) {
     const talles = TABLAS_TALLES[p.tabla] || TALLES_ADULTO
-    onChange(index, { ...item, producto_id: p.id, prodQ: p.nombre, prodRes: [], tabla: p.tabla, talles, conNino: false, cantidades: {}, observacion: '', precio_confeccion: p.precio_confeccion || null })
+    onChange(index, { ...item, producto_id: p.id, prodQ: p.nombre, prodRes: [], tabla: p.tabla, talles, conNino: false, cantidades: {}, observacion: '', precio_confeccion: p.costo_confeccion || null })
   }
 
   function toggleNino() {
@@ -103,8 +101,8 @@ function ItemProd({ item, index, tipo, onChange, onRemove, timers }) {
     <div style={{ border: '1px solid #c0c8d8', background: '#f8f8fc', padding: '6px 8px', marginBottom: 8 }}>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
         <div style={{ flex: 1, position: 'relative' }}>
-          <input style={{ ...S.inp, width: '100%' }} value={item.prodQ} onChange={e => onProdInput(e.target.value)} placeholder="Buscar producto..." />
-          <AcList items={item.prodRes || []} onPick={pickProd} label={r => r.nombre} />
+          <input ref={prodInputRef} style={{ ...S.inp, width: '100%' }} value={item.prodQ} onChange={e => onProdInput(e.target.value)} placeholder="Buscar producto..." />
+          <AcList items={item.prodRes || []} onPick={pickProd} label={r => r.nombre} anchorRef={prodInputRef} />
         </div>
         {item.producto_id && item.tabla === 'adulto' && (
           <button style={{ ...S.btn, fontSize: 10, background: item.conNino ? '#4a2a6a' : undefined, color: item.conNino ? '#fff' : undefined }}
@@ -207,6 +205,7 @@ function TabFalladas({ selected, onToggle }) {
 // ── Formulario base de movimiento (compartido entre Nuevo y Editar) ───────────
 
 function FormMovimiento({ tipo, setTipo, fecha, setFecha, tallerQ, setTallerQ, tallerId, setTallerId, tallerRes, setTallerRes, items, setItems, nota, setNota, monto, setMonto, tabItems, setTabItems, fallasSel, setFallasSel, timers, modoEditar }) {
+  const tallerInputRef = React.useRef(null)
   const conFallasTab  = tipo === 'envio' || tipo === 'devolucion'
   const esMonoMonto   = tipo === 'pago' || tipo === 'concepto'
   const esRecepcion   = tipo === 'recepcion'
@@ -256,9 +255,9 @@ function FormMovimiento({ tipo, setTipo, fecha, setFecha, tallerQ, setTallerQ, t
         </div>
         <div style={{ flex: 1, position: 'relative' }}>
           <span style={S.lbl}>{tipo === 'entrega' ? 'Cliente' : 'Taller'}</span>
-          <input style={{ ...S.inp, width: '100%' }} value={tallerQ} onChange={e => onTallerInput(e.target.value)} placeholder="Buscar en Contactos..." />
+          <input ref={tallerInputRef} style={{ ...S.inp, width: '100%' }} value={tallerQ} onChange={e => onTallerInput(e.target.value)} placeholder="Buscar en Contactos..." />
           {tallerId && <span style={{ fontSize: 10, color: '#2a6a2a' }}>✓ {tallerQ}</span>}
-          <AcList items={tallerRes} onPick={r => { setTallerId(r.id); setTallerQ(r.nombre); setTallerRes([]) }} label={r => r.nombre} />
+          <AcList items={tallerRes} onPick={r => { setTallerId(r.id); setTallerQ(r.nombre); setTallerRes([]) }} label={r => r.nombre} anchorRef={tallerInputRef} />
         </div>
       </div>
 
@@ -411,7 +410,7 @@ function ModalEditar({ mov, onClose, onSave }) {
       if (!byProd[pid]) {
         const tabla  = it.productos?.tabla || 'adulto'
         const talles = TABLAS_TALLES[tabla] || TALLES_ADULTO
-        byProd[pid] = { producto_id: pid, prodQ: it.productos?.nombre || '', prodRes: [], tabla, talles, conNino: false, cantidades: {}, observacion: it.observacion || '', precio_confeccion: it.productos?.precio_confeccion ?? null }
+        byProd[pid] = { producto_id: pid, prodQ: it.productos?.nombre || '', prodRes: [], tabla, talles, conNino: false, cantidades: {}, observacion: it.observacion || '', precio_confeccion: it.productos?.costo_confeccion ?? null }
       }
       byProd[pid].cantidades[it.talle] = String(it.cantidad)
       if (TALLES_NINO.includes(it.talle)) {
@@ -428,10 +427,10 @@ function ModalEditar({ mov, onClose, onSave }) {
     if (mov.tipo !== 'recepcion') return
     const ids = [...new Set((mov.taller_movimientos_items || []).map(it => it.producto_id).filter(Boolean))]
     if (!ids.length) return
-    supabase.from('productos').select('id, precio_confeccion').in('id', ids).then(({ data }) => {
+    supabase.from('productos').select('id, costo_confeccion').in('id', ids).then(({ data }) => {
       if (!data) return
       const map = {}
-      data.forEach(p => { map[p.id] = p.precio_confeccion })
+      data.forEach(p => { map[p.id] = p.costo_confeccion })
       setItems(prev => prev.map(it => it.producto_id && map[it.producto_id] != null
         ? { ...it, precio_confeccion: map[it.producto_id] }
         : it))
@@ -710,6 +709,7 @@ function ModalEnviarFalla({ falla, onClose, onSave }) {
   const [tallerRes, setTallerRes] = useState([])
   const [saving,    setSaving]    = useState(false)
   const timers = useRef({})
+  const tallerInputRef = useRef(null)
 
   function onTallerInput(val) {
     setTallerQ(val); setTallerId(null)
@@ -740,6 +740,7 @@ function ModalEnviarFalla({ falla, onClose, onSave }) {
       enviado_taller: true,
       enviado_fecha: fecha,
       enviado_contacto_id: tallerId,
+      enviado_movimiento_id: mov.id,
     }).eq('id', falla.id)
     setSaving(false); onSave()
   }
@@ -765,12 +766,208 @@ function ModalEnviarFalla({ falla, onClose, onSave }) {
             </div>
             <div style={{ flex: 1, position: 'relative' }}>
               <span style={S.lbl}>Taller</span>
-              <input style={{ ...S.inp, width: '100%' }} value={tallerQ} onChange={e => onTallerInput(e.target.value)} placeholder="Buscar en Contactos..." />
+              <input ref={tallerInputRef} style={{ ...S.inp, width: '100%' }} value={tallerQ} onChange={e => onTallerInput(e.target.value)} placeholder="Buscar en Contactos..." />
               {tallerId && <span style={{ fontSize: 10, color: '#2a6a2a' }}>✓ {tallerQ}</span>}
-              <AcList items={tallerRes} onPick={r => { setTallerId(r.id); setTallerQ(r.nombre); setTallerRes([]) }} label={r => r.nombre} />
+              <AcList items={tallerRes} onPick={r => { setTallerId(r.id); setTallerQ(r.nombre); setTallerRes([]) }} label={r => r.nombre} anchorRef={tallerInputRef} />
             </div>
           </div>
           <div style={{ fontSize: 10, color: '#555' }}>Se creará una Devolución al taller seleccionado y la falla quedará marcada como enviada.</div>
+        </div>
+        <div style={{ padding: '8px 12px', borderTop: '1px solid #c0c0b0', display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+          <button style={S.btn} onClick={onClose}>Cancelar</button>
+          <button style={{ ...S.btnP, background: 'linear-gradient(to bottom,#6a006a,#4a004a)', border: '1px solid #4a004a' }}
+            onClick={save} disabled={saving}>{saving ? 'Guardando...' : '📤 Enviar al taller'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Modal: Enviar TODAS las fallas al taller desde En mi taller ───────────────
+
+function ModalEnviarTodasFallas({ fallaGroups, onClose, onSave }) {
+  const [fecha,     setFecha]     = useState(today())
+  const [tallerQ,   setTallerQ]   = useState('')
+  const [tallerId,  setTallerId]  = useState(null)
+  const [tallerRes, setTallerRes] = useState([])
+  const [filas,     setFilas]     = useState(() => fallaGroups.map(g => ({ ...g, cantidad: String(g.totalCant) })))
+  const [saving,    setSaving]    = useState(false)
+  const timers = useRef({})
+  const tallerInputRef = useRef(null)
+
+  function onTallerInput(val) {
+    setTallerQ(val); setTallerId(null)
+    clearTimeout(timers.current.taller)
+    if (!val.trim()) { setTallerRes([]); return }
+    timers.current.taller = setTimeout(async () => {
+      const { data } = await supabase.from('contactos').select('id, nombre').ilike('nombre', `%${val.trim()}%`).limit(8)
+      setTallerRes(data || [])
+    }, 250)
+  }
+
+  function setCant(i, val) {
+    setFilas(prev => prev.map((f, j) => j === i ? { ...f, cantidad: val } : f))
+  }
+
+  async function save() {
+    if (!tallerId) { alert('Seleccioná un taller'); return }
+    const rows = filas.filter(f => parseInt(f.cantidad) > 0)
+    if (!rows.length) { alert('Ingresá al menos una cantidad'); return }
+    setSaving(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data: mov, error } = await supabase.from('taller_movimientos')
+      .insert({ tipo: 'devolucion', fecha, contacto_id: tallerId, nota: '🔁 Fallas enviadas al taller', user_id: user?.id })
+      .select().single()
+    if (error) { alert('Error: ' + error.message); setSaving(false); return }
+    for (const r of rows) {
+      const cant = parseInt(r.cantidad)
+      await supabase.from('taller_movimientos_items').insert({
+        movimiento_id: mov.id, producto_id: r.producto_id, talle: r.talle, cantidad: cant,
+      })
+      let remaining = cant
+      for (const c of r.controlItems) {
+        if (remaining <= 0) break
+        await supabase.from('taller_control_items').update({
+          enviado_taller: true, enviado_fecha: fecha, enviado_contacto_id: tallerId, enviado_movimiento_id: mov.id,
+        }).eq('id', c.id)
+        remaining -= c.cant_falla
+      }
+    }
+    setSaving(false); onSave()
+  }
+
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={{ ...S.modal, width: 600 }} onClick={e => e.stopPropagation()}>
+        <div style={{ ...S.modalH, background: 'linear-gradient(to bottom,#6a006a,#4a004a)' }}>
+          <span>📤 Enviar fallas al taller</span>
+          <button style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: F }} onClick={onClose}>✕</button>
+        </div>
+        <div style={S.modalB}>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
+            <div>
+              <span style={S.lbl}>Fecha</span>
+              <input style={S.inp} type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
+            </div>
+            <div style={{ flex: 1, position: 'relative' }}>
+              <span style={S.lbl}>Taller</span>
+              <input ref={tallerInputRef} style={{ ...S.inp, width: '100%' }} value={tallerQ} onChange={e => onTallerInput(e.target.value)} placeholder="Buscar en Contactos..." />
+              {tallerId && <span style={{ fontSize: 10, color: '#2a6a2a' }}>✓ {tallerQ}</span>}
+              <AcList items={tallerRes} onPick={r => { setTallerId(r.id); setTallerQ(r.nombre); setTallerRes([]) }} label={r => r.nombre} anchorRef={tallerInputRef} />
+            </div>
+          </div>
+          <div style={{ fontSize: 10, color: '#555', marginBottom: 6 }}>Cantidades a enviar (máx. fallas pendientes).</div>
+          <table style={S.tbl}>
+            <thead><tr>
+              <th style={S.thL}>Producto</th>
+              <th style={S.th}>Talle</th>
+              <th style={S.th}>Con falla</th>
+              <th style={S.th}>A enviar</th>
+            </tr></thead>
+            <tbody>
+              {filas.map((f, i) => (
+                <tr key={i} style={{ background: parseInt(f.cantidad) > 0 ? '#fff4f0' : 'transparent' }}>
+                  <td style={S.tdL}>{f.prodNombre}</td>
+                  <td style={{ ...S.td, fontWeight: 700 }}>{f.talle}</td>
+                  <td style={{ ...S.td, color: '#8a2000' }}>⚠️ {f.totalCant}</td>
+                  <td style={S.td}>
+                    <input style={{ ...S.inpC, width: 44, background: parseInt(f.cantidad) > 0 ? '#fff0e8' : '#fff' }}
+                      type="number" min="0" max={f.totalCant}
+                      value={f.cantidad} onChange={e => setCant(i, e.target.value)} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div style={{ padding: '8px 12px', borderTop: '1px solid #c0c0b0', display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+          <button style={S.btn} onClick={onClose}>Cancelar</button>
+          <button style={{ ...S.btnP, background: 'linear-gradient(to bottom,#6a006a,#4a004a)', border: '1px solid #4a004a' }}
+            onClick={save} disabled={saving}>{saving ? 'Guardando...' : '📤 Enviar al taller'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Modal: Enviar falla al taller desde En mi taller (FIFO) ───────────────────
+
+function ModalEnviarFallasDesdeStock({ fallaGroup, onClose, onSave }) {
+  const { prodNombre, talle, totalCant, controlItems, producto_id } = fallaGroup
+  const [fecha,     setFecha]     = useState(today())
+  const [cantidad,  setCantidad]  = useState(String(totalCant))
+  const [tallerQ,   setTallerQ]   = useState('')
+  const [tallerId,  setTallerId]  = useState(null)
+  const [tallerRes, setTallerRes] = useState([])
+  const [saving,    setSaving]    = useState(false)
+  const timers = useRef({})
+  const tallerInputRef = useRef(null)
+
+  function onTallerInput(val) {
+    setTallerQ(val); setTallerId(null)
+    clearTimeout(timers.current.taller)
+    if (!val.trim()) { setTallerRes([]); return }
+    timers.current.taller = setTimeout(async () => {
+      const { data } = await supabase.from('contactos').select('id, nombre').ilike('nombre', `%${val.trim()}%`).limit(8)
+      setTallerRes(data || [])
+    }, 250)
+  }
+
+  async function save() {
+    if (!tallerId) { alert('Seleccioná un taller'); return }
+    const cant = parseInt(cantidad) || 0
+    if (cant <= 0) { alert('Cantidad inválida'); return }
+    setSaving(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data: mov, error } = await supabase.from('taller_movimientos')
+      .insert({ tipo: 'devolucion', fecha, contacto_id: tallerId, nota: '🔁 Falla enviada al taller', user_id: user?.id })
+      .select().single()
+    if (error) { alert('Error: ' + error.message); setSaving(false); return }
+    await supabase.from('taller_movimientos_items').insert({
+      movimiento_id: mov.id, producto_id, talle, cantidad: cant,
+    })
+    // Marcar controlItems FIFO (más viejo primero) hasta completar la cantidad
+    let remaining = cant
+    for (const c of controlItems) {
+      if (remaining <= 0) break
+      await supabase.from('taller_control_items').update({
+        enviado_taller: true, enviado_fecha: fecha, enviado_contacto_id: tallerId, enviado_movimiento_id: mov.id,
+      }).eq('id', c.id)
+      remaining -= c.cant_falla
+    }
+    setSaving(false); onSave()
+  }
+
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={{ ...S.modal, width: 440 }} onClick={e => e.stopPropagation()}>
+        <div style={{ ...S.modalH, background: 'linear-gradient(to bottom,#6a006a,#4a004a)' }}>
+          <span>📤 Enviar falla al taller</span>
+          <button style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: F }} onClick={onClose}>✕</button>
+        </div>
+        <div style={S.modalB}>
+          <div style={{ background: '#fff4f0', border: '1px solid #e0b0a0', padding: '6px 10px', marginBottom: 12, fontSize: 11 }}>
+            <strong>{prodNombre}</strong>
+            <span style={{ marginLeft: 6, color: '#1a3a6b', fontWeight: 700 }}>talle {talle}</span>
+            <span style={{ marginLeft: 6, color: '#8a0000' }}>× {totalCant} con falla</span>
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
+            <div>
+              <span style={S.lbl}>Cantidad</span>
+              <input style={{ ...S.inp, width: 60 }} type="number" min={1} max={totalCant} value={cantidad} onChange={e => setCantidad(e.target.value)} />
+            </div>
+            <div>
+              <span style={S.lbl}>Fecha</span>
+              <input style={S.inp} type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
+            </div>
+            <div style={{ flex: 1, position: 'relative' }}>
+              <span style={S.lbl}>Taller</span>
+              <input ref={tallerInputRef} style={{ ...S.inp, width: '100%' }} value={tallerQ} onChange={e => onTallerInput(e.target.value)} placeholder="Buscar en Contactos..." />
+              {tallerId && <span style={{ fontSize: 10, color: '#2a6a2a' }}>✓ {tallerQ}</span>}
+              <AcList items={tallerRes} onPick={r => { setTallerId(r.id); setTallerQ(r.nombre); setTallerRes([]) }} label={r => r.nombre} anchorRef={tallerInputRef} />
+            </div>
+          </div>
+          <div style={{ fontSize: 10, color: '#555' }}>Se creará una Devolución al taller seleccionado y las fallas quedarán marcadas como enviadas (FIFO por fecha de recepción).</div>
         </div>
         <div style={{ padding: '8px 12px', borderTop: '1px solid #c0c0b0', display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
           <button style={S.btn} onClick={onClose}>Cancelar</button>
@@ -792,6 +989,7 @@ function ModalEntregarDesdeRecepcion({ recepcion, entregasVinculadas, onClose, o
   const [nota,       setNota]       = useState('')
   const [saving,     setSaving]     = useState(false)
   const timers = useRef({})
+  const clienteInputRef = useRef(null)
 
   // Calcular ya entregado por producto+talle de entregas anteriores vinculadas
   const yaEntregado = {}
@@ -858,9 +1056,9 @@ function ModalEntregarDesdeRecepcion({ recepcion, entregasVinculadas, onClose, o
             </div>
             <div style={{ flex: 1, position: 'relative' }}>
               <span style={S.lbl}>Cliente</span>
-              <input style={{ ...S.inp, width: '100%' }} value={clienteQ} onChange={e => onClienteInput(e.target.value)} placeholder="Buscar en Contactos..." />
+              <input ref={clienteInputRef} style={{ ...S.inp, width: '100%' }} value={clienteQ} onChange={e => onClienteInput(e.target.value)} placeholder="Buscar en Contactos..." />
               {clienteId && <span style={{ fontSize: 10, color: '#2a6a2a' }}>✓ {clienteQ}</span>}
-              <AcList items={clienteRes} onPick={r => { setClienteId(r.id); setClienteQ(r.nombre); setClienteRes([]) }} label={r => r.nombre} />
+              <AcList items={clienteRes} onPick={r => { setClienteId(r.id); setClienteQ(r.nombre); setClienteRes([]) }} label={r => r.nombre} anchorRef={clienteInputRef} />
             </div>
           </div>
           <table style={S.tbl}>
@@ -1008,6 +1206,7 @@ function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, on
               }
               const fallaCtrl = {}
               for (const c of (controlItems || [])) {
+                if (c.devuelto_taller) continue // ya fue devuelto/arreglado
                 const k = `${c.producto_id}__${c.talle}`
                 fallaCtrl[k] = (fallaCtrl[k] || 0) + (c.cant_falla || 0)
               }
@@ -1476,24 +1675,28 @@ function StockEnTalleres({ movimientos, controlMap, onRecibirStock }) {
 
 // ── Modal: Entregar a cliente ─────────────────────────────────────────────────
 
-function ModalEntregarCliente({ miStockItems, onClose, onSave }) {
-  const [fecha,      setFecha]      = useState(today())
-  const [clienteQ,   setClienteQ]   = useState('')
-  const [clienteId,  setClienteId]  = useState(null)
-  const [clienteRes, setClienteRes] = useState([])
+const TIPOS_TALLER = ['Taller', 'Estampador', 'Bordador']
+
+function ModalEntregarCliente({ miStockItems, onClose, onSave, titulo = '📤 Entregar', contactoLabel = 'Destino' }) {
+  const [fecha,       setFecha]      = useState(today())
+  const [clienteQ,    setClienteQ]   = useState('')
+  const [clienteId,   setClienteId]  = useState(null)
+  const [clienteTipo, setClienteTipo]= useState(null)
+  const [clienteRes,  setClienteRes] = useState([])
   const [nota,       setNota]       = useState('')
   const [saving,     setSaving]     = useState(false)
   const [filas,      setFilas]      = useState(() =>
     miStockItems.map(it => ({ ...it, cantidad: '' }))
   )
   const timers = useRef({})
+  const clienteInputRef = useRef(null)
 
   function onClienteInput(val) {
     setClienteQ(val); setClienteId(null)
     clearTimeout(timers.current.cli)
     if (!val.trim()) { setClienteRes([]); return }
     timers.current.cli = setTimeout(async () => {
-      const { data } = await supabase.from('contactos').select('id, nombre').ilike('nombre', `%${val.trim()}%`).limit(8)
+      const { data } = await supabase.from('contactos').select('id, nombre, tipo').ilike('nombre', `%${val.trim()}%`).limit(8)
       setClienteRes(data || [])
     }, 250)
   }
@@ -1508,8 +1711,9 @@ function ModalEntregarCliente({ miStockItems, onClose, onSave }) {
     if (!rows.length) { alert('Ingresá al menos una cantidad'); return }
     setSaving(true)
     const { data: { user } } = await supabase.auth.getUser()
+    const tipoMov = TIPOS_TALLER.includes(clienteTipo) ? 'envio' : 'entrega'
     const { data: mov, error } = await supabase.from('taller_movimientos')
-      .insert({ tipo: 'entrega', fecha, contacto_id: clienteId, nota: nota.trim() || null, user_id: user?.id })
+      .insert({ tipo: tipoMov, fecha, contacto_id: clienteId, nota: nota.trim() || null, user_id: user?.id })
       .select().single()
     if (error) { alert('Error: ' + error.message); setSaving(false); return }
     for (const r of rows) {
@@ -1525,7 +1729,7 @@ function ModalEntregarCliente({ miStockItems, onClose, onSave }) {
     <div style={S.overlay} onClick={onClose}>
       <div style={{ ...S.modal, width: 600 }} onClick={e => e.stopPropagation()}>
         <div style={{ ...S.modalH, background: 'linear-gradient(to bottom,#7a3a00,#5a2000)' }}>
-          <span>🛍️ Entregar a cliente</span>
+          <span>{titulo}</span>
           <button style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: F }} onClick={onClose}>✕</button>
         </div>
         <div style={S.modalB}>
@@ -1535,12 +1739,17 @@ function ModalEntregarCliente({ miStockItems, onClose, onSave }) {
               <input style={S.inp} type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
             </div>
             <div style={{ flex: 1, position: 'relative' }}>
-              <span style={S.lbl}>Cliente</span>
-              <input style={{ ...S.inp, width: '100%' }} value={clienteQ} onChange={e => onClienteInput(e.target.value)} placeholder="Buscar en Contactos..." />
+              <span style={S.lbl}>{contactoLabel}</span>
+              <input ref={clienteInputRef} style={{ ...S.inp, width: '100%' }} value={clienteQ} onChange={e => onClienteInput(e.target.value)} placeholder="Buscar en Contactos..." />
               {clienteId && <span style={{ fontSize: 10, color: '#2a6a2a' }}>✓ {clienteQ}</span>}
-              <AcList items={clienteRes} onPick={r => { setClienteId(r.id); setClienteQ(r.nombre); setClienteRes([]) }} label={r => r.nombre} />
+              <AcList items={clienteRes} onPick={r => { setClienteId(r.id); setClienteQ(r.nombre); setClienteTipo(r.tipo); setClienteRes([]) }} label={r => r.nombre} anchorRef={clienteInputRef} />
             </div>
           </div>
+          {clienteId && (
+            <div style={{ fontSize: 10, marginBottom: 6, color: TIPOS_TALLER.includes(clienteTipo) ? '#1a5a8a' : '#5a3a00' }}>
+              {TIPOS_TALLER.includes(clienteTipo) ? '🏭 Se registrará como envío al taller — aparecerá en "En talleres"' : '🛍️ Se registrará como entrega a cliente'}
+            </div>
+          )}
           <div style={{ fontSize: 10, color: '#555', marginBottom: 6 }}>Ingresá las cantidades a entregar (máx. stock disponible).</div>
           <table style={S.tbl}>
             <thead><tr>
@@ -1556,9 +1765,13 @@ function ModalEntregarCliente({ miStockItems, onClose, onSave }) {
                   <td style={{ ...S.td, fontWeight: 700 }}>{f.talle}</td>
                   <td style={{ ...S.td, color: '#555' }}>{f.n}</td>
                   <td style={S.td}>
-                    <input style={{ ...S.inpC, width: 44, background: parseInt(f.cantidad) > 0 ? '#fff8e8' : '#fff' }}
-                      type="number" min="0" max={f.n}
-                      value={f.cantidad} onChange={e => setCant(i, e.target.value)} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                      <input style={{ ...S.inpC, width: 44, background: parseInt(f.cantidad) > 0 ? '#fff8e8' : '#fff' }}
+                        type="number" min="0" max={f.n}
+                        value={f.cantidad} onChange={e => setCant(i, e.target.value)} />
+                      <button style={{ fontSize: 9, padding: '1px 4px', fontFamily: F, background: '#e8f0e8', border: '1px solid #a8c8a8', cursor: 'pointer', color: '#2a5a2a', whiteSpace: 'nowrap' }}
+                        onClick={() => setCant(i, String(f.n))}>Todo</button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -1581,21 +1794,39 @@ function ModalEntregarCliente({ miStockItems, onClose, onSave }) {
 
 // ── Resumen: stock en mi taller ───────────────────────────────────────────────
 
-function StockEnMiTaller({ movimientos, controlMap, onEntregar }) {
+function StockEnMiTaller({ movimientos, controlMap, onEntregar, onEnviarFallaStock, onEnviarTodasFallas }) {
   const [open, setOpen] = useState(true)
 
   // recepcion suma, devolucion y entrega restan (envio se ignora)
   const stock = {} // { pid: { prodNombre, talles: { talle: { ok, falla } } } }
 
   // Fallas pendientes de envío: controlMap items con cant_falla > 0 y enviado_taller = false
-  // agrupadas por producto_id + talle
-  const fallasPendientes = {} // { `${pid}__${talle}`: cant }
+  // agrupadas por producto_id + talle, con los items reales ordenados FIFO (más viejo primero)
+  const movFechaMap = {}
+  for (const m of movimientos) movFechaMap[m.id] = m.fecha
+
+  const fallasPendientes = {} // { `${pid}__${talle}`: { cant, items, prodNombre, producto_id, talle } }
   for (const items of Object.values(controlMap)) {
     for (const c of items) {
       if (c.cant_falla > 0 && !c.enviado_taller) {
         const k = `${c.producto_id}__${c.talle}`
-        fallasPendientes[k] = (fallasPendientes[k] || 0) + c.cant_falla
+        if (!fallasPendientes[k]) fallasPendientes[k] = { cant: 0, items: [], prodNombre: c.productos?.nombre || '?', producto_id: c.producto_id, talle: c.talle }
+        fallasPendientes[k].cant += c.cant_falla
+        fallasPendientes[k].items.push(c)
       }
+    }
+  }
+  for (const v of Object.values(fallasPendientes)) {
+    v.items.sort((a, b) => (movFechaMap[a.movimiento_id] || '').localeCompare(movFechaMap[b.movimiento_id] || ''))
+  }
+
+  // Fecha más vieja de recepción por pid__talle (para orden FIFO en entrega)
+  const oldestRecepcion = {}
+  for (const mov of movimientos) {
+    if (mov.tipo !== 'recepcion') continue
+    for (const it of (mov.taller_movimientos_items || [])) {
+      const k = `${it.producto_id}__${it.talle}`
+      if (!oldestRecepcion[k] || mov.fecha < oldestRecepcion[k]) oldestRecepcion[k] = mov.fecha
     }
   }
 
@@ -1615,17 +1846,31 @@ function StockEnMiTaller({ movimientos, controlMap, onEntregar }) {
   const prodList = Object.values(stock).map(({ prodNombre, pid, talles }) => {
     const filas = Object.entries(talles)
       .map(([talle, v]) => {
-        const falla = fallasPendientes[`${pid}__${talle}`] || 0
+        const falla = fallasPendientes[`${pid}__${talle}`]?.cant || 0
         const ok = Math.max(0, (v.ok || 0)) - falla
-        return { talle, ok: Math.max(0, ok), falla, n: Math.max(0, ok) + falla, producto_id: pid, prodNombre }
+        const oldest = oldestRecepcion[`${pid}__${talle}`] || '9999'
+        return { talle, ok: Math.max(0, ok), falla, n: Math.max(0, ok) + falla, producto_id: pid, prodNombre, oldest }
       })
       .filter(f => f.ok > 0 || f.falla > 0)
     const total = filas.reduce((s, f) => s + f.n, 0)
-    return { prodNombre, filas, total }
+    const oldestProd = filas.reduce((min, f) => f.oldest < min ? f.oldest : min, '9999')
+    return { prodNombre, filas, total, oldestProd }
   }).filter(p => p.filas.length > 0)
 
   const totalPrendas = prodList.reduce((s, p) => s + p.total, 0)
-  const miStockItems = prodList.flatMap(p => p.filas)
+  // FIFO: ordenar por producto más viejo primero, dentro de cada producto por talle más viejo
+  const miStockItems = prodList
+    .sort((a, b) => a.oldestProd.localeCompare(b.oldestProd))
+    .flatMap(p => p.filas.sort((a, b) => a.oldest.localeCompare(b.oldest)))
+
+  // todasFallas derivado de prodList (lo que ya se muestra en las cards)
+  const todasFallas = prodList.flatMap(p =>
+    p.filas.filter(f => f.falla > 0).map(f => {
+      const fg = fallasPendientes[`${f.producto_id}__${f.talle}`]
+      return { prodNombre: f.prodNombre, talle: f.talle, totalCant: f.falla, controlItems: fg?.items || [], producto_id: f.producto_id }
+    })
+  )
+  const tieneFallas = todasFallas.length > 0
 
   if (!prodList.length) return null
 
@@ -1636,10 +1881,12 @@ function StockEnMiTaller({ movimientos, controlMap, onEntregar }) {
         <span style={{ fontWeight: 700, fontSize: 12 }}>{open ? '▼' : '▶'} 🏭 En mi taller</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 10 }}>{totalPrendas} prenda{totalPrendas !== 1 ? 's' : ''}</span>
-          <button style={{ ...S.btn, fontSize: 10, padding: '1px 8px', background: '#fff', color: '#7a3a00', fontWeight: 700, border: '1px solid #fff' }}
-            onClick={e => { e.stopPropagation(); onEntregar(miStockItems) }}>
-            🛍️ Entregar a cliente
-          </button>
+          {tieneFallas && (
+            <button style={{ ...S.btn, fontSize: 10, padding: '1px 8px', background: '#fff0e8', color: '#8a2000', fontWeight: 700, border: '1px solid #d08060' }}
+              onClick={e => { e.stopPropagation(); onEnviarTodasFallas && onEnviarTodasFallas(todasFallas) }}>
+              ⚠️ Con falla
+            </button>
+          )}
         </div>
       </div>
       {open && (
@@ -1673,13 +1920,32 @@ function StockEnMiTaller({ movimientos, controlMap, onEntregar }) {
                 )}
                 {tieneFalla && (
                   <div>
-                    <div style={{ fontSize: 10, color: '#8a2000', fontWeight: 700, marginBottom: 2 }}>⚠️ Con falla</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                      <button
+                        style={{ fontSize: 10, color: '#8a2000', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer', fontFamily: F, padding: 0, textDecoration: 'underline dotted' }}
+                        title="Click para enviar todas las fallas de este producto"
+                        onClick={() => {
+                          const grupos = p.filas.filter(f => f.falla > 0).map(f => {
+                            const fg = fallasPendientes[`${f.producto_id}__${f.talle}`]
+                            return { prodNombre: f.prodNombre, talle: f.talle, totalCant: f.falla, controlItems: fg?.items || [], producto_id: f.producto_id }
+                          })
+                          onEnviarTodasFallas && onEnviarTodasFallas(grupos)
+                        }}
+                      >⚠️ Con falla</button>
+                    </div>
                     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                      {p.filas.filter(f => f.falla > 0).map(f => (
-                        <span key={f.talle} style={{ fontSize: 11, background: '#fff0e8', padding: '1px 6px', border: '1px solid #d08060', color: '#8a2000', fontWeight: 700 }}>
-                          ⚠️ {f.talle} × {f.falla}
-                        </span>
-                      ))}
+                      {p.filas.filter(f => f.falla > 0).map(f => {
+                        const fg = fallasPendientes[`${f.producto_id}__${f.talle}`]
+                        return (
+                          <button key={f.talle}
+                            style={{ fontSize: 11, background: 'none', border: 'none', padding: 0, color: '#8a2000', fontWeight: 700, cursor: 'pointer', fontFamily: F, textDecoration: 'underline dotted' }}
+                            title="Click para enviar esta falla al taller"
+                            onClick={() => onEnviarFallaStock && onEnviarFallaStock({ prodNombre: f.prodNombre, talle: f.talle, totalCant: f.falla, controlItems: fg?.items || [], producto_id: f.producto_id })}
+                          >
+                            ⚠️ {f.talle} × {f.falla}
+                          </button>
+                        )
+                      })}
                     </div>
                   </div>
                 )}
@@ -1696,8 +1962,9 @@ function StockEnMiTaller({ movimientos, controlMap, onEntregar }) {
 
 function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, onCalidad, onRecibir, onEnviarFalla }) {
   const [open, setOpen] = useState(true)
+  const [cuentaOpen, setCuentaOpen] = useState(false)
 
-  // Saldo: debe = recepciones.monto + conceptos.monto  |  haber = pagos.monto
+  // Saldo
   let debe = 0, haber = 0
   for (const m of movs) {
     if ((m.tipo === 'recepcion' || m.tipo === 'concepto') && m.monto != null) debe += m.monto
@@ -1706,13 +1973,92 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
   const saldo = debe - haber
   const tieneSaldo = debe > 0 || haber > 0
 
-  const sorted = [...movs].sort((a, b) => {
-    const d = b.fecha.localeCompare(a.fecha)
-    return d !== 0 ? d : (b.created_at || '').localeCompare(a.created_at || '')
+  // Construir bloques anclados en envío con capacidad por producto/talle (FIFO)
+  const sortedAsc = [...movs].sort((a, b) => {
+    const d = a.fecha.localeCompare(b.fecha)
+    return d !== 0 ? d : (a.created_at || '').localeCompare(b.created_at || '')
   })
 
-  const saldoColor = saldo > 0 ? '#8a2000' : saldo < 0 ? '#1a5a1a' : '#555'
-  const saldoLabel = saldo > 0 ? `Adeudado: ${fmtMoneda(saldo)}` : saldo < 0 ? `A tu favor: ${fmtMoneda(-saldo)}` : '✓ Al día'
+  const cuentaCorriente = []
+  const enviosAsc = sortedAsc.filter(m => m.tipo === 'envio')
+
+  // Capacidad restante por envío: { envioId: { `${pid}__${talle}`: qty } }
+  const envioCapacity = {}
+  for (const e of enviosAsc) {
+    envioCapacity[e.id] = {}
+    for (const it of (e.taller_movimientos_items || [])) {
+      const k = `${it.producto_id}__${it.talle}`
+      envioCapacity[e.id][k] = (envioCapacity[e.id][k] || 0) + (it.cantidad || 0)
+    }
+  }
+
+  const blockMap = {}
+  for (const e of enviosAsc) blockMap[e.id] = { envio: e, movements: [] }
+  const loose = { envio: null, movements: [] }
+
+  function assignBlock(mov) {
+    const movItems = mov.taller_movimientos_items || []
+
+    // Devolución (falla que vuelve al taller): envío más reciente con ese producto antes de esta fecha
+    if (mov.tipo === 'devolucion') {
+      const movPids = new Set(movItems.map(it => it.producto_id))
+      const candidatos = enviosAsc.filter(e => {
+        if (e.fecha > mov.fecha) return false
+        return (e.taller_movimientos_items || []).some(it => movPids.has(it.producto_id))
+      })
+      if (candidatos.length) return candidatos[candidatos.length - 1].id
+      const ant = enviosAsc.filter(e => e.fecha <= mov.fecha)
+      return ant.length ? ant[ant.length - 1].id : null
+    }
+
+    // Recepción / entrega: oldest envío con capacidad restante para ese producto/talle
+    if (!movItems.length) {
+      const ant = enviosAsc.filter(e => e.fecha <= mov.fecha)
+      return ant.length ? ant[ant.length - 1].id : null
+    }
+
+    // Nivel 1: oldest envío con capacidad exacta por producto+talle
+    for (const e of enviosAsc) {
+      if (e.fecha > mov.fecha) continue
+      const cap = envioCapacity[e.id]
+      const tieneCapacidad = movItems.some(it => (cap[`${it.producto_id}__${it.talle}`] || 0) > 0)
+      if (tieneCapacidad) {
+        if (mov.tipo === 'recepcion') {
+          for (const it of movItems) {
+            const k = `${it.producto_id}__${it.talle}`
+            if (cap[k]) cap[k] = Math.max(0, cap[k] - (it.cantidad || 0))
+          }
+        }
+        return e.id
+      }
+    }
+
+    // Nivel 2: oldest envío que directamente contiene el mismo producto (sin importar talle ni capacidad)
+    const movPids = new Set(movItems.map(it => it.producto_id))
+    for (const e of enviosAsc) {
+      if (e.fecha > mov.fecha) continue
+      const tieneProducto = (e.taller_movimientos_items || []).some(it => movPids.has(it.producto_id))
+      if (tieneProducto) return e.id
+    }
+
+    // Nivel 3: fallback al envío más reciente antes de esta fecha
+    const ant = enviosAsc.filter(e => e.fecha <= mov.fecha)
+    return ant.length ? ant[ant.length - 1].id : null
+  }
+
+  for (const m of sortedAsc) {
+    if (m.tipo === 'pago' || m.tipo === 'concepto') { cuentaCorriente.push(m); continue }
+    if (m.tipo === 'envio') continue
+    const bid = assignBlock(m)
+    if (bid && blockMap[bid]) blockMap[bid].movements.push(m)
+    else loose.movements.push(m)
+  }
+
+  const blocks = [
+    ...enviosAsc.map(e => blockMap[e.id]),
+    ...(loose.movements.length ? [loose] : []),
+  ]
+  const blocksDesc = [...blocks].reverse()
 
   return (
     <div style={{ border: '2px solid #7a8898', background: '#f4f4f0', marginBottom: 12 }}>
@@ -1720,18 +2066,58 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
         onClick={() => setOpen(o => !o)}>
         <span style={{ fontWeight: 700, fontSize: 13 }}>{open ? '▼' : '▶'} {nombre}</span>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          {tieneSaldo && <span style={{ fontSize: 11, fontWeight: 700, color: saldo > 0 ? '#ffb0a0' : saldo < 0 ? '#a0ffb0' : '#ccc' }}>{saldoLabel}</span>}
-          <span style={{ fontSize: 10, color: '#ccc' }}>{sorted.length} movimientos</span>
+          {tieneSaldo && <span style={{ fontSize: 11, fontWeight: 700, color: saldo > 0 ? '#ffb0a0' : saldo < 0 ? '#a0ffb0' : '#ccc' }}>
+            {saldo > 0 ? `Adeudado: ${fmtMoneda(saldo)}` : saldo < 0 ? `A tu favor: ${fmtMoneda(-saldo)}` : '✓ Al día'}
+          </span>}
+          <span style={{ fontSize: 10, color: '#ccc' }}>{movs.length} movimientos</span>
         </div>
       </div>
+
       {open && (
         <div style={{ padding: '6px 8px' }}>
-          {sorted.map(m => (
-            <MovCard key={m.id} mov={m} onDelete={onDelete} onEdit={onEdit}
-              onCalidad={onCalidad} onRecibir={onRecibir}
-              controlItems={controlMap[m.id]} onEnviarFalla={onEnviarFalla}
-              entregasVinculadas={entregasMap[m.id]} />
+          {blocksDesc.map((block, i) => (
+            <div key={block.envio?.id || `suelto-${i}`}
+              style={{ borderLeft: '3px solid #b0b8c8', marginBottom: 10, paddingLeft: 8 }}>
+              {/* Recepciones/devoluciones/entregas — más nueva primero */}
+              {[...block.movements].reverse().map(m => (
+                <MovCard key={m.id} mov={m} onDelete={onDelete} onEdit={onEdit}
+                  onCalidad={onCalidad} onRecibir={onRecibir}
+                  controlItems={controlMap[m.id]} onEnviarFalla={onEnviarFalla}
+                  entregasVinculadas={entregasMap[m.id]} />
+              ))}
+              {/* Envío — ancla del bloque, al fondo */}
+              {block.envio && (
+                <div style={{ borderTop: block.movements.length > 0 ? '1px dashed #b0b8c8' : 'none', paddingTop: block.movements.length > 0 ? 4 : 0 }}>
+                  <MovCard mov={block.envio} onDelete={onDelete} onEdit={onEdit}
+                    onCalidad={onCalidad} onRecibir={onRecibir}
+                    controlItems={controlMap[block.envio.id]} onEnviarFalla={onEnviarFalla}
+                    entregasVinculadas={entregasMap[block.envio.id]} />
+                </div>
+              )}
+            </div>
           ))}
+
+          {/* Cuenta corriente (pagos y conceptos) — colapsada por defecto */}
+          {cuentaCorriente.length > 0 && (
+            <div style={{ borderTop: '1px solid #c0c8d0', marginTop: 4, paddingTop: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: cuentaOpen ? 4 : 0 }}
+                onClick={() => setCuentaOpen(o => !o)}>
+                <span style={{ fontSize: 11, color: '#4a5a6a', fontWeight: 700 }}>
+                  {cuentaOpen ? '▼' : '▶'} 💰 Cuenta corriente
+                </span>
+                <span style={{ fontSize: 10, color: '#888' }}>
+                  {cuentaCorriente.length} movimiento{cuentaCorriente.length !== 1 ? 's' : ''}
+                  {tieneSaldo ? ` · ${saldo > 0 ? `debe ${fmtMoneda(saldo)}` : saldo < 0 ? `a favor ${fmtMoneda(-saldo)}` : 'al día'}` : ''}
+                </span>
+              </div>
+              {cuentaOpen && [...cuentaCorriente].reverse().map(m => (
+                <MovCard key={m.id} mov={m} onDelete={onDelete} onEdit={onEdit}
+                  onCalidad={onCalidad} onRecibir={onRecibir}
+                  controlItems={controlMap[m.id]} onEnviarFalla={onEnviarFalla}
+                  entregasVinculadas={entregasMap[m.id]} />
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1752,8 +2138,10 @@ export default function Talleres({ onMenuClick }) {
   const [recibiendo,    setRecibiendo]    = useState(null)
   const [filtroTipo,    setFiltroTipo]    = useState('')
   const [filtroQ,       setFiltroQ]       = useState('')
-  const [recibiendoStock, setRecibiendoStock] = useState(null) // { taller, stockItems }
-  const [entregando,      setEntregando]      = useState(null) // miStockItems[]
+  const [recibiendoStock,   setRecibiendoStock]   = useState(null) // { taller, stockItems }
+  const [entregando,        setEntregando]        = useState(null) // miStockItems[]
+  const [enviandoFallaStock,   setEnviandoFallaStock]   = useState(null) // fallaGroup individual
+  const [enviandoTodasFallas,  setEnviandoTodasFallas]  = useState(null) // fallaGroups[]
 
   useEffect(() => { fetchAll() }, [])
 
@@ -1800,6 +2188,10 @@ export default function Talleres({ onMenuClick }) {
 
   async function deleteMov(id) {
     if (!window.confirm('¿Eliminar este movimiento?')) return
+    // Si es una devolución, resetear los control items que marcó como enviados
+    await supabase.from('taller_control_items')
+      .update({ enviado_taller: false, enviado_fecha: null, enviado_contacto_id: null, enviado_movimiento_id: null })
+      .eq('enviado_movimiento_id', id)
     await supabase.from('taller_control_items').delete().eq('movimiento_id', id)
     await supabase.from('taller_movimientos_items').delete().eq('movimiento_id', id)
     await supabase.from('taller_movimientos').delete().eq('id', id)
@@ -1828,7 +2220,7 @@ export default function Talleres({ onMenuClick }) {
 
       <div style={S.body}>
         <StockEnTalleres movimientos={movimientos} controlMap={controlMap} onRecibirStock={(taller, stockItems, fallaCtrl) => setRecibiendoStock({ taller, stockItems, fallaControlItems: fallaCtrl || [] })} />
-        <StockEnMiTaller movimientos={movimientos} controlMap={controlMap} onEntregar={items => setEntregando(items)} />
+        <StockEnMiTaller movimientos={movimientos} controlMap={controlMap} onEntregar={items => setEntregando(items)} onEnviarFallaStock={group => setEnviandoFallaStock(group)} onEnviarTodasFallas={groups => setEnviandoTodasFallas(groups)} />
         <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <select style={S.sel} value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}>
             <option value="">Todos los tipos</option>
@@ -1871,6 +2263,8 @@ export default function Talleres({ onMenuClick }) {
       {recibiendo && <ModalRecibir envio={recibiendo} onClose={() => setRecibiendo(null)} onSave={() => { setRecibiendo(null); fetchAll() }} />}
       {recibiendoStock && <ModalRecibirStock taller={recibiendoStock.taller} stockItems={recibiendoStock.stockItems} fallaControlItems={recibiendoStock.fallaControlItems} onClose={() => setRecibiendoStock(null)} onSave={() => { setRecibiendoStock(null); fetchAll() }} />}
       {entregando && <ModalEntregarCliente miStockItems={entregando} onClose={() => setEntregando(null)} onSave={() => { setEntregando(null); fetchAll() }} />}
+      {enviandoFallaStock && <ModalEnviarFallasDesdeStock fallaGroup={enviandoFallaStock} onClose={() => setEnviandoFallaStock(null)} onSave={() => { setEnviandoFallaStock(null); fetchAll() }} />}
+      {enviandoTodasFallas && <ModalEnviarTodasFallas fallaGroups={enviandoTodasFallas} onClose={() => setEnviandoTodasFallas(null)} onSave={() => { setEnviandoTodasFallas(null); fetchAll() }} />}
     </div>
   )
 }

@@ -1,14 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
-
-// ── Constants ──────────────────────────────────────────────────────────────────
-
-export const TABLAS_TALLES = {
-  adulto:   ['XS', 'S', 'M', 'L', 'XL', 'XXL'],
-  nino:     ['2', '4', '6', '8', '10', '12', '14', '16'],
-  malla:    ['40', '42', '44', '46', '48', '50', '52'],
-  mallaesp: ['54', '56', '58'],
-}
+import { TABLAS_TALLES } from '../constants/talles'
 export const ROL_LABELS = { tela1: 'Tela 1', tela2: 'Tela 2', tela3: 'Tela 3', rib: 'RIB' }
 const F = 'Tahoma, Arial, sans-serif'
 

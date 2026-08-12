@@ -13,3 +13,4 @@ build/
 # Editor
 .vscode/
 .DS_Store
+.vercel

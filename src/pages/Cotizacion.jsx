@@ -1,365 +1,577 @@
 import React, { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
-const fmtUYU = n => n != null && n !== ''
-  ? '$' + Number(n).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  : '$0,00'
-const fmtFecha = f => {
-  if (!f) return '—'
-  const s = f.includes('T') ? f.split('T')[0] : f
-  const [y, m, d] = s.split('-')
-  return `${d}/${m}/${y}`
-}
+const F = 'Tahoma, Trebuchet MS, sans-serif'
+const today = () => new Date().toISOString().slice(0, 10)
+const fmtF  = f => { if (!f) return '—'; const s = f.includes('T') ? f.split('T')[0] : f; const [y,m,d] = s.split('-'); return `${d}/${m}/${y}` }
+const fmtM  = n => { const v = parseFloat(n); if (!v) return '$ 0'; return '$ ' + v.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }
 
-const PANEL = { background: '#fff', border: '1px solid #a8a8a8', boxShadow: '1px 1px 0 #b8b8b8', marginBottom: 8 }
-const HDR   = { padding: '5px 10px', fontWeight: 700, fontSize: 12, background: 'linear-gradient(to bottom, #e8eef7, #c8d4e8)', borderBottom: '1px solid #6b83a8', color: '#1a3a6b' }
-const BODY  = { padding: 10 }
-
-const ESTADO_STYLE = {
-  pendiente:   { background: '#fff3c8', color: '#5a3a00', border: '1px solid #c8a040' },
-  aceptada:    { background: '#d4f0d4', color: '#1a5a1a', border: '1px solid #4a9a4a' },
-  no_aceptada: { background: '#ffd4d4', color: '#8a0000', border: '1px solid #c06060' },
-}
-const ESTADO_LABEL = { pendiente: 'Pendiente', aceptada: 'Aceptada', no_aceptada: 'No aceptada' }
-
-const SECCION = { padding: '4px 8px', background: '#f0f4f8', fontWeight: 700, color: '#1a3a6b', fontSize: 11, border: '1px solid #e0e8f0' }
-const TD      = { padding: '5px 8px', border: '1px solid #eee' }
-const TD_IN   = { padding: '3px 6px', border: '1px solid #eee' }
-
-// Recoge los IDs de tela de un producto (tela1, tela2, rib, extras)
-function telaIdsDeProducto(prod) {
-  const ids = []
-  if (prod.tela1_id) ids.push(parseInt(prod.tela1_id))
-  if (prod.tela2_id) ids.push(parseInt(prod.tela2_id))
-  if (prod.rib_id)   ids.push(parseInt(prod.rib_id))
-  ;(prod.telas_extra || []).forEach(te => { if (te.tela_id) ids.push(parseInt(te.tela_id)) })
-  return [...new Set(ids.filter(Boolean))]
-}
-
-const COSTO_KEYS = ['confeccion','corte','elasticos','estampado_frente','estampado_espalda','otros']
-const COSTO_LABELS = {
-  confeccion:        'Confección',
-  corte:             'Corte',
-  elasticos:         'Elásticos y avíos',
-  estampado_frente:  'Estampado frente',
-  estampado_espalda: 'Estampado espalda',
-  otros:             'Otros costos',
-}
-const COSTO_SECCIONES = [
-  { label: '✂ Confección y corte',   keys: ['confeccion','corte'] },
-  { label: '🧵 Elásticos y avíos',    keys: ['elasticos'] },
-  { label: '🖨 Estampado',            keys: ['estampado_frente','estampado_espalda'] },
-  { label: 'Otros',                   keys: ['otros'] },
+const COSTO_FIELDS = [
+  { key: 'costo_confeccion', label: '✂ Confección' },
+  { key: 'costo_corte',      label: 'Corte' },
 ]
 
-const emptyCostos = () => Object.fromEntries(COSTO_KEYS.map(k => [k, '']))
+const ESTADO_BG = { pendiente: '#fff3c8', aceptada: '#d4f0d4', no_aceptada: '#ffd4d4', cancelada: '#e8e8e8' }
+const ESTADO_LABEL = { pendiente: 'Pendiente', aceptada: 'Aceptada', no_aceptada: 'No aceptada', cancelada: 'Cancelada' }
+
+function costoTotalPrenda(p) {
+  const ct = (p.telas || []).length > 0
+    ? (p.telas || []).reduce((a, t) => a + (parseFloat(t.costo) || 0), 0)
+    : (parseFloat(p.costo_telas) || 0)
+  const ce = (p.estampados || []).length > 0
+    ? (p.estampados || []).reduce((a, e) => a + (parseFloat(e.costo) || 0), 0)
+    : (parseFloat(p.costo_otros) || 0)
+  const ca = (p.avios || []).reduce((a, av) => a + (parseFloat(av.costo) || 0), 0)
+  const cf = COSTO_FIELDS.reduce((a, f) => {
+    if (f.key === 'costo_elasticos' && (p.avios || []).length > 0) return a
+    return a + (parseFloat(p[f.key]) || 0)
+  }, 0)
+  return ct + ce + ca + cf
+}
+
+const emptyPrenda = () => ({
+  _key: Math.random(), id: null, nombre: '',
+  telas: [], estampados: [],
+  costo_telas: '', costo_otros: '',
+  costo_confeccion: '', costo_corte: '', costo_elasticos: '',
+  avios: [],
+  margen_pct: '', precio_venta: '', precio_cotizado: '', notas: '', open: true,
+})
+
+const emptyPrecio = () => ({
+  _key: Math.random(), id: null,
+  proveedor: '', tela: '', precio_metro: '', ancho: '', fecha: today(), notas: '',
+})
+
+const S = {
+  panel: { background: '#fff', border: '1px solid #a8a8a8', marginBottom: 8 },
+  hdr:   { padding: '5px 10px', fontWeight: 700, fontSize: 11, background: 'linear-gradient(to bottom,#e8eef7,#c8d4e8)', borderBottom: '1px solid #6b83a8', color: '#1a3a6b', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  body:  { padding: 10 },
+  inp:   { fontFamily: F, fontSize: 11, border: '1px solid #a8a8a8', padding: '2px 6px', width: '100%', boxSizing: 'border-box' },
+  btn:   { fontFamily: F, fontSize: 11, background: 'linear-gradient(to bottom,#f0f0e8,#d8d4c8)', border: '1px solid #808080', padding: '2px 10px', cursor: 'pointer' },
+  lbl:   { display: 'block', fontWeight: 700, fontSize: 10, color: '#555', marginBottom: 2 },
+  th:    { padding: '4px 6px', background: 'linear-gradient(to bottom,#e8eef7,#c8d4e8)', color: '#1a3a6b', fontWeight: 700, fontSize: 10, borderBottom: '1px solid #6b83a8', textAlign: 'left', whiteSpace: 'nowrap' },
+  td:    { padding: '3px 4px', borderBottom: '1px solid #eee', verticalAlign: 'middle' },
+}
 
 export default function Cotizacion({ onMenuClick }) {
-  const navigate = useNavigate()
-
-  const [productos,    setProductos]    = useState([])
-  const [contactos,    setContactos]    = useState([])
   const [cotizaciones, setCotizaciones] = useState([])
+  const [contactos,    setContactos]    = useState([])
+  const [productos,    setProductos]    = useState([])
+  const [aviosCat,     setAviosCat]     = useState([])
   const [loading,      setLoading]      = useState(true)
   const [saving,       setSaving]       = useState(false)
+  const [savedOk,      setSavedOk]      = useState(false)
+  const [cot,          setCot]          = useState(null) // null = lista
+  const [nuevoPrecio,  setNuevoPrecio]  = useState(emptyPrecio())
 
-  // Formulario
-  const [productoId,   setProductoId]   = useState('')
-  const [productoInfo, setProductoInfo] = useState(null) // datos completos del producto
-  const [telasData,    setTelasData]    = useState([])   // [{ id, tipo, precio, rendimiento, costo }]
-  const [cliente,      setCliente]      = useState('')
-  const [costos,       setCostos]       = useState(emptyCostos())
-  const [margenPct,    setMargenPct]    = useState('')
-  const [precioVenta,  setPrecioVenta]  = useState('')
-  const [notas,        setNotas]        = useState('')
-  const [estado,       setEstado]       = useState('pendiente')
+  useEffect(() => { fetchAll() }, [])
 
-  // Derivados
-  const costoTelas = telasData.reduce((a, t) => a + (t.costo || 0), 0)
-  const costoOtros = COSTO_KEYS.reduce((a, k) => a + (parseFloat(costos[k]) || 0), 0)
-  const costoTotal = costoTelas + costoOtros
-  const ganancia   = precioVenta !== '' && costoTotal > 0 ? parseFloat(precioVenta) - costoTotal : null
-
-  useEffect(() => { fetchInit() }, [])
-
-  // Recalcular precio cuando cambia costoTotal (si hay margen fijado)
-  useEffect(() => {
-    if (margenPct !== '' && costoTotal > 0) {
-      setPrecioVenta((costoTotal * (1 + parseFloat(margenPct) / 100)).toFixed(2))
-    }
-  }, [costoTotal])
-
-  async function fetchInit() {
+  async function fetchAll() {
     setLoading(true)
-    const [{ data: prods }, { data: conts }, { data: cots }] = await Promise.all([
-      supabase.from('productos').select('id, nombre, cliente_id, molde, tela1_id, tela2_id, rib_id, telas_extra').order('nombre'),
-      supabase.from('contactos').select('id, nombre'),
-      supabase.from('cotizaciones').select('*').order('created_at', { ascending: false }).limit(50),
+    const [{ data: cots }, { data: conts }, { data: prods }, { data: avs }] = await Promise.all([
+      supabase.from('cotizaciones').select('id, nombre, cliente, estado, created_at').order('created_at', { ascending: false }).limit(100),
+      supabase.from('contactos').select('id, nombre, tipo').order('nombre'),
+      supabase.from('productos').select('id, nombre, costo_confeccion, costo_corte, costo_elasticos, costo_otros, tela1_id, tela1_consumo, tela2_id, tela2_consumo, rib_id, rib_consumo, telas_extra, tipo_cambio, estampados, avios_ids').order('nombre'),
+      supabase.from('avios').select('id, nombre, tipo, unidad, precio').order('nombre'),
     ])
-    setProductos(prods || [])
-    setContactos(conts || [])
     setCotizaciones(cots || [])
+    setContactos(conts || [])
+    setProductos(prods || [])
+    setAviosCat(avs || [])
     setLoading(false)
   }
 
-  async function cargarProducto(id) {
-    setProductoId(id)
-    setTelasData([])
-    setProductoInfo(null)
-    if (!id) return
+  async function openCot(id) {
+    const [{ data: c }, { data: precios }, { data: prendas }] = await Promise.all([
+      supabase.from('cotizaciones').select('*').eq('id', id).single(),
+      supabase.from('cotizacion_precios_tela').select('*').eq('cotizacion_id', id).order('fecha'),
+      supabase.from('cotizacion_prendas').select('*').eq('cotizacion_id', id).order('orden'),
+    ])
+    setCot({
+      ...c,
+      tipo_cambio: c.tipo_cambio ?? '',
+      precios: precios?.length
+        ? precios.map(p => ({ ...p, _key: Math.random(), precio_metro: p.precio_metro ?? '', ancho: p.ancho ?? '', proveedor: p.proveedor ?? '', notas: p.notas ?? '' }))
+        : [emptyPrecio()],
+      prendas: prendas?.length
+        ? prendas.map(p => ({ ...p, _key: Math.random(), open: false,
+            telas: (p.telas_detalle || []).map(t => ({ ...t, _key: Math.random() })),
+            estampados: (p.estampados_detalle || []).map(e => ({ ...e, _key: Math.random() })),
+            avios: (p.avios_detalle || []).map(a => ({ ...a, _key: Math.random() })),
+            costo_telas: p.costo_telas ?? '', costo_confeccion: p.costo_confeccion ?? '',
+            costo_corte: p.costo_corte ?? '', costo_elasticos: p.costo_elasticos ?? '',
+            costo_otros: p.costo_otros ?? '', margen_pct: p.margen_pct ?? '', precio_venta: p.precio_venta ?? '', precio_cotizado: p.precio_cotizado ?? '', notas: p.notas ?? '',
+          }))
+        : [emptyPrenda()],
+    })
+  }
 
-    const prod = productos.find(p => p.id === parseInt(id))
-    if (!prod) return
-    setProductoInfo(prod)
+  function nuevaCot() {
+    setCot({ id: null, nombre: '', cliente: '', notas: '', estado: 'pendiente', tipo_cambio: '', precios: [emptyPrecio()], prendas: [emptyPrenda()] })
+  }
 
-    // Autocompletar cliente
-    if (prod.cliente_id) {
-      const cont = contactos.find(c => c.id === prod.cliente_id)
-      if (cont) setCliente(cont.nombre)
-    }
+  const updCot = (field, val) => setCot(c => {
+    if (field !== 'tipo_cambio') return { ...c, [field]: val }
+    const tc = parseFloat(val) || 0
+    const prendas = c.prendas.map(p => {
+      const telas = p.telas.map(t => {
+        if (t.moneda !== 'USD' || !tc) return t
+        const precioMetro = t.precioBase * tc
+        return { ...t, precioMetro, costo: (parseFloat(t.consumo) || 0) * precioMetro }
+      })
+      const updP = { ...p, telas }
+      if (updP.margen_pct !== '') {
+        const ct = costoTotalPrenda(updP)
+        if (ct > 0) updP.precio_venta = (ct * (1 + parseFloat(updP.margen_pct) / 100)).toFixed(2)
+      }
+      return updP
+    })
+    return { ...c, tipo_cambio: val, prendas }
+  })
 
-    // Cargar telas del producto
-    const ids = telaIdsDeProducto(prod)
+  const updPrecio = (key, field, val) =>
+    setCot(c => ({ ...c, precios: c.precios.map(p => p._key === key ? { ...p, [field]: val } : p) }))
+  const addPrecio = () => setCot(c => ({ ...c, precios: [...c.precios, emptyPrecio()] }))
+  const delPrecio = key => setCot(c => ({ ...c, precios: c.precios.filter(p => p._key !== key) }))
+
+  async function pickProductoEnPrenda(key, prod) {
+    const consumoMap = {}
+    if (prod.tela1_id) consumoMap[Number(prod.tela1_id)] = parseFloat(prod.tela1_consumo) || 0
+    if (prod.tela2_id) consumoMap[Number(prod.tela2_id)] = parseFloat(prod.tela2_consumo) || 0
+    if (prod.rib_id)   consumoMap[Number(prod.rib_id)]   = parseFloat(prod.rib_consumo)   || 0
+    ;(prod.telas_extra || []).forEach(te => {
+      if (te.tela_id) consumoMap[Number(te.tela_id)] = parseFloat(te.consumo) || 0
+    })
+    const ids = Object.keys(consumoMap).map(Number).filter(Boolean)
+    const tc = parseFloat(cot.tipo_cambio) || parseFloat(prod.tipo_cambio) || 1
+
+    let telasArr = []
     if (ids.length > 0) {
-      const { data: telas } = await supabase
-        .from('telas').select('id, tipo, precio, rendimiento').in('id', ids)
-      setTelasData((telas || []).map(t => ({
-        ...t,
-        costo: (parseFloat(t.precio) || 0) * (parseFloat(t.rendimiento) || 0),
-      })))
+      const { data: telas } = await supabase.from('telas').select('id, tipo, precio, rendimiento, unidad, moneda').in('id', ids)
+      telasArr = (telas || []).map(t => {
+        const consumo = consumoMap[t.id]
+        const precioBase = t.unidad === 'kg'
+          ? (t.rendimiento ? (parseFloat(t.precio) || 0) / parseFloat(t.rendimiento) : 0)
+          : (parseFloat(t.precio) || 0)
+        const precioMetro = t.moneda === 'USD' ? precioBase * tc : precioBase
+        const costo = consumo * precioMetro
+        return { _key: Math.random(), tela_id: t.id, nombre: t.tipo, consumo, precioBase, precioMetro, moneda: t.moneda, costo }
+      })
     }
+
+    const estampadosArr = (prod.estampados || []).map(e => ({
+      _key: Math.random(),
+      nombre: e.nombre || e.descripcion || 'Estampado',
+      costo: parseFloat(e.precio) || parseFloat(e.costo) || 0,
+    }))
+
+    const aviosArr = (prod.avios_ids || []).map(item => {
+      const cat = aviosCat.find(x => x.id === (item.avio_id || item))
+      const precio = parseFloat(cat?.precio) || 0
+      const cantidad = parseFloat(item.cantidad) || 1
+      return {
+        _key: Math.random(),
+        avio_id: item.avio_id || null,
+        nombre: item.nombre || cat?.nombre || '',
+        unidad: item.unidad || cat?.unidad || 'u',
+        cantidad: String(cantidad),
+        precio,
+        costo: cantidad * precio,
+      }
+    }).filter(a => a.nombre)
+
+    setCot(c => ({ ...c, prendas: c.prendas.map(p => {
+      if (p._key !== key) return p
+      return {
+        ...p,
+        nombre:           prod.nombre,
+        telas:            telasArr,
+        estampados:       estampadosArr,
+        avios:            aviosArr,
+        costo_confeccion: prod.costo_confeccion != null ? String(prod.costo_confeccion) : p.costo_confeccion,
+        costo_corte:      prod.costo_corte      != null ? String(prod.costo_corte)      : p.costo_corte,
+        costo_elasticos:  prod.costo_elasticos  != null ? String(prod.costo_elasticos)  : p.costo_elasticos,
+      }
+    }) }))
   }
 
-  function onMargenChange(val) {
-    setMargenPct(val)
-    if (val !== '' && costoTotal > 0)
-      setPrecioVenta((costoTotal * (1 + parseFloat(val) / 100)).toFixed(2))
-    else if (val === '')
-      setPrecioVenta('')
+  function updTela(pKey, tKey, field, val) {
+    setCot(c => ({ ...c, prendas: c.prendas.map(p => {
+      if (p._key !== pKey) return p
+      const telas = p.telas.map(t => {
+        if (t._key !== tKey) return t
+        const upd = { ...t, [field]: val }
+        if (field === 'precioMetro') upd.precioBase = parseFloat(val) || 0
+        upd.costo = (parseFloat(upd.consumo) || 0) * (parseFloat(upd.precioMetro) || 0)
+        return upd
+      })
+      const updP = { ...p, telas }
+      if (updP.margen_pct !== '') {
+        const ct = costoTotalPrenda(updP)
+        if (ct > 0) updP.precio_venta = (ct * (1 + parseFloat(updP.margen_pct) / 100)).toFixed(2)
+      }
+      return updP
+    }) }))
   }
 
-  function onPrecioChange(val) {
-    setPrecioVenta(val)
-    if (val !== '' && costoTotal > 0)
-      setMargenPct(((parseFloat(val) - costoTotal) / costoTotal * 100).toFixed(2))
-    else if (val === '')
-      setMargenPct('')
+  function addTela(pKey) {
+    setCot(c => ({ ...c, prendas: c.prendas.map(p => p._key !== pKey ? p :
+      { ...p, telas: [...p.telas, { _key: Math.random(), tela_id: null, nombre: '', consumo: '', precioMetro: '', moneda: 'ARS', costo: 0 }] }
+    ) }))
   }
+
+  function delTela(pKey, tKey) {
+    setCot(c => ({ ...c, prendas: c.prendas.map(p => p._key !== pKey ? p :
+      { ...p, telas: p.telas.filter(t => t._key !== tKey) }
+    ) }))
+  }
+
+  function updEstampado(pKey, eKey, field, val) {
+    setCot(c => ({ ...c, prendas: c.prendas.map(p => {
+      if (p._key !== pKey) return p
+      const estampados = p.estampados.map(e => e._key !== eKey ? e : { ...e, [field]: val })
+      const updP = { ...p, estampados }
+      if (updP.margen_pct !== '') {
+        const ct = costoTotalPrenda(updP)
+        if (ct > 0) updP.precio_venta = (ct * (1 + parseFloat(updP.margen_pct) / 100)).toFixed(2)
+      }
+      return updP
+    }) }))
+  }
+
+  function addEstampado(pKey) {
+    setCot(c => ({ ...c, prendas: c.prendas.map(p => p._key !== pKey ? p :
+      { ...p, estampados: [...p.estampados, { _key: Math.random(), nombre: '', costo: '' }] }
+    ) }))
+  }
+
+  function delEstampado(pKey, eKey) {
+    setCot(c => ({ ...c, prendas: c.prendas.map(p => p._key !== pKey ? p :
+      { ...p, estampados: p.estampados.filter(e => e._key !== eKey) }
+    ) }))
+  }
+
+  function updAvio(pKey, aKey, field, val) {
+    setCot(c => ({ ...c, prendas: c.prendas.map(p => {
+      if (p._key !== pKey) return p
+      const avios = p.avios.map(a => {
+        if (a._key !== aKey) return a
+        const upd = { ...a, [field]: val }
+        if (field === 'nombre') {
+          const match = aviosCat.find(x => x.nombre === val)
+          if (match) { upd.avio_id = match.id; upd.precio = parseFloat(match.precio) || 0; upd.unidad = match.unidad || 'u' }
+        }
+        upd.costo = (parseFloat(upd.cantidad) || 0) * (parseFloat(upd.precio) || 0)
+        return upd
+      })
+      const updP = { ...p, avios }
+      if (updP.margen_pct !== '') {
+        const ct = costoTotalPrenda(updP)
+        if (ct > 0) updP.precio_venta = (ct * (1 + parseFloat(updP.margen_pct) / 100)).toFixed(2)
+      }
+      return updP
+    }) }))
+  }
+
+  function addAvio(pKey) {
+    setCot(c => ({ ...c, prendas: c.prendas.map(p => p._key !== pKey ? p :
+      { ...p, avios: [...(p.avios || []), { _key: Math.random(), avio_id: null, nombre: '', unidad: 'u', cantidad: '', precio: '', costo: 0 }] }
+    ) }))
+  }
+
+  function delAvio(pKey, aKey) {
+    setCot(c => ({ ...c, prendas: c.prendas.map(p => p._key !== pKey ? p :
+      { ...p, avios: p.avios.filter(a => a._key !== aKey) }
+    ) }))
+  }
+
+  function updPrenda(key, field, val) {
+    setCot(c => ({ ...c, prendas: c.prendas.map(p => {
+      if (p._key !== key) return p
+      const upd = { ...p, [field]: val }
+      const ct  = costoTotalPrenda(upd)
+      if (field === 'margen_pct' && val !== '' && ct > 0)
+        upd.precio_venta = (ct * (1 + parseFloat(val) / 100)).toFixed(2)
+      if (field === 'precio_venta' && val !== '' && ct > 0)
+        upd.margen_pct = ((parseFloat(val) - ct) / ct * 100).toFixed(1)
+      if (!['precio_venta','margen_pct','nombre','notas','open'].includes(field) && upd.margen_pct !== '') {
+        const ct2 = costoTotalPrenda(upd)
+        if (ct2 > 0) upd.precio_venta = (ct2 * (1 + parseFloat(upd.margen_pct) / 100)).toFixed(2)
+      }
+      return upd
+    }) }))
+  }
+  const addPrenda    = () => setCot(c => ({ ...c, prendas: [...c.prendas, emptyPrenda()] }))
+  const delPrenda    = key => setCot(c => ({ ...c, prendas: c.prendas.filter(p => p._key !== key) }))
+  const togglePrenda = key => updPrenda(key, 'open', !cot.prendas.find(p => p._key === key)?.open)
 
   async function handleGuardar() {
-    if (!productoId) return
+    if (!cot.nombre.trim()) { alert('Poné un nombre a la cotización'); return }
     setSaving(true)
-    const { data: { user } } = await supabase.auth.getUser()
-    await supabase.from('cotizaciones').insert({
-      producto_id:              parseInt(productoId),
-      cliente:                  cliente || null,
-      costo_telas:              costoTelas,
-      costo_confeccion:         parseFloat(costos.confeccion)        || 0,
-      costo_corte:              parseFloat(costos.corte)             || 0,
-      costo_elasticos:          parseFloat(costos.elasticos)         || 0,
-      costo_estampado_frente:   parseFloat(costos.estampado_frente)  || 0,
-      costo_estampado_espalda:  parseFloat(costos.estampado_espalda) || 0,
-      costo_otros:              parseFloat(costos.otros)             || 0,
-      costo_total:              costoTotal,
-      margen_pct:               parseFloat(margenPct)    || null,
-      precio_venta:             parseFloat(precioVenta)  || null,
-      notas:                    notas || null,
-      estado,
-      user_id:                  user?.id,
+    let cotId = cot.id
+    const cotData = { nombre: cot.nombre, cliente: cot.cliente || null, notas: cot.notas || null, estado: cot.estado }
+    if (!cotId) {
+      const { data: { user } } = await supabase.auth.getUser()
+      const { data, error } = await supabase.from('cotizaciones').insert({ ...cotData, producto_id: null, user_id: user?.id }).select('id').single()
+      if (error) { alert('Error al guardar: ' + error.message); setSaving(false); return }
+      cotId = data.id
+    } else {
+      await supabase.from('cotizaciones').update(cotData).eq('id', cotId)
+    }
+    // precios — delete + insert
+    await supabase.from('cotizacion_precios_tela').delete().eq('cotizacion_id', cotId)
+    const precIns = cot.precios.filter(p => p.tela?.trim()).map(p => ({
+      cotizacion_id: cotId, proveedor: p.proveedor || null, tela: p.tela,
+      precio_metro: parseFloat(p.precio_metro) || null, ancho: parseFloat(p.ancho) || null,
+      fecha: p.fecha || null, notas: p.notas || null,
+    }))
+    if (precIns.length) await supabase.from('cotizacion_precios_tela').insert(precIns)
+    // prendas — delete + insert
+    await supabase.from('cotizacion_prendas').delete().eq('cotizacion_id', cotId)
+    const prenIns = cot.prendas.filter(p => p.nombre?.trim()).map((p, i) => {
+      const costo_telas = (p.telas || []).length > 0
+        ? (p.telas || []).reduce((a, t) => a + (parseFloat(t.costo) || 0), 0)
+        : (parseFloat(p.costo_telas) || 0)
+      const costo_otros = (p.estampados || []).length > 0
+        ? (p.estampados || []).reduce((a, e) => a + (parseFloat(e.costo) || 0), 0)
+        : (parseFloat(p.costo_otros) || 0)
+      return {
+        cotizacion_id: cotId, nombre: p.nombre, orden: i,
+        costo_telas,
+        costo_confeccion:        parseFloat(p.costo_confeccion)        || 0,
+        costo_corte:             parseFloat(p.costo_corte)             || 0,
+        costo_elasticos: (p.avios || []).length > 0
+          ? (p.avios || []).reduce((a, av) => a + (parseFloat(av.costo) || 0), 0)
+          : (parseFloat(p.costo_elasticos) || 0),
+        costo_estampado_frente:  0,
+        costo_estampado_espalda: 0,
+        costo_otros,
+        costo_total:             costoTotalPrenda(p),
+        margen_pct:              parseFloat(p.margen_pct)     || null,
+        precio_venta:            parseFloat(p.precio_venta)   || null,
+        precio_cotizado:         parseFloat(p.precio_cotizado) || null,
+        notas:                   p.notas || null,
+        telas_detalle:           p.telas || [],
+        estampados_detalle:      p.estampados || [],
+        avios_detalle:           p.avios || [],
+      }
     })
+    if (prenIns.length) {
+      const { error: prenError } = await supabase.from('cotizacion_prendas').insert(prenIns)
+      if (prenError) { alert('Error al guardar prendas: ' + prenError.message); setSaving(false); return }
+    }
     setSaving(false)
-    fetchInit()
+    setSavedOk(true)
+    setTimeout(() => setSavedOk(false), 2500)
+    await fetchAll()
+    await openCot(cotId)
   }
 
-  function loadCotizacion(cot) {
-    setProductoId(cot.producto_id ? String(cot.producto_id) : '')
-    setCliente(cot.cliente || '')
-    setCostos({
-      confeccion:        String(cot.costo_confeccion        || ''),
-      corte:             String(cot.costo_corte             || ''),
-      elasticos:         String(cot.costo_elasticos         || ''),
-      estampado_frente:  String(cot.costo_estampado_frente  || ''),
-      estampado_espalda: String(cot.costo_estampado_espalda || ''),
-      otros:             String(cot.costo_otros             || ''),
-    })
-    setMargenPct(cot.margen_pct   != null ? String(cot.margen_pct)   : '')
-    setPrecioVenta(cot.precio_venta != null ? String(cot.precio_venta) : '')
-    setNotas(cot.notas  || '')
-    setEstado(cot.estado || 'pendiente')
-    if (cot.producto_id) cargarProducto(String(cot.producto_id))
+  async function handleEliminar() {
+    if (!cot.id) { setCot(null); return }
+    if (!window.confirm('¿Eliminar esta cotización?')) return
+    await supabase.from('cotizaciones').delete().eq('id', cot.id)
+    setCot(null)
+    fetchAll()
   }
 
-  function resetForm() {
-    setProductoId(''); setProductoInfo(null); setTelasData([])
-    setCliente(''); setCostos(emptyCostos())
-    setMargenPct(''); setPrecioVenta(''); setNotas(''); setEstado('pendiente')
-  }
+  const totalCosto = cot ? cot.prendas.reduce((a, p) => a + costoTotalPrenda(p), 0) : 0
+  const totalVenta = cot ? cot.prendas.reduce((a, p) => a + (parseFloat(p.precio_venta) || 0), 0) : 0
 
-  const nombreProducto = id => productos.find(p => p.id === parseInt(id))?.nombre || '—'
-
-  // ── Render ──────────────────────────────────────────────────────────────────
-  return (
-    <div>
-      <div className="topbar">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button className="mobile-menu-btn" onClick={onMenuClick}>☰</button>
-          <h2>💰 Cotización</h2>
+  // ── LISTA ─────────────────────────────────────────────────────────────────────
+  if (!cot) {
+    return (
+      <div>
+        <div className="topbar">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <button className="mobile-menu-btn" onClick={onMenuClick}>☰</button>
+            <h2>💰 Cotización</h2>
+          </div>
+          <button className="btn btn-primary btn-sm" onClick={nuevaCot}>+ Nueva cotización</button>
         </div>
-        <button className="btn btn-secondary btn-sm" onClick={resetForm}>+ Nueva</button>
-      </div>
-
-      <div className="content" style={{ fontFamily: 'Tahoma, Arial, sans-serif', fontSize: 11 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 8 }}>
-
-          {/* ── Columna principal ── */}
-          <div>
-
-            {/* Producto a cotizar */}
-            <div style={PANEL}>
-              <div style={HDR}>🔍 Producto a cotizar</div>
-              <div style={{ ...BODY, display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 8, alignItems: 'end' }}>
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label>Producto</label>
-                  <select value={productoId} onChange={e => cargarProducto(e.target.value)} style={{ width: '100%' }}>
-                    <option value="">— Seleccionar producto —</option>
-                    {productos.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-                  </select>
-                </div>
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label>Cliente</label>
-                  <input
-                    value={cliente}
-                    onChange={e => setCliente(e.target.value)}
-                    placeholder="nombre del cliente"
-                    style={{ width: '100%' }}
-                  />
-                </div>
-                <button
-                  className="btn btn-primary btn-sm"
-                  onClick={() => productoId && cargarProducto(productoId)}
-                  disabled={!productoId}
-                  style={{ height: 28 }}
-                >
-                  Calcular costos ▸
-                </button>
-              </div>
-            </div>
-
-            {/* Desglose de costos */}
-            <div style={PANEL}>
-              <div style={HDR}>📊 Desglose de costos</div>
-              <div style={BODY}>
+        <div className="content" style={{ fontFamily: F, fontSize: 11 }}>
+          {loading ? <div className="loading"><div className="spinner" /></div> : (
+            <div style={S.panel}>
+              <div style={S.hdr}><span>Cotizaciones guardadas</span></div>
+              {cotizaciones.length === 0 ? (
+                <div style={{ ...S.body, color: '#888', fontStyle: 'italic' }}>Sin cotizaciones aún — creá una nueva</div>
+              ) : (
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
-                    <tr style={{ background: 'linear-gradient(to bottom, #e8eef7, #c8d4e8)' }}>
-                      <th style={{ ...TD, color: '#1a3a6b', textAlign: 'left' }}>Concepto</th>
-                      <th style={{ ...TD, color: '#1a3a6b', textAlign: 'right', width: 140 }}>Costo ($UY)</th>
+                    <tr>
+                      <th style={S.th}>Fecha</th>
+                      <th style={S.th}>Trabajo / cliente</th>
+                      <th style={S.th}>Cliente</th>
+                      <th style={S.th}>Estado</th>
                     </tr>
                   </thead>
                   <tbody>
-
-                    {/* — Telas — */}
-                    <tr><td colSpan={2} style={SECCION}>🧶 Telas</td></tr>
-
-                    {telasData.length === 0 ? (
-                      <tr>
-                        <td colSpan={2} style={{ ...TD, color: '#888', fontStyle: 'italic' }}>
-                          {productoId ? 'Sin telas asignadas al producto' : 'Seleccioná un producto para calcular'}
-                        </td>
-                      </tr>
-                    ) : telasData.map(t => (
-                      <tr key={t.id}>
-                        <td style={TD}>
-                          {t.tipo}
-                          <span style={{ color: '#999', marginLeft: 8, fontSize: 10 }}>
-                            ${Number(t.precio || 0).toFixed(2)} × {Number(t.rendimiento || 0).toFixed(2)} m/kg
+                    {cotizaciones.map(c => (
+                      <tr key={c.id} style={{ cursor: 'pointer' }}
+                        onClick={() => openCot(c.id)}
+                        onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'}
+                        onMouseLeave={e => e.currentTarget.style.background = ''}
+                      >
+                        <td style={{ ...S.td, whiteSpace: 'nowrap' }}>{fmtF(c.created_at)}</td>
+                        <td style={{ ...S.td, fontWeight: 700 }}>{c.nombre || '—'}</td>
+                        <td style={S.td}>{c.cliente || '—'}</td>
+                        <td style={S.td}>
+                          <span style={{ padding: '1px 6px', fontSize: 10, fontWeight: 700, background: ESTADO_BG[c.estado] || '#eee' }}>
+                            {ESTADO_LABEL[c.estado] || c.estado}
                           </span>
                         </td>
-                        <td style={{ ...TD, textAlign: 'right', fontWeight: 700 }}>
-                          {fmtUYU(t.costo)}
-                        </td>
                       </tr>
                     ))}
-
-                    <tr style={{ background: '#f8f8f4' }}>
-                      <td style={{ ...TD, fontWeight: 700 }}>Subtotal telas</td>
-                      <td style={{ ...TD, textAlign: 'right', fontWeight: 700 }}>{fmtUYU(costoTelas)}</td>
-                    </tr>
-
-                    {/* — Secciones editables — */}
-                    {COSTO_SECCIONES.map(sec => (
-                      <React.Fragment key={sec.label}>
-                        <tr><td colSpan={2} style={SECCION}>{sec.label}</td></tr>
-                        {sec.keys.map(key => (
-                          <tr key={key}>
-                            <td style={TD}>{COSTO_LABELS[key]}</td>
-                            <td style={TD_IN}>
-                              <input
-                                type="number"
-                                value={costos[key]}
-                                onChange={e => setCostos(c => ({ ...c, [key]: e.target.value }))}
-                                placeholder="0"
-                                style={{ width: '100%', textAlign: 'right' }}
-                              />
-                            </td>
-                          </tr>
-                        ))}
-                      </React.Fragment>
-                    ))}
-
-                    {/* — Total — */}
-                    <tr style={{ background: 'linear-gradient(to bottom, #e8eef7, #c8d4e8)' }}>
-                      <td style={{ padding: 8, fontWeight: 700, fontSize: 13, color: '#1a3a6b', border: '1px solid #6b83a8' }}>
-                        COSTO TOTAL
-                      </td>
-                      <td style={{ padding: 8, textAlign: 'right', fontWeight: 700, fontSize: 15, color: '#1a3a6b', border: '1px solid #6b83a8' }}>
-                        {fmtUYU(costoTotal)}
-                      </td>
-                    </tr>
                   </tbody>
                 </table>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // ── EDICIÓN ───────────────────────────────────────────────────────────────────
+  return (
+    <div>
+      <div className="topbar">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button className="mobile-menu-btn" onClick={onMenuClick}>☰</button>
+          <button style={{ ...S.btn, fontSize: 10 }} onClick={() => setCot(null)}>← Volver</button>
+          <h2 style={{ margin: 0, fontSize: 13 }}>
+            💰 {cot.id ? (cot.nombre || 'Cotización') : 'Nueva cotización'}
+          </h2>
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button style={{ ...S.btn, color: '#a00', fontSize: 10 }} onClick={handleEliminar}>🗑 Eliminar</button>
+          <button className="btn btn-primary btn-sm" onClick={handleGuardar} disabled={saving}>
+            {saving ? 'Guardando…' : savedOk ? '✓ Guardado!' : '✓ Guardar'}
+          </button>
+        </div>
+      </div>
+
+      <div className="content" style={{ fontFamily: F, fontSize: 11 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 240px', gap: 8, alignItems: 'start' }}>
+
+          {/* ── Columna principal ──────────────────────────────────────────────── */}
+          <div>
+
+            {/* Datos generales */}
+            <div style={S.panel}>
+              <div style={S.hdr}><span>📋 Datos generales</span></div>
+              <div style={{ ...S.body, display: 'grid', gridTemplateColumns: '2fr 1fr 130px', gap: 8 }}>
+                <div>
+                  <label style={S.lbl}>Nombre del trabajo *</label>
+                  <input style={S.inp} value={cot.nombre} onChange={e => updCot('nombre', e.target.value)} placeholder="Ej: Colegio San Martín 2026" />
+                </div>
+                <div>
+                  <label style={S.lbl}>Cliente</label>
+                  <input style={S.inp} value={cot.cliente || ''} onChange={e => updCot('cliente', e.target.value)} placeholder="Nombre del cliente" list="cot-contactos" />
+                  <datalist id="cot-contactos">
+                    {contactos.map(c => <option key={c.id} value={c.nombre} />)}
+                  </datalist>
+                  <datalist id="cot-proveedores">
+                    {contactos.filter(c => c.tipo === 'Proveedor').map(c => <option key={c.id} value={c.nombre} />)}
+                  </datalist>
+                </div>
+                <div>
+                  <label style={S.lbl}>Estado</label>
+                  <select style={{ ...S.inp, padding: '2px 4px' }} value={cot.estado} onChange={e => updCot('estado', e.target.value)}>
+                    <option value="pendiente">Pendiente</option>
+                    <option value="aceptada">Aceptada</option>
+                    <option value="no_aceptada">No aceptada</option>
+                    <option value="cancelada">Cancelada</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={S.lbl}>Tipo de cambio $ / USD</label>
+                  <input
+                    type="number"
+                    style={{ ...S.inp, width: 110, textAlign: 'right' }}
+                    value={cot.tipo_cambio}
+                    onChange={e => updCot('tipo_cambio', e.target.value)}
+                    placeholder="$ por USD"
+                  />
+                </div>
+              </div>
+              <div style={{ ...S.body, paddingTop: 0 }}>
+                <label style={S.lbl}>Observaciones</label>
+                <textarea style={{ ...S.inp, resize: 'vertical' }} rows={2} value={cot.notas || ''} onChange={e => updCot('notas', e.target.value)} placeholder="Notas generales de la cotización…" />
               </div>
             </div>
 
-            {/* Historial */}
-            <div style={PANEL}>
-              <div style={HDR}>📋 Historial de cotizaciones</div>
-              {loading ? (
-                <div className="loading"><div className="spinner" /></div>
-              ) : cotizaciones.length === 0 ? (
-                <div style={{ ...BODY, color: '#888', fontStyle: 'italic' }}>Sin cotizaciones guardadas aún</div>
-              ) : (
+            {/* Precios de tela recibidos */}
+            <div style={S.panel}>
+              <div style={S.hdr}><span>🧶 Precios de tela recibidos</span></div>
+
+              {/* Formulario de ingreso */}
+              <div style={{ ...S.body, borderBottom: '2px solid #c8d4e8' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '115px 1fr 1fr 90px 80px', gap: 6, marginBottom: 6 }}>
+                  <div>
+                    <label style={S.lbl}>Fecha</label>
+                    <input type="date" style={S.inp} value={nuevoPrecio.fecha} onChange={e => setNuevoPrecio(p => ({ ...p, fecha: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label style={S.lbl}>Proveedor</label>
+                    <input style={S.inp} value={nuevoPrecio.proveedor} onChange={e => setNuevoPrecio(p => ({ ...p, proveedor: e.target.value }))} placeholder="Proveedor" list="cot-proveedores" />
+                  </div>
+                  <div>
+                    <label style={S.lbl}>Tela</label>
+                    <input style={S.inp} value={nuevoPrecio.tela} onChange={e => setNuevoPrecio(p => ({ ...p, tela: e.target.value }))} placeholder="Tipo de tela" />
+                  </div>
+                  <div>
+                    <label style={S.lbl}>$ / metro</label>
+                    <input type="number" style={{ ...S.inp, textAlign: 'right' }} value={nuevoPrecio.precio_metro} onChange={e => setNuevoPrecio(p => ({ ...p, precio_metro: e.target.value }))} placeholder="0" />
+                  </div>
+                  <div>
+                    <label style={S.lbl}>Ancho (m)</label>
+                    <input type="number" style={{ ...S.inp, textAlign: 'right' }} value={nuevoPrecio.ancho} onChange={e => setNuevoPrecio(p => ({ ...p, ancho: e.target.value }))} placeholder="1.50" />
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 6, alignItems: 'end' }}>
+                  <div>
+                    <label style={S.lbl}>Notas</label>
+                    <input style={S.inp} value={nuevoPrecio.notas} onChange={e => setNuevoPrecio(p => ({ ...p, notas: e.target.value }))} placeholder="Observaciones…" />
+                  </div>
+                  <button style={{ ...S.btn, background: 'linear-gradient(to bottom,#d4e8d4,#a8c8a8)', borderColor: '#4a8a4a', fontWeight: 700, padding: '3px 14px' }}
+                    onClick={() => {
+                      if (!nuevoPrecio.tela.trim()) return
+                      setCot(c => ({ ...c, precios: [...c.precios, { ...nuevoPrecio, _key: Math.random() }] }))
+                      setNuevoPrecio(emptyPrecio())
+                    }}>
+                    + Agregar
+                  </button>
+                </div>
+              </div>
+
+              {/* Lista de precios ingresados */}
+              {cot.precios.length > 0 && (
                 <div style={{ overflowX: 'auto' }}>
-                  <table style={{ fontSize: 11 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                     <thead>
-                      <tr style={{ background: 'linear-gradient(to bottom, #e8eef7, #c8d4e8)' }}>
-                        {['Fecha','Producto','Cliente','Costo','Precio','%','Estado'].map(h => (
-                          <th key={h} style={{ padding: '4px 8px', color: '#1a3a6b', textAlign: h === 'Costo' || h === 'Precio' || h === '%' ? 'right' : 'left', whiteSpace: 'nowrap' }}>{h}</th>
-                        ))}
+                      <tr>
+                        <th style={S.th}>Fecha</th>
+                        <th style={S.th}>Proveedor</th>
+                        <th style={S.th}>Tela</th>
+                        <th style={{ ...S.th, textAlign: 'right' }}>$ / metro</th>
+                        <th style={{ ...S.th, textAlign: 'right' }}>Ancho</th>
+                        <th style={S.th}>Notas</th>
+                        <th style={S.th}></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {cotizaciones.map(cot => (
-                        <tr
-                          key={cot.id}
-                          onClick={() => loadCotizacion(cot)}
-                          style={{ cursor: 'pointer' }}
-                          onMouseEnter={e => { e.currentTarget.style.background = '#ffffcc' }}
-                          onMouseLeave={e => { e.currentTarget.style.background = '' }}
-                        >
-                          <td style={{ padding: '4px 8px', whiteSpace: 'nowrap' }}>{fmtFecha(cot.created_at)}</td>
-                          <td style={{ padding: '4px 8px' }}>{nombreProducto(cot.producto_id)}</td>
-                          <td style={{ padding: '4px 8px' }}>{cot.cliente || '—'}</td>
-                          <td style={{ padding: '4px 8px', textAlign: 'right' }}>{fmtUYU(cot.costo_total)}</td>
-                          <td style={{ padding: '4px 8px', textAlign: 'right' }}>{cot.precio_venta != null ? fmtUYU(cot.precio_venta) : '—'}</td>
-                          <td style={{ padding: '4px 8px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                            {cot.margen_pct != null ? Number(cot.margen_pct).toFixed(1) + '%' : '—'}
-                          </td>
-                          <td style={{ padding: '4px 8px' }}>
-                            <span style={{ padding: '1px 6px', fontSize: 10, fontWeight: 700, ...ESTADO_STYLE[cot.estado] }}>
-                              {ESTADO_LABEL[cot.estado] || cot.estado}
-                            </span>
+                      {cot.precios.map(p => (
+                        <tr key={p._key}>
+                          <td style={{ ...S.td, whiteSpace: 'nowrap' }}>{fmtF(p.fecha)}</td>
+                          <td style={S.td}>{p.proveedor || '—'}</td>
+                          <td style={{ ...S.td, fontWeight: 700 }}>{p.tela}</td>
+                          <td style={{ ...S.td, textAlign: 'right' }}>{p.precio_metro ? fmtM(p.precio_metro) : '—'}</td>
+                          <td style={{ ...S.td, textAlign: 'right' }}>{p.ancho ? p.ancho + ' m' : '—'}</td>
+                          <td style={{ ...S.td, color: '#666' }}>{p.notas || '—'}</td>
+                          <td style={S.td}>
+                            <button style={{ ...S.btn, padding: '1px 6px', color: '#a00' }} onClick={() => delPrecio(p._key)}>✕</button>
                           </td>
                         </tr>
                       ))}
@@ -368,162 +580,336 @@ export default function Cotizacion({ onMenuClick }) {
                 </div>
               )}
             </div>
+
+            {/* Prendas */}
+            <div style={S.panel}>
+              <div style={S.hdr}>
+                <span>👕 Prendas</span>
+                <button style={{ ...S.btn, fontSize: 10 }} onClick={addPrenda}>+ Agregar prenda</button>
+              </div>
+              <div>
+                {cot.prendas.map(p => {
+                  const ct = costoTotalPrenda(p)
+                  return (
+                    <div key={p._key} style={{ borderBottom: '1px solid #e0e0e0' }}>
+                      {/* Header prenda */}
+                      <div
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', background: p.open ? '#eef2f8' : '#fff', cursor: 'pointer' }}
+                        onClick={() => togglePrenda(p._key)}
+                      >
+                        <span style={{ fontSize: 10, color: '#888', width: 12, flexShrink: 0 }}>{p.open ? '▼' : '▶'}</span>
+                        <input
+                          style={{ ...S.inp, fontWeight: 700, flex: 1, maxWidth: 220 }}
+                          value={p.nombre}
+                          onChange={e => {
+                            e.stopPropagation()
+                            const val = e.target.value
+                            updPrenda(p._key, 'nombre', val)
+                            const prod = productos.find(pr => pr.nombre === val)
+                            if (prod) pickProductoEnPrenda(p._key, prod)
+                          }}
+                          onClick={e => e.stopPropagation()}
+                          placeholder="Nombre de la prenda o elegí de la lista"
+                          list={`prods-${p._key}`}
+                        />
+                        <datalist id={`prods-${p._key}`}>
+                          {productos.map(pr => <option key={pr.id} value={pr.nombre} />)}
+                        </datalist>
+                        <span style={{ fontSize: 10, color: '#888', whiteSpace: 'nowrap' }}>
+                          Costo: {fmtM(ct)}
+                        </span>
+                        {parseFloat(p.precio_cotizado) > 0
+                          ? <span style={{ fontSize: 14, fontWeight: 700, color: '#1a5a1a', whiteSpace: 'nowrap' }}>{fmtM(parseFloat(p.precio_cotizado))} <span style={{ fontWeight: 400, fontSize: 10 }}>IVA inc.</span></span>
+                          : parseFloat(p.precio_venta) > 0
+                            ? <span style={{ fontSize: 12, fontWeight: 700, color: '#555', whiteSpace: 'nowrap' }}>{fmtM(parseFloat(p.precio_venta) * 1.22)} <span style={{ fontWeight: 400, fontSize: 10 }}>IVA inc.</span></span>
+                            : null
+                        }
+                        <button
+                          style={{ ...S.btn, padding: '1px 6px', color: '#a00', marginLeft: 'auto', flexShrink: 0 }}
+                          onClick={e => { e.stopPropagation(); delPrenda(p._key) }}
+                        >✕</button>
+                      </div>
+                      {/* Body prenda */}
+                      {p.open && (
+                        <div style={{ padding: '8px 10px 10px', background: '#fafbfd' }}>
+
+                          {/* ── Telas ── */}
+                          <div style={{ marginBottom: 8 }}>
+                            <div style={{ fontWeight: 700, fontSize: 10, color: '#1a3a6b', marginBottom: 4 }}>🧶 TELAS</div>
+                            {p.telas.length === 0 && (
+                              <div style={{ fontSize: 10, color: '#888', marginBottom: 4, display: 'flex', gap: 8, alignItems: 'center' }}>
+                                <input
+                                  type="number"
+                                  style={{ ...S.inp, width: 90, textAlign: 'right' }}
+                                  value={p.costo_telas}
+                                  onChange={e => updPrenda(p._key, 'costo_telas', e.target.value)}
+                                  placeholder="0"
+                                />
+                                <span style={{ color: '#aaa' }}>— o elegí un producto arriba para ver el desglose</span>
+                              </div>
+                            )}
+                            {p.telas.map(t => {
+                              const preciosSug = (cot.precios || []).filter(pr => pr.precio_metro)
+                              return (
+                                <div key={t._key} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, fontSize: 11 }}>
+                                  <input
+                                    style={{ ...S.inp, flex: 2 }}
+                                    value={t.nombre}
+                                    list={`nombres-tela-${t._key}`}
+                                    onChange={e => {
+                                      const val = e.target.value
+                                      updTela(p._key, t._key, 'nombre', val)
+                                      const match = preciosSug.find(pr => pr.tela === val)
+                                      if (match?.precio_metro) updTela(p._key, t._key, 'precioMetro', String(match.precio_metro))
+                                    }}
+                                    placeholder="Nombre tela"
+                                  />
+                                  <datalist id={`nombres-tela-${t._key}`}>
+                                    {preciosSug.filter(pr => pr.tela).map(pr => (
+                                      <option key={pr._key} value={pr.tela} label={`$${pr.precio_metro}/m — ${pr.proveedor || ''}`} />
+                                    ))}
+                                  </datalist>
+                                  <input
+                                    type="number"
+                                    style={{ ...S.inp, width: 60, textAlign: 'right' }}
+                                    value={t.consumo}
+                                    onChange={e => updTela(p._key, t._key, 'consumo', e.target.value)}
+                                    placeholder="m"
+                                    title="Consumo en metros"
+                                  />
+                                  <span style={{ color: '#888', fontSize: 10 }}>m ×</span>
+                                  <input
+                                    type="number"
+                                    style={{ ...S.inp, width: 80, textAlign: 'right' }}
+                                    value={t.precioMetro}
+                                    onChange={e => updTela(p._key, t._key, 'precioMetro', e.target.value)}
+                                    placeholder="$/m"
+                                    title="Precio por metro (ARS)"
+                                  />
+                                  {t.moneda === 'USD' && t.precioBase > 0 && (
+                                    <span style={{ color: '#1a5a1a', fontSize: 10, whiteSpace: 'nowrap' }}>
+                                      U$D {parseFloat(t.precioBase).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </span>
+                                  )}
+                                  <span style={{ color: '#888', fontSize: 10 }}>/m =</span>
+                                  <span style={{ fontWeight: 700, minWidth: 70, textAlign: 'right', fontSize: 11 }}>{fmtM(t.costo)}</span>
+                                  <button style={{ ...S.btn, padding: '1px 5px', color: '#a00' }} onClick={() => delTela(p._key, t._key)}>✕</button>
+                                </div>
+                              )
+                            })}
+                            <button style={{ ...S.btn, fontSize: 10, marginTop: 2 }} onClick={() => addTela(p._key)}>+ Agregar tela</button>
+                          </div>
+
+                          {/* ── Estampados ── */}
+                          <div style={{ marginBottom: 8 }}>
+                            <div style={{ fontWeight: 700, fontSize: 10, color: '#6a3a00', marginBottom: 4 }}>🖨 ESTAMPADOS Y BORDADOS</div>
+                            {p.estampados.length === 0 && (
+                              <div style={{ fontSize: 10, color: '#888', marginBottom: 4 }}>
+                                <input
+                                  type="number"
+                                  style={{ ...S.inp, width: 90, textAlign: 'right' }}
+                                  value={p.costo_otros}
+                                  onChange={e => updPrenda(p._key, 'costo_otros', e.target.value)}
+                                  placeholder="0"
+                                />
+                              </div>
+                            )}
+                            {p.estampados.map(e => (
+                              <div key={e._key} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, fontSize: 11 }}>
+                                <input
+                                  style={{ ...S.inp, flex: 2 }}
+                                  value={e.nombre}
+                                  onChange={ev => updEstampado(p._key, e._key, 'nombre', ev.target.value)}
+                                  placeholder="Descripción"
+                                />
+                                <input
+                                  type="number"
+                                  style={{ ...S.inp, width: 90, textAlign: 'right' }}
+                                  value={e.costo}
+                                  onChange={ev => updEstampado(p._key, e._key, 'costo', ev.target.value)}
+                                  placeholder="$"
+                                />
+                                <button style={{ ...S.btn, padding: '1px 5px', color: '#a00' }} onClick={() => delEstampado(p._key, e._key)}>✕</button>
+                              </div>
+                            ))}
+                            <button style={{ ...S.btn, fontSize: 10, marginTop: 2 }} onClick={() => addEstampado(p._key)}>+ Agregar estampado</button>
+                          </div>
+
+                          {/* ── Avíos ── */}
+                          <div style={{ marginBottom: 8 }}>
+                            <div style={{ fontWeight: 700, fontSize: 10, color: '#4a2a6b', marginBottom: 4 }}>🧵 AVÍOS Y ELÁSTICOS</div>
+                            {(p.avios || []).length === 0 && (
+                              <div style={{ fontSize: 10, color: '#888', marginBottom: 4, display: 'flex', gap: 8, alignItems: 'center' }}>
+                                <input
+                                  type="number"
+                                  style={{ ...S.inp, width: 90, textAlign: 'right' }}
+                                  value={p.costo_elasticos}
+                                  onChange={e => updPrenda(p._key, 'costo_elasticos', e.target.value)}
+                                  placeholder="0"
+                                />
+                                <span style={{ color: '#aaa' }}>— o agregá avíos del catálogo</span>
+                              </div>
+                            )}
+                            {(p.avios || []).map(a => (
+                              <div key={a._key} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, fontSize: 11 }}>
+                                <input
+                                  style={{ ...S.inp, flex: 2 }}
+                                  value={a.nombre}
+                                  list={`avios-cat-${a._key}`}
+                                  onChange={e => updAvio(p._key, a._key, 'nombre', e.target.value)}
+                                  placeholder="Nombre avío"
+                                />
+                                <datalist id={`avios-cat-${a._key}`}>
+                                  {aviosCat.map(av => (
+                                    <option key={av.id} value={av.nombre} label={`$${av.precio} / ${av.unidad || 'u'}`} />
+                                  ))}
+                                </datalist>
+                                <input
+                                  type="number"
+                                  style={{ ...S.inp, width: 60, textAlign: 'right' }}
+                                  value={a.cantidad}
+                                  onChange={e => updAvio(p._key, a._key, 'cantidad', e.target.value)}
+                                  placeholder="cant."
+                                />
+                                <span style={{ color: '#888', fontSize: 10 }}>{a.unidad || 'u'} ×</span>
+                                <input
+                                  type="number"
+                                  style={{ ...S.inp, width: 80, textAlign: 'right' }}
+                                  value={a.precio}
+                                  onChange={e => updAvio(p._key, a._key, 'precio', e.target.value)}
+                                  placeholder="$"
+                                />
+                                <span style={{ color: '#888', fontSize: 10 }}>/u =</span>
+                                <span style={{ fontWeight: 700, minWidth: 60, textAlign: 'right', fontSize: 11 }}>{fmtM(a.costo)}</span>
+                                <button style={{ ...S.btn, padding: '1px 5px', color: '#a00' }} onClick={() => delAvio(p._key, a._key)}>✕</button>
+                              </div>
+                            ))}
+                            <button style={{ ...S.btn, fontSize: 10, marginTop: 2 }} onClick={() => addAvio(p._key)}>+ Agregar avío</button>
+                          </div>
+
+                          {/* ── Otros costos ── */}
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px 20px', marginBottom: 8 }}>
+                            {COSTO_FIELDS.map(f => (
+                              <div key={f.key} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <label style={{ ...S.lbl, margin: 0, width: 140, flexShrink: 0 }}>{f.label}</label>
+                                <input
+                                  type="number"
+                                  style={{ ...S.inp, width: 90, textAlign: 'right' }}
+                                  value={p[f.key]}
+                                  onChange={e => updPrenda(p._key, f.key, e.target.value)}
+                                  placeholder="0"
+                                />
+                              </div>
+                            ))}
+                          </div>
+
+                          <div style={{ borderTop: '1px solid #d0d8e8', paddingTop: 8, display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+                            <span style={{ fontWeight: 700, color: '#1a3a6b' }}>Costo total: {fmtM(ct)}</span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <label style={{ ...S.lbl, margin: 0, whiteSpace: 'nowrap' }}>Margen %</label>
+                              <input type="number" style={{ ...S.inp, width: 65, textAlign: 'right' }}
+                                value={p.margen_pct} onChange={e => updPrenda(p._key, 'margen_pct', e.target.value)} placeholder="0" />
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <label style={{ ...S.lbl, margin: 0, whiteSpace: 'nowrap' }}>Precio venta (sin IVA)</label>
+                              <input type="number" style={{ ...S.inp, width: 90, textAlign: 'right' }}
+                                value={p.precio_venta} onChange={e => updPrenda(p._key, 'precio_venta', e.target.value)} placeholder="0" />
+                            </div>
+                            {parseFloat(p.precio_venta) > 0 && (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <label style={{ ...S.lbl, margin: 0, whiteSpace: 'nowrap', color: '#1a5a1a' }}>IVA inc. (22%)</label>
+                                <span style={{ fontWeight: 700, color: '#1a5a1a', fontSize: 12 }}>{fmtM(parseFloat(p.precio_venta) * 1.22)}</span>
+                              </div>
+                            )}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <label style={{ ...S.lbl, margin: 0, whiteSpace: 'nowrap' }}>Precio cotizado (IVA inc.)</label>
+                              <input type="number" style={{ ...S.inp, width: 100, textAlign: 'right' }}
+                                value={p.precio_cotizado} onChange={e => updPrenda(p._key, 'precio_cotizado', e.target.value)} placeholder="0" />
+                            </div>
+                            {parseFloat(p.precio_cotizado) > 0 && (() => {
+                              const sinIva = parseFloat(p.precio_cotizado) / 1.22
+                              const ganancia = sinIva - ct
+                              return (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                  <label style={{ ...S.lbl, margin: 0, whiteSpace: 'nowrap', color: ganancia >= 0 ? '#1a5a1a' : '#a00' }}>Ganancia</label>
+                                  <span style={{ fontWeight: 700, color: ganancia >= 0 ? '#1a5a1a' : '#a00', fontSize: 12 }}>{fmtM(ganancia)}</span>
+                                  <span style={{ fontSize: 10, color: '#888' }}>({ct > 0 ? ((ganancia / ct) * 100).toFixed(1) : 0}%)</span>
+                                </div>
+                              )
+                            })()}
+                          </div>
+                          <div style={{ marginTop: 6 }}>
+                            <label style={S.lbl}>Notas</label>
+                            <input style={S.inp} value={p.notas} onChange={e => updPrenda(p._key, 'notas', e.target.value)} placeholder="Observaciones de esta prenda…" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
           </div>
 
-          {/* ── Columna derecha ── */}
+          {/* ── Columna derecha ────────────────────────────────────────────────── */}
           <div>
-
-            {/* Calculadora de precio */}
-            <div style={PANEL}>
-              <div style={HDR}>💰 Precio de venta</div>
-              <div style={BODY}>
-
-                {/* Costo total display */}
-                <div style={{ marginBottom: 10, padding: 8, background: '#f0f4f8', border: '1px solid #c8d4e8' }}>
-                  <div style={{ fontSize: 10, color: '#6b83a8', marginBottom: 2 }}>Costo total calculado</div>
-                  <div style={{ fontWeight: 700, fontSize: 16, color: '#1a3a6b' }}>{fmtUYU(costoTotal)}</div>
-                </div>
-
-                {/* Margen % */}
-                <div className="form-group" style={{ marginBottom: 8 }}>
-                  <label>Margen %</label>
-                  <input
-                    type="number"
-                    value={margenPct}
-                    onChange={e => onMargenChange(e.target.value)}
-                    placeholder="ej: 30"
-                    style={{ width: '100%' }}
-                  />
-                </div>
-
-                {/* Precio de venta */}
-                <div className="form-group" style={{ marginBottom: 10 }}>
-                  <label>Precio de venta $</label>
-                  <input
-                    type="number"
-                    value={precioVenta}
-                    onChange={e => onPrecioChange(e.target.value)}
-                    placeholder="ej: 1500"
-                    style={{ width: '100%' }}
-                  />
-                </div>
-
-                {/* Ganancia */}
-                {ganancia != null && (
-                  <div style={{
-                    background: ganancia >= 0 ? '#d4f0d4' : '#ffd4d4',
-                    border: `1px solid ${ganancia >= 0 ? '#4a9a4a' : '#c06060'}`,
-                    padding: 8, marginBottom: 10,
-                  }}>
-                    <div style={{ fontSize: 10, color: '#555', marginBottom: 2 }}>Ganancia estimada</div>
-                    <div style={{ fontWeight: 700, fontSize: 14, color: ganancia >= 0 ? '#1a5a1a' : '#8a0000' }}>
-                      {fmtUYU(ganancia)}
+            <div style={S.panel}>
+              <div style={S.hdr}><span>💰 Resumen</span></div>
+              <div style={S.body}>
+                {cot.prendas.filter(p => p.nombre?.trim()).length === 0 && (
+                  <div style={{ color: '#888', fontStyle: 'italic', fontSize: 10 }}>Agregá prendas para ver el resumen</div>
+                )}
+                {cot.prendas.filter(p => p.nombre?.trim()).map(p => {
+                  const ct = costoTotalPrenda(p)
+                  return (
+                    <div key={p._key} style={{ marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid #eee' }}>
+                      <div style={{ fontWeight: 700, marginBottom: 3 }}>{p.nombre}</div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#555' }}>
+                        <span>Costo</span><span>{fmtM(ct)}</span>
+                      </div>
+                      {parseFloat(p.precio_venta) > 0 && (
+                        <>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#1a5a1a' }}>
+                            <span>Precio venta (sin IVA)</span><span>{fmtM(p.precio_venta)}</span>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#1a5a1a', fontWeight: 700 }}>
+                            <span>IVA inc. (22%)</span><span>{fmtM(parseFloat(p.precio_venta) * 1.22)}</span>
+                          </div>
+                        </>
+                      )}
                     </div>
+                  )
+                })}
+                {cot.prendas.some(p => p.nombre?.trim()) && (
+                  <div style={{ borderTop: '2px solid #6b83a8', paddingTop: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, marginBottom: 4 }}>
+                      <span>Total costo</span><span>{fmtM(totalCosto)}</span>
+                    </div>
+                    {totalVenta > 0 && (
+                      <>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#1a5a1a' }}>
+                          <span>Total venta (sin IVA)</span><span>{fmtM(totalVenta)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, color: '#1a5a1a' }}>
+                          <span>Total IVA inc. (22%)</span><span>{fmtM(totalVenta * 1.22)}</span>
+                        </div>
+                      </>
+                    )}
+                    {totalVenta > 0 && totalCosto > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#555', marginTop: 4 }}>
+                        <span>Ganancia</span>
+                        <span style={{ color: totalVenta - totalCosto >= 0 ? '#1a5a1a' : '#a00', fontWeight: 700 }}>
+                          {fmtM(totalVenta - totalCosto)}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 )}
-
-                {/* Precio final grande */}
-                {precioVenta !== '' && (
-                  <div style={{ background: '#1a3a6b', padding: 10, textAlign: 'center', marginBottom: 12 }}>
-                    <div style={{ fontSize: 10, color: '#a8c0e0', marginBottom: 2 }}>Precio final</div>
-                    <div style={{ fontWeight: 700, fontSize: 22, color: '#fff', letterSpacing: 1 }}>
-                      {fmtUYU(parseFloat(precioVenta))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Estado */}
-                <div className="form-group" style={{ marginBottom: 12 }}>
-                  <label>Estado</label>
-                  <select value={estado} onChange={e => setEstado(e.target.value)} style={{ width: '100%' }}>
-                    <option value="pendiente">Pendiente</option>
-                    <option value="aceptada">Aceptada</option>
-                    <option value="no_aceptada">No aceptada</option>
-                  </select>
-                </div>
-
-                {/* Acciones */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <button
-                    className="btn btn-primary btn-sm"
-                    onClick={handleGuardar}
-                    disabled={saving || !productoId}
-                    style={{ width: '100%' }}
-                  >
-                    {saving ? 'Guardando…' : '✓ Guardar cotización'}
-                  </button>
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => navigate('/pedidos', { state: { clienteNombre: cliente, productoId: parseInt(productoId) } })}
-                    disabled={!productoId}
-                    style={{ width: '100%', textAlign: 'left' }}
-                  >
-                    Convertir en pedido ▸
-                  </button>
-                  <button
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => window.print()}
-                    style={{ width: '100%', textAlign: 'left' }}
-                  >
-                    🖨 Imprimir
-                  </button>
-                </div>
               </div>
             </div>
-
-            {/* Info del producto */}
-            {productoInfo && (
-              <div style={PANEL}>
-                <div style={HDR}>📦 Info del producto</div>
-                <div style={BODY}>
-                  <div style={{ fontWeight: 700, fontSize: 12, marginBottom: 6 }}>{productoInfo.nombre}</div>
-                  {cliente && (
-                    <div style={{ color: '#555', marginBottom: 4 }}>
-                      <span style={{ color: '#888' }}>Cliente:</span> {cliente}
-                    </div>
-                  )}
-                  {telasData.length > 0 && (
-                    <div style={{ marginBottom: 6 }}>
-                      <div style={{ color: '#888', marginBottom: 2 }}>Telas:</div>
-                      {telasData.map(t => (
-                        <div key={t.id} style={{ paddingLeft: 8, color: '#333' }}>· {t.tipo}</div>
-                      ))}
-                    </div>
-                  )}
-                  {productoInfo.molde && (
-                    <div style={{ color: '#555', marginBottom: 6 }}>
-                      <span style={{ color: '#888' }}>Molde:</span> {productoInfo.molde}
-                    </div>
-                  )}
-                  <span
-                    onClick={() => navigate(`/productos`)}
-                    style={{ color: '#1a3a6b', cursor: 'pointer', textDecoration: 'underline', fontSize: 11 }}
-                  >
-                    Ver ficha completa →
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {/* Notas */}
-            <div style={PANEL}>
-              <div style={HDR}>📝 Notas</div>
-              <div style={BODY}>
-                <textarea
-                  value={notas}
-                  onChange={e => setNotas(e.target.value)}
-                  placeholder="Observaciones de la cotización…"
-                  rows={5}
-                  style={{
-                    width: '100%', boxSizing: 'border-box', resize: 'vertical',
-                    fontFamily: 'Tahoma, Arial, sans-serif', fontSize: 11,
-                    border: '1px solid #a8a8a8', padding: 6,
-                  }}
-                />
-              </div>
-            </div>
-
           </div>
+
         </div>
       </div>
     </div>

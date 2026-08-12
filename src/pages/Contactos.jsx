@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 
-const TIPOS = ['Cliente', 'Costurera', 'Proveedor', 'Otro']
+const TIPOS = ['Cliente', 'Costurera', 'Taller', 'Estampador', 'Bordador', 'Proveedor', 'Otro']
 
 const TIPO_COLOR = {
-  Cliente:   '#2060a8',
-  Costurera: '#2a7a2a',
-  Proveedor: '#8060c0',
-  Otro:      '#888888',
+  Cliente:    '#2060a8',
+  Costurera:  '#2a7a2a',
+  Taller:     '#1a6a6a',
+  Estampador: '#c06000',
+  Bordador:   '#8a2080',
+  Proveedor:  '#8060c0',
+  Otro:       '#888888',
 }
 
 function TipoBadge({ tipo }) {

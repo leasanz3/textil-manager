@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
+import { TABLAS, TABLAS_TALLES } from '../constants/talles'
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
@@ -24,22 +25,15 @@ const ETAPA_MAP_LEGACY = {
 }
 const normalizeEtapa = id => ETAPA_MAP_LEGACY[id] || id
 
-const TABLAS = {
-  adulto:   { label: 'Adulto',         talles: ['XS', 'S', 'M', 'L', 'XL', 'XXL'] },
-  nino:     { label: 'Niño',           talles: ['2', '4', '6', '8', '10', '12', '14', '16'] },
-  malla:    { label: 'Malla',          talles: ['40', '42', '44', '46', '48', '50', '52'] },
-  mallaesp: { label: 'Malla Especial', talles: ['54', '56', '58'] },
-}
-
 const FLUJO_ETAPAS = ['recibido', 'presupuestado', 'confirmado', 'compra_tela', 'corte', 'taller', 'entrega']
 
 function inferirTabla(talles) {
   if (!talles) return 'adulto'
   const keys = Object.keys(talles)
-  if (keys.some(k => ['XS', 'S', 'M', 'L', 'XL', 'XXL'].includes(k))) return 'adulto'
-  if (keys.some(k => ['2', '4', '6', '8', '10'].includes(k))) return 'nino'
-  if (keys.some(k => ['54', '56', '58'].includes(k))) return 'mallaesp'
-  if (keys.some(k => ['40', '42', '44'].includes(k))) return 'malla'
+  if (keys.some(k => TABLAS_TALLES.adulto.includes(k)))   return 'adulto'
+  if (keys.some(k => TABLAS_TALLES.nino.includes(k)))     return 'nino'
+  if (keys.some(k => TABLAS_TALLES.mallaesp.includes(k))) return 'mallaesp'
+  if (keys.some(k => TABLAS_TALLES.malla.includes(k)))    return 'malla'
   return 'adulto'
 }
 

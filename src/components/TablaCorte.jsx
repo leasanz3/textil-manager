@@ -1,11 +1,5 @@
 import React, { useState } from 'react'
-
-// Orden canónico de talles
-const TALLES_ORDEN = [
-  'XS', 'S', 'M', 'L', 'XL', 'XXL',
-  '2', '4', '6', '8', '10', '12', '14', '16',
-  '40', '42', '44', '46', '48', '50', '52', '54', '56', '58',
-]
+import { ORDEN_TALLES as TALLES_ORDEN } from '../constants/talles'
 
 const thS = {
   padding: '6px 10px', textAlign: 'center', fontSize: 11, fontWeight: 700,
