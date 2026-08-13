@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+﻿import React, { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 
 export default function Proveedores({ onMenuClick }) {
@@ -122,7 +122,7 @@ export default function Proveedores({ onMenuClick }) {
       </div>
 
       {modal && (
-        <div className="modal-overlay" onClick={() => setModal(false)}>
+        <div className="modal-overlay">
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>{editing ? '✏ Editar proveedor' : '🏢 Nuevo proveedor'}</h3>

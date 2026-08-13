@@ -1,4 +1,4 @@
-import React from 'react'
+﻿import React from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
@@ -13,16 +13,19 @@ const NAV = [
   { path: '/corte',        icon: '✂',  label: 'Corte' },
   { path: '/marcada',      icon: '📐', label: 'Marcada' },
   { path: '/talleres',     icon: '🧵', label: 'Talleres' },
-  { section: 'Telas' },
-  { path: '/telas/catalogo', icon: '🧶', label: 'Catálogo' },
-  { path: '/telas/stock',    icon: '📊', label: 'Stock' },
-  { section: 'Avíos' },
-  { path: '/avios/catalogo', icon: '🧵', label: 'Catálogo' },
-  { path: '/avios/stock',    icon: '📊', label: 'Stock' },
+  { section: 'Catálogo' },
+  { path: '/telas/catalogo',   icon: '🧶', label: 'Telas' },
+  { path: '/avios/catalogo',   icon: '🧷', label: 'Avíos' },
+  { path: '/prendas/catalogo', icon: '👕', label: 'Prendas' },
+  { section: 'Stock' },
+  { path: '/telas/stock',   icon: '🧶', label: 'Telas' },
+  { path: '/avios/stock',   icon: '🧷', label: 'Avíos' },
+  { path: '/prendas/stock', icon: '👕', label: 'Prendas' },
   { section: 'Compras' },
-  { path: '/telas/compras',  icon: '🧶', label: 'Telas' },
-  { path: '/avios/compras',  icon: '🪡', label: 'Avíos' },
-  { path: '/proveedores',    icon: '🏢', label: 'Proveedores' },
+  { path: '/telas/compras',   icon: '🧶', label: 'Telas' },
+  { path: '/avios/compras',   icon: '🧷', label: 'Avíos' },
+  { path: '/prendas/compras', icon: '👕', label: 'Prendas' },
+  { path: '/proveedores',     icon: '🏢', label: 'Proveedores' },
   { section: 'Finanzas' },
   { path: '/compras',          icon: '🧾', label: 'Facturas' },
   { path: '/cotizacion',       icon: '💰', label: 'Cotización' },

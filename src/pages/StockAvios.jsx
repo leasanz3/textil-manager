@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+﻿import React, { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 
 const fmtNum = (n) => n != null ? Number(n).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
@@ -174,7 +174,7 @@ export default function StockAvios({ onMenuClick }) {
       </div>
 
       {modal && editingAvio && (
-        <div className="modal-overlay" onClick={() => setModal(false)}>
+        <div className="modal-overlay">
           <div className="modal" style={{ maxWidth: 360 }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>📊 Ajustar stock</h3>

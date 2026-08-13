@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+﻿import React, { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 
 const fmtNum = (n) => n != null ? Number(n).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
@@ -182,7 +182,7 @@ export default function CatalogoAvios({ onMenuClick }) {
           <div className="modal modal-lg" onClick={e => e.stopPropagation()} style={{ maxWidth: 640 }}>
             <div className="modal-header">
               <div>
-                <h3 style={{ margin: 0 }}>🪡 {detalle.nombre}</h3>
+                <h3 style={{ margin: 0 }}>🧷 {detalle.nombre}</h3>
                 <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>
                   {detalle.tipo && <span>{detalle.tipo} · </span>}
                   {detalle.proveedor && <span>{detalle.proveedor}</span>}
@@ -256,7 +256,7 @@ export default function CatalogoAvios({ onMenuClick }) {
       )}
 
       {modal && (
-        <div className="modal-overlay" onClick={() => setModal(false)}>
+        <div className="modal-overlay">
           <div className="modal modal-lg" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>{editing ? '✏ Editar avío' : '🧵 Nuevo avío'}</h3>

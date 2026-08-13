@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+﻿import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { TABLAS } from '../constants/talles'
 
@@ -16,7 +16,7 @@ function useIsTouch() {
 
 const PROCESOS_DISPONIBLES = [
   { id: 'corte',      label: '✂ Corte',         icon: '✂'  },
-  { id: 'bordado',    label: '🪡 Bordado',        icon: '🪡' },
+  { id: 'bordado',    label: '🧷 Bordado',        icon: '🧷' },
   { id: 'estampado',  label: '🎨 Estampado',      icon: '🎨' },
   { id: 'sublimado',  label: '✨ Sublimado',       icon: '✨' },
   { id: 'taller',     label: '🧵 Taller',         icon: '🧵' },
@@ -1089,7 +1089,7 @@ export default function Productos({ onMenuClick }) {
                   {(vistaFicha.estampados || []).map((e, i) => (
                     <div key={i} style={{ display: 'flex', gap: 12, padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 13, alignItems: 'center' }}>
                       <span style={{ flex: 1 }}>{e.nombre}</span>
-                      <span style={{ fontSize: 11, color: '#555', background: '#eee', borderRadius: 4, padding: '1px 6px' }}>{e.tipo === 'bordado' ? '🪡 bordado' : '🎨 estampado'}</span>
+                      <span style={{ fontSize: 11, color: '#555', background: '#eee', borderRadius: 4, padding: '1px 6px' }}>{e.tipo === 'bordado' ? '🧷 bordado' : '🎨 estampado'}</span>
                       {e.precio != null && <span style={{ fontWeight: 700, color: 'var(--accent)' }}>${Number(e.precio).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>}
                     </div>
                   ))}
@@ -1315,7 +1315,7 @@ export default function Productos({ onMenuClick }) {
                                 <td style={TD}>
                                   {e.nombre}
                                   <span style={{ marginLeft: 6, fontSize: 10, color: '#555', background: '#eee', borderRadius: 4, padding: '1px 4px' }}>
-                                    {e.tipo === 'bordado' ? '🪡' : '🎨'}
+                                    {e.tipo === 'bordado' ? '🧷' : '🎨'}
                                   </span>
                                 </td>
                                 <td style={{ ...TD, textAlign: 'center' }}></td>
@@ -1393,7 +1393,7 @@ export default function Productos({ onMenuClick }) {
 
       {/* ── MODAL ── */}
       {modal && (
-        <div className="modal-overlay" onClick={() => setModal(false)}>
+        <div className="modal-overlay">
           <div className="modal" style={{ maxWidth: 760 }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>{editing ? '✏ Editar producto' : '📦 Nuevo producto'}</h3>
@@ -1809,7 +1809,7 @@ export default function Productos({ onMenuClick }) {
                     <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6, fontSize: 12 }}>
                       <span style={{ flex: 2 }}>{e.nombre}</span>
                       <span style={{ fontSize: 10, color: '#555', background: '#eee', borderRadius: 4, padding: '1px 5px', whiteSpace: 'nowrap' }}>
-                        {e.tipo === 'bordado' ? '🪡 bordado' : '🎨 estampado'}
+                        {e.tipo === 'bordado' ? '🧷 bordado' : '🎨 estampado'}
                       </span>
                       <input
                         type="number"
@@ -1834,7 +1834,7 @@ export default function Productos({ onMenuClick }) {
                       style={{ width: 120 }}
                     >
                       <option value="estampado">🎨 Estampado</option>
-                      <option value="bordado">🪡 Bordado</option>
+                      <option value="bordado">🧷 Bordado</option>
                     </select>
                     <input
                       type="number"

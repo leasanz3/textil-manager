@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+﻿import React, { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 
 const TIPOS = ['Cliente', 'Costurera', 'Taller', 'Estampador', 'Bordador', 'Proveedor', 'Otro']
@@ -272,7 +272,7 @@ export default function Contactos({ onMenuClick }) {
 
       {/* ── Modal ── */}
       {modal && (
-        <div className="modal-overlay" onClick={() => setModal(false)}>
+        <div className="modal-overlay">
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>{editing ? '✏ Editar contacto' : '👤 Nuevo contacto'}</h3>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+﻿import React, { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 
 const fmtNum = (n) => n != null ? Number(n).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
@@ -411,7 +411,7 @@ export default function ComprasAvios({ onMenuClick }) {
                   {facturaItems.avios.length > 0 && (
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text2)', borderBottom: '1px solid var(--border)', padding: '4px 0 6px', marginBottom: 6 }}>
-                        🪡 Avíos ({facturaItems.avios.length})
+                        🧷 Avíos ({facturaItems.avios.length})
                       </div>
                       <table style={{ width: '100%' }}>
                         <thead><tr><th>Avío</th><th>Tipo</th><th style={{ textAlign: 'right' }}>Cantidad</th><th style={{ textAlign: 'right' }}>Precio</th><th style={{ textAlign: 'right' }}>Total</th></tr></thead>
@@ -455,7 +455,7 @@ export default function ComprasAvios({ onMenuClick }) {
                     style={{ margin: 0, cursor: c.avio_id ? 'pointer' : 'default', textDecoration: c.avio_id ? 'underline' : 'none', color: c.avio_id ? 'var(--accent)' : undefined }}
                     onClick={e => c.avio_id && openAvioHistorial(e, c.avio_id, c.avios?.nombre)}
                     title={c.avio_id ? 'Ver todas las compras de este avío' : undefined}
-                  >🪡 {c.avios?.nombre || 'Compra de avío'}</h3>
+                  >🧷 {c.avios?.nombre || 'Compra de avío'}</h3>
                   <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>
                     {c.avios?.tipo && <span>{c.avios.tipo} · </span>}
                     {fmtFecha(c.fecha)}
@@ -516,7 +516,7 @@ export default function ComprasAvios({ onMenuClick }) {
         <div className="modal-overlay" onClick={() => setAvioHistorial(null)}>
           <div className="modal modal-lg" style={{ maxWidth: 640 }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 style={{ margin: 0 }}>🪡 Historial: {avioHistorial.nombre}</h3>
+              <h3 style={{ margin: 0 }}>🧷 Historial: {avioHistorial.nombre}</h3>
               <button className="close-btn" onClick={() => setAvioHistorial(null)}>✕</button>
             </div>
             <div className="modal-body">
@@ -551,7 +551,7 @@ export default function ComprasAvios({ onMenuClick }) {
       )}
 
       {modal && (
-        <div className="modal-overlay" onClick={() => setModal(false)}>
+        <div className="modal-overlay">
           <div className="modal" style={{ maxWidth: 960 }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>{editingId ? '✏ Editar compra de avío' : '🛒 Nueva compra de avíos'}</h3>

@@ -25,6 +25,9 @@ import CuentaCorriente from './pages/CuentaCorriente'
 import Corte from './pages/Corte'
 import Marcada from './pages/Marcada'
 import Talleres from './pages/Talleres'
+import CatalogoPrendas from './pages/CatalogoPrendas'
+import StockPrendas from './pages/StockPrendas'
+import ComprasPrendas from './pages/ComprasPrendas'
 
 export default function App() {
   const [session, setSession] = useState(undefined) // undefined = cargando
@@ -69,6 +72,10 @@ export default function App() {
             <Route path="/avios/compras" element={<ComprasAvios onMenuClick={menu} />} />
             <Route path="/avios/stock" element={<StockAvios onMenuClick={menu} />} />
             <Route path="/avios" element={<Navigate to="/avios/catalogo" replace />} />
+            <Route path="/prendas/catalogo" element={<CatalogoPrendas onMenuClick={menu} />} />
+            <Route path="/prendas/stock" element={<StockPrendas onMenuClick={menu} />} />
+            <Route path="/prendas/compras" element={<ComprasPrendas onMenuClick={menu} />} />
+            <Route path="/prendas" element={<Navigate to="/prendas/catalogo" replace />} />
             <Route path="/proveedores" element={<Proveedores onMenuClick={menu} />} />
             <Route path="/compras" element={<Compras onMenuClick={menu} />} />
             <Route path="/cotizacion" element={<Cotizacion onMenuClick={menu} />} />

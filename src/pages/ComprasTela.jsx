@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+﻿import React, { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 
 const fmtNum = (n) => n != null ? Number(n).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
@@ -417,7 +417,7 @@ export default function ComprasTela({ onMenuClick }) {
                   {facturaItems.avios.length > 0 && (
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text2)', borderBottom: '1px solid var(--border)', padding: '4px 0 6px', marginBottom: 6 }}>
-                        🪡 Avíos ({facturaItems.avios.length})
+                        🧷 Avíos ({facturaItems.avios.length})
                       </div>
                       <table style={{ width: '100%' }}>
                         <thead><tr><th>Avío</th><th>Tipo</th><th style={{ textAlign: 'right' }}>Cantidad</th><th style={{ textAlign: 'right' }}>Precio</th><th style={{ textAlign: 'right' }}>Total</th></tr></thead>
@@ -564,7 +564,7 @@ export default function ComprasTela({ onMenuClick }) {
       )}
 
       {modal && (
-        <div className="modal-overlay" onClick={() => setModal(false)}>
+        <div className="modal-overlay">
           <div className="modal" style={{ maxWidth: 960 }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>{editingId ? '✏ Editar compra de tela' : '🛒 Nueva compra de tela'}</h3>

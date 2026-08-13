@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+﻿import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { TABLAS, TABLAS_TALLES } from '../constants/talles'
 
@@ -815,7 +815,7 @@ export default function Pedidos({ onMenuClick }) {
 
       {/* ── Modal crear / editar pedido ── */}
       {modal && (
-        <div className="modal-overlay" onClick={() => setModal(false)}>
+        <div className="modal-overlay">
           <div className="modal modal-lg" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>{editing ? '✏ Editar pedido' : '📋 Nuevo pedido'}</h3>

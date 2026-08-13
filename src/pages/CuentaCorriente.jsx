@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+﻿import React, { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 
 const fmtMoney = v =>
@@ -329,7 +329,7 @@ export default function CuentaCorriente({ onMenuClick }) {
 
       {/* ── Modal registrar movimiento ── */}
       {modal && (
-        <div className="modal-overlay" onClick={() => setModal(false)}>
+        <div className="modal-overlay">
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
             <div className="modal-header">
               <h3>💳 Registrar movimiento — {selected?.nombre}</h3>

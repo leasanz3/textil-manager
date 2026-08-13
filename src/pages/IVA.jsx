@@ -20,6 +20,7 @@ export default function IVA({ onMenuClick }) {
   const [desde, setDesde] = useState('')
   const [hasta, setHasta] = useState('')
   const [sortAsc, setSortAsc] = useState(false)
+  const [buscarProv, setBuscarProv] = useState('')
 
   useEffect(() => { fetchCompras() }, [])
 
@@ -53,6 +54,7 @@ export default function IVA({ onMenuClick }) {
       if (!x.fecha) return false
       if (desde && x.fecha < desde) return false
       if (hasta && x.fecha > hasta) return false
+      if (buscarProv && !(x.proveedor || '').toLowerCase().includes(buscarProv.toLowerCase())) return false
       return true
     })
     .sort((a, b) => sortAsc
@@ -93,7 +95,14 @@ export default function IVA({ onMenuClick }) {
             <input type="date" value={desde} onChange={e => onRangoChange('desde', e.target.value)} style={{ width: 140 }} />
             <span style={{ color: 'var(--text2)', fontSize: 12 }}>hasta</span>
             <input type="date" value={hasta} onChange={e => onRangoChange('hasta', e.target.value)} style={{ width: 140 }} />
-            <button className="btn btn-secondary btn-sm" onClick={() => { setMes(''); setDesde(''); setHasta('') }}>✕ Limpiar</button>
+            <input
+              type="text"
+              placeholder="Buscar proveedor..."
+              value={buscarProv}
+              onChange={e => setBuscarProv(e.target.value)}
+              style={{ width: 180 }}
+            />
+            <button className="btn btn-secondary btn-sm" onClick={() => { setMes(''); setDesde(''); setHasta(''); setBuscarProv('') }}>✕ Limpiar</button>
           </div>
           {(desde || hasta) && (
             <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text2)' }}>

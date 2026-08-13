@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+﻿import React, { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 
 const fmtUYU = (n) => n ? '$' + Number(n).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'
@@ -374,7 +374,7 @@ export default function Compras({ onMenuClick }) {
                   {detalleItems.avios.length > 0 && (
                     <div style={{ marginBottom: 8 }}>
                       <div style={{ fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text2)', padding: '4px 0 6px', borderBottom: '1px solid var(--border)', marginBottom: 6 }}>
-                        🪡 Avíos ({detalleItems.avios.length})
+                        🧷 Avíos ({detalleItems.avios.length})
                       </div>
                       <table style={{ width: '100%' }}>
                         <thead>
@@ -418,7 +418,7 @@ export default function Compras({ onMenuClick }) {
       )}
 
       {modal && (
-        <div className="modal-overlay" onClick={() => setModal(false)}>
+        <div className="modal-overlay">
           <div className="modal modal-lg" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>{editing ? '✏ Editar factura' : '🧾 Nueva factura de compra'}</h3>
