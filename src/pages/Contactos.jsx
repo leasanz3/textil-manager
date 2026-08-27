@@ -58,7 +58,7 @@ export default function Contactos({ onMenuClick }) {
   const [vistaFicha, setVistaFicha] = useState(null)
   const [saving, setSaving]         = useState(false)
 
-  const emptyForm = { nombre: '', tipo: 'Cliente', telefono: '', email: '', direccion: '', notas: '', facturacion_tipo: 'normal', facturacion_pct_con_factura: '100', facturacion_descuento_sin_factura: '0' }
+  const emptyForm = { nombre: '', tipo: 'Cliente', telefono: '', email: '', direccion: '', notas: '', rut: '', razon_social: '', facturacion_tipo: 'normal', facturacion_pct_con_factura: '100', facturacion_descuento_sin_factura: '0' }
   const [form, setForm] = useState(emptyForm)
   const setF = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
@@ -86,6 +86,8 @@ export default function Contactos({ onMenuClick }) {
       email:     c.email     || '',
       direccion: c.direccion || '',
       notas:     c.notas     || '',
+      rut:          c.rut          || '',
+      razon_social: c.razon_social || '',
       facturacion_tipo:                 c.facturacion_tipo                  || 'normal',
       facturacion_pct_con_factura:      c.facturacion_pct_con_factura != null ? String(c.facturacion_pct_con_factura) : '100',
       facturacion_descuento_sin_factura: c.facturacion_descuento_sin_factura != null ? String(c.facturacion_descuento_sin_factura) : '0',
@@ -103,6 +105,8 @@ export default function Contactos({ onMenuClick }) {
       email:     form.email.trim()     || null,
       direccion: form.direccion.trim() || null,
       notas:     form.notas.trim()     || null,
+      rut:          form.tipo === 'Cliente' ? (form.rut.trim() || null) : null,
+      razon_social: form.tipo === 'Cliente' ? (form.razon_social.trim() || null) : null,
       facturacion_tipo:                  form.tipo === 'Cliente' ? (form.facturacion_tipo || 'normal') : null,
       facturacion_pct_con_factura:       form.tipo === 'Cliente' ? (parseFloat(form.facturacion_pct_con_factura) || 100) : null,
       facturacion_descuento_sin_factura: form.tipo === 'Cliente' ? (parseFloat(form.facturacion_descuento_sin_factura) || 0) : null,
@@ -259,6 +263,18 @@ export default function Contactos({ onMenuClick }) {
                   <MapButtons direccion={vistaFicha.direccion} />
                 </div>
               )}
+              {vistaFicha.rut && (
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>RUT</div>
+                  <span>{vistaFicha.rut}</span>
+                </div>
+              )}
+              {vistaFicha.razon_social && (
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Razón social</div>
+                  <span>{vistaFicha.razon_social}</span>
+                </div>
+              )}
               {vistaFicha.notas && (
                 <div>
                   <div style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Notas</div>
@@ -341,6 +357,24 @@ export default function Contactos({ onMenuClick }) {
                 <div style={{ borderTop: '1px solid var(--border)', marginTop: 12, paddingTop: 12 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', color: 'var(--text2)', letterSpacing: 0.5, marginBottom: 8 }}>
                     💳 Facturación
+                  </div>
+                  <div className="form-grid">
+                    <div className="form-group">
+                      <label>RUT</label>
+                      <input
+                        value={form.rut}
+                        onChange={e => setF('rut', e.target.value)}
+                        placeholder="ej: 21234567-8"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Razón social</label>
+                      <input
+                        value={form.razon_social}
+                        onChange={e => setF('razon_social', e.target.value)}
+                        placeholder="ej: Emblema S.A."
+                      />
+                    </div>
                   </div>
                   <div className="form-group">
                     <label>Tipo de facturación</label>

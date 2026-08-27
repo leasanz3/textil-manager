@@ -13,6 +13,8 @@ const NAV = [
   { path: '/corte',        icon: '✂',  label: 'Corte' },
   { path: '/marcada',      icon: '📐', label: 'Marcada' },
   { path: '/talleres',     icon: '🧵', label: 'Talleres' },
+  { path: '/mi-taller',   icon: '🏭', label: 'Mi Taller' },
+  { path: '/clientes',     icon: '🛍️', label: 'Clientes' },
   { section: 'Catálogo' },
   { path: '/telas/catalogo',   icon: '🧶', label: 'Telas' },
   { path: '/avios/catalogo',   icon: '🧷', label: 'Avíos' },

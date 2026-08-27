@@ -242,7 +242,7 @@ function FormMovimiento({ tipo, setTipo, fecha, setFecha, tallerQ, setTallerQ, t
       <div style={{ marginBottom: 10 }}>
         <span style={S.lbl}>Tipo</span>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {TIPOS.map(tp => (
+          {TIPOS.filter(tp => tp.id !== 'entrega' && tp.id !== 'devolucion_cliente').map(tp => (
             <button key={tp.id} style={{ ...S.btn, background: tipo === tp.id ? tp.color : undefined, color: tipo === tp.id ? '#fff' : undefined, border: tipo === tp.id ? `1px solid ${tp.color}` : undefined }}
               onClick={() => setTipo(tp.id)}>{tp.icon} {tp.label}</button>
           ))}
@@ -1144,7 +1144,7 @@ function RecibirFallaInline({ item, onSave }) {
 
 // ── Tarjeta de movimiento ─────────────────────────────────────────────────────
 
-function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, onEnviarFalla, entregasVinculadas }) {
+function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, onEnviarFalla, entregasVinculadas, onVerDetalle }) {
   const [collapsed,       setCollapsed]       = useState(false)
   const [expandedProds,   setExpandedProds]   = useState({})
   const [enviarFallaItem, setEnviarFallaItem] = useState(null)
@@ -1166,7 +1166,10 @@ function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, on
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', flex: 1 }} onClick={() => setCollapsed(c => !c)}>
           <span style={{ fontSize: 14 }}>{collapsed ? '▶' : '▼'}</span>
           <span style={S.tag(t.color)}>{t.icon} {t.label}</span>
-          <span style={{ fontWeight: 700, fontSize: 12 }}>{fmtF(mov.fecha)}</span>
+          {onVerDetalle
+            ? <button onClick={e => { e.stopPropagation(); onVerDetalle() }} style={{ fontFamily: F, fontSize: 12, fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer', color: '#1a3a6b', textDecoration: 'underline dotted', padding: 0 }}>{fmtF(mov.fecha)}</button>
+            : <span style={{ fontWeight: 700, fontSize: 12 }}>{fmtF(mov.fecha)}</span>
+          }
           {(esPago || esConcepto)
             ? <span style={{ fontWeight: 700, fontSize: 13, color: t.color }}>{fmtMoneda(mov.monto)}</span>
             : <span style={{ fontSize: 10, color: '#888' }}>{mov.taller_movimientos_items?.length || 0} ítem{mov.taller_movimientos_items?.length !== 1 ? 's' : ''}</span>
@@ -1305,7 +1308,14 @@ function MovCard({ mov, onDelete, onEdit, onCalidad, onRecibir, controlItems, on
                 <tbody>
                   {grupos.map(g => g.rows.map((it, ri) => (
                     <tr key={it.id}>
-                      <td style={S.tdL}>{ri === 0 ? it.productos?.nombre || '?' : ''}</td>
+                      <td style={S.tdL}>{ri === 0 ? (<>
+                        {it.productos?.nombre || '?'}
+                        {it.productos?.telas && (
+                          <span style={{ marginLeft: 5, fontSize: 10, color: '#666', fontWeight: 400 }}>
+                            · {it.productos.telas.tipo}{it.productos.telas.color ? ` ${it.productos.telas.color}` : ''}
+                          </span>
+                        )}
+                      </>) : ''}</td>
                       <td style={{ ...S.td, fontWeight: 700 }}>{it.talle}</td>
                       <td style={S.td}>{it.cantidad}</td>
                       {hasObs && <td style={S.tdL}>{it.observacion || ''}</td>}
@@ -1463,20 +1473,37 @@ function ModalRecibirStock({ taller, stockItems, fallaControlItems, onClose, onS
   const [nota,    setNota]    = useState(esFalla ? '🔁 Falla arreglada' + (obsTexto ? ` — ${obsTexto}` : '') : '')
   const [saving,  setSaving]  = useState(false)
   const [filas,   setFilas]   = useState(() =>
-    stockItems.map(it => ({ ...it, cantidad: String(it.n) }))
+    stockItems.map(it => ({ ...it, cantidad: '' }))
   )
+  const [precios, setPrecios] = useState(() => {
+    const m = {}
+    for (const it of stockItems) { if (!(it.producto_id in m)) m[it.producto_id] = '' }
+    return m
+  })
 
   function setCant(i, val) {
     setFilas(prev => prev.map((f, j) => j === i ? { ...f, cantidad: val } : f))
   }
+
+  function ponerTodo() {
+    setFilas(prev => prev.map(f => ({ ...f, cantidad: String(f.n) })))
+  }
+
+  // Total = suma por producto de (precio × cantidades recibidas de ese producto)
+  const totalMonto = filas.reduce((sum, f) => {
+    const precio = parseFloat(precios[f.producto_id]) || 0
+    const cant   = parseInt(f.cantidad) || 0
+    return sum + precio * cant
+  }, 0)
 
   async function save() {
     const rows = filas.filter(f => parseInt(f.cantidad) > 0)
     if (!rows.length) { alert('Ingresá al menos una cantidad'); return }
     setSaving(true)
     const { data: { user } } = await supabase.auth.getUser()
+    const montoVal = totalMonto > 0 ? totalMonto : null
     const { data: mov, error } = await supabase.from('taller_movimientos')
-      .insert({ tipo: 'recepcion', fecha, contacto_id: taller.id, nota: nota.trim() || null, user_id: user?.id })
+      .insert({ tipo: 'recepcion', fecha, contacto_id: taller.id, nota: nota.trim() || null, monto: montoVal, user_id: user?.id })
       .select().single()
     if (error) { alert('Error: ' + error.message); setSaving(false); return }
     for (const r of rows) {
@@ -1516,31 +1543,73 @@ function ModalRecibirStock({ taller, stockItems, fallaControlItems, onClose, onS
               <input style={S.inp} type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
             </div>
           </div>
-          <div style={{ fontSize: 10, color: '#555', marginBottom: 6 }}>Ajustá las cantidades recibidas.</div>
+          <div style={{ fontSize: 10, color: '#555', marginBottom: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span>Ingresá las cantidades recibidas.</span>
+            <button style={{ ...S.btn, fontSize: 10, padding: '2px 8px' }} onClick={ponerTodo}>Poner todo</button>
+          </div>
           <table style={S.tbl}>
             <thead><tr>
               <th style={S.thL}>Producto</th>
               <th style={S.th}>Talle</th>
               <th style={S.th}>En taller</th>
               <th style={S.th}>Recibido</th>
+              <th style={S.th}>Precio/u</th>
             </tr></thead>
             <tbody>
-              {filas.map((f, i) => (
-                <tr key={i} style={{ background: f.falla > 0 ? '#fff4f0' : 'transparent' }}>
-                  <td style={S.tdL}>{f.prodNombre}</td>
-                  <td style={{ ...S.td, fontWeight: 700 }}>{f.talle}</td>
-                  <td style={S.td}>
-                    {f.normal > 0 && <span style={{ color: '#555', marginRight: 4 }}>{f.normal}</span>}
-                    {f.falla > 0 && <span style={{ color: '#8a2000', fontWeight: 700 }}>⚠️ {f.falla}</span>}
-                  </td>
-                  <td style={S.td}>
-                    <input style={{ ...S.inpC, width: 44 }} type="number" min="0" max={f.n}
-                      value={f.cantidad} onChange={e => setCant(i, e.target.value)} />
-                  </td>
-                </tr>
-              ))}
+              {(() => {
+                const seen = {}
+                return filas.map((f, i) => {
+                  const firstOfProd = !seen[f.producto_id]
+                  if (firstOfProd) seen[f.producto_id] = true
+                  const precio = parseFloat(precios[f.producto_id]) || 0
+                  const cantProd = filas.filter(x => x.producto_id === f.producto_id).reduce((s, x) => s + (parseInt(x.cantidad) || 0), 0)
+                  const subtotal = precio > 0 && cantProd > 0 ? precio * cantProd : null
+                  return (
+                    <tr key={i} style={{ background: f.falla > 0 ? '#fff4f0' : 'transparent' }}>
+                      <td style={S.tdL}>{f.prodNombre}</td>
+                      <td style={{ ...S.td, fontWeight: 700 }}>{f.talle}</td>
+                      <td style={S.td}>
+                        {f.normal > 0 && <span style={{ color: '#555', marginRight: 4 }}>{f.normal}</span>}
+                        {f.falla > 0 && <span style={{ color: '#8a2000', fontWeight: 700 }}>⚠️ {f.falla}</span>}
+                      </td>
+                      <td style={S.td}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <input style={{ ...S.inpC, width: 44 }} type="number" min="0" max={f.n}
+                            value={f.cantidad} onChange={e => setCant(i, e.target.value)}
+                            onFocus={e => e.target.select()} />
+                          <button style={{ fontFamily: F, fontSize: 10, background: '#e8eef8', border: '1px solid #a0b0c8', cursor: 'pointer', color: '#1a3a6b', padding: '2px 7px', whiteSpace: 'nowrap' }}
+                            onClick={() => setCant(i, String(f.n))}>todo</button>
+                        </div>
+                      </td>
+                      <td style={S.td}>
+                        {firstOfProd && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <span style={{ fontSize: 11, color: '#555' }}>$</span>
+                            <input style={{ ...S.inpC, width: 60 }} type="number" min="0" step="0.01"
+                              value={precios[f.producto_id]}
+                              onChange={e => setPrecios(p => ({ ...p, [f.producto_id]: e.target.value }))}
+                              onFocus={e => e.target.select()}
+                              placeholder="0.00" />
+                            {subtotal != null && (
+                              <span style={{ fontSize: 10, color: '#1a5a1a', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                                = {fmtMoneda(subtotal)}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })
+              })()}
             </tbody>
           </table>
+          {totalMonto > 0 && (
+            <div style={{ marginTop: 8, background: '#eaf4ea', border: '1px solid #b0d0b0', padding: '5px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 11, color: '#555' }}>Total a pagar</span>
+              <strong style={{ fontSize: 13, color: '#1a5a1a' }}>{fmtMoneda(totalMonto)}</strong>
+            </div>
+          )}
           <div style={{ marginTop: 10 }}>
             <span style={S.lbl}>Nota</span>
             <input style={{ ...S.inp, width: '100%' }} value={nota} onChange={e => setNota(e.target.value)} placeholder="opcional" />
@@ -1596,6 +1665,42 @@ function StockEnTalleres({ movimientos, controlMap, onRecibirStock }) {
     }
   }
 
+  // Envíos por taller con capacidad restante (FIFO descontando recepciones)
+  const enviosPorTaller = {} // cid -> [{ envio, cap: { pid__talle: qty } }]
+  for (const mov of movsAsc) {
+    if (mov.tipo !== 'envio') continue
+    const cid = mov.contactos?.id
+    if (!cid) continue
+    const cap = {}
+    for (const it of (mov.taller_movimientos_items || [])) {
+      const k = `${it.producto_id}__${it.talle}`
+      cap[k] = (cap[k] || 0) + (it.cantidad || 0)
+    }
+    if (!enviosPorTaller[cid]) enviosPorTaller[cid] = []
+    enviosPorTaller[cid].push({ envio: mov, cap })
+  }
+  // Descontar recepciones: asignar al envío más reciente anterior a la fecha de recepción
+  for (const mov of movsAsc) {
+    if (mov.tipo !== 'recepcion') continue
+    const cid = mov.contactos?.id
+    if (!cid || !enviosPorTaller[cid]) continue
+    for (const it of (mov.taller_movimientos_items || [])) {
+      const k = `${it.producto_id}__${it.talle}`
+      let rem = it.cantidad || 0
+      // más reciente primero, solo envíos anteriores a esta recepción
+      const elegibles = [...enviosPorTaller[cid]]
+        .filter(b => b.envio.fecha <= mov.fecha)
+        .reverse()
+      for (const bloque of elegibles) {
+        if (!bloque.cap[k] || bloque.cap[k] <= 0) continue
+        const desc = Math.min(bloque.cap[k], rem)
+        bloque.cap[k] -= desc
+        rem -= desc
+        if (rem <= 0) break
+      }
+    }
+  }
+
   // Aplanar y filtrar positivos
   const talleres = Object.values(stock).map(({ nombre, cid, prods }) => {
     const prodList = Object.values(prods).map(({ prodNombre, pid, talles }) => {
@@ -1607,7 +1712,8 @@ function StockEnTalleres({ movimientos, controlMap, onRecibirStock }) {
     }).filter(p => p.filas.length > 0)
     const total = prodList.reduce((s, p) => s + p.total, 0)
     const stockItems = prodList.flatMap(p => p.filas)
-    return { nombre, cid, prodList, total, stockItems }
+    const envios = (enviosPorTaller[cid] || []).filter(b => Object.values(b.cap).some(v => v > 0))
+    return { nombre, cid, prodList, total, stockItems, envios }
   }).filter(t => t.prodList.length > 0)
 
   if (!talleres.length) return null
@@ -1623,52 +1729,106 @@ function StockEnTalleres({ movimientos, controlMap, onRecibirStock }) {
         <div style={{ padding: '8px 10px', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {talleres.map(t => (
             <div key={t.cid} style={{ border: '1px solid #a0b0c8', background: '#fff', padding: '6px 10px', minWidth: 220, flex: '1 1 220px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, borderBottom: '1px solid #d0d8e8', paddingBottom: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, borderBottom: '1px solid #d0d8e8', paddingBottom: 4 }}>
                 <span style={{ fontWeight: 700, fontSize: 12, color: '#1a3a6b' }}>{t.nombre} · <span style={{ fontWeight: 400, fontSize: 11 }}>{t.total} prendas</span></span>
                 <button style={{ ...S.btnP, fontSize: 10, padding: '1px 7px' }}
                   onClick={() => onRecibirStock({ id: t.cid, nombre: t.nombre }, t.stockItems)}>
                   📥 Recibir
                 </button>
               </div>
-              {t.prodList.map(p => {
+              {/* Envíos pendientes agrupados por fecha */}
+              {[...t.envios].reverse().map(({ envio, cap }) => {
+                const porProd = {}
+                for (const it of (envio.taller_movimientos_items || [])) {
+                  const k = `${it.producto_id}__${it.talle}`
+                  const restante = cap[k] || 0
+                  if (restante <= 0) continue
+                  const pid = it.producto_id
+                  const nombre = it.productos?.nombre || `#${pid}`
+                  if (!porProd[pid]) porProd[pid] = { nombre, pid, filas: [] }
+                  porProd[pid].filas.push({ talle: it.talle, cant: restante })
+                }
+                const prods = Object.values(porProd)
+                if (!prods.length) return null
                 const allCtrl = Object.values(controlMap).flat()
-                const fallaCtrl = allCtrl.filter(c =>
-                  c.enviado_contacto_id === t.cid &&
-                  c.producto_id === p.filas[0]?.producto_id &&
-                  !c.devuelto_taller && c.cant_falla > 0
+                // armar stockItems de este envío para el modal de recibir
+                const envioStockItems = prods.flatMap(p =>
+                  p.filas.map(f => ({
+                    producto_id: p.pid, prodNombre: p.nombre,
+                    talle: f.talle, normal: f.cant, falla: 0, n: f.cant,
+                  }))
                 )
-                const tieneFalla = p.filas.some(f => f.falla > 0)
                 return (
-                  <div key={p.prodNombre} style={{ marginBottom: 6 }}>
-                    <button
-                      style={{ fontSize: 11, fontWeight: 700, marginBottom: 2, background: 'none', border: 'none', cursor: 'pointer', fontFamily: F, padding: 0, textDecoration: 'underline dotted', color: tieneFalla ? '#8a2000' : '#1a3a6b', textAlign: 'left' }}
-                      title="Click para recibir solo este producto"
-                      onClick={() => onRecibirStock({ id: t.cid, nombre: t.nombre }, p.filas, fallaCtrl)}
-                    >{tieneFalla ? '⚠️ ' : ''}{p.prodNombre}</button>
-                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                      {p.filas.map(f => (
-                        <span key={f.talle} style={{ fontSize: 11, display: 'inline-flex', gap: 2, alignItems: 'center' }}>
-                          {f.normal > 0 && (
-                            <span style={{ background: '#e0e8f4', padding: '1px 6px', border: '1px solid #a0b0c8' }}>
-                              {f.talle} × {f.normal}
-                            </span>
-                          )}
-                          {f.falla > 0 && (
-                            <span style={{ background: '#fff0e8', padding: '1px 6px', border: '1px solid #d08060', color: '#8a2000', fontWeight: 700 }}>
-                              ⚠️ {f.talle} × {f.falla}
-                            </span>
-                          )}
-                        </span>
-                      ))}
-                      <span style={{ fontSize: 10, color: '#555', alignSelf: 'center' }}>= {p.total}</span>
+                  <div key={envio.id} style={{ marginBottom: 8, paddingBottom: 6, borderBottom: '1px dashed #d0d8e8' }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#4a5a7a', marginBottom: 4 }}>
+                      <button onClick={() => onRecibirStock({ id: t.cid, nombre: t.nombre }, envioStockItems, [])}
+                        style={{ fontFamily: F, fontSize: 10, fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer', color: '#1a3a6b', textDecoration: 'underline dotted', padding: 0 }}>
+                        📦 {fmtF(envio.fecha)}
+                      </button>
+                      {envio.nota ? <span style={{ fontWeight: 400, color: '#888', marginLeft: 4 }}>· {envio.nota}</span> : ''}
                     </div>
+                    {prods.map(p => {
+                      const total = p.filas.reduce((s, f) => s + f.cant, 0)
+                      return (
+                        <div key={p.pid} style={{ marginBottom: 3 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 2, color: '#333' }}>
+                            {p.nombre} <span style={{ fontWeight: 400, color: '#555' }}>· {total} u.</span>
+                          </div>
+                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                            {p.filas.map((f, i) => (
+                              <span key={i} style={{ background: '#e0e8f4', padding: '1px 6px', border: '1px solid #a0b0c8', fontSize: 11 }}>{f.talle} × {f.cant}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 )
               })}
+              {/* Fallas pendientes — sección separada al final */}
+              {t.stockItems.some(s => s.falla > 0) && (() => {
+                const allCtrl = Object.values(controlMap).flat()
+                // fecha más reciente de devolucion para este taller
+                const devFecha = movimientos
+                  .filter(m => m.tipo === 'devolucion' && m.contactos?.id === t.cid)
+                  .sort((a, b) => b.fecha.localeCompare(a.fecha))[0]?.fecha || null
+                const porProd = {}
+                for (const s of t.stockItems.filter(s => s.falla > 0)) {
+                  if (!porProd[s.producto_id]) porProd[s.producto_id] = { nombre: s.prodNombre, pid: s.producto_id, filas: [] }
+                  porProd[s.producto_id].filas.push({ talle: s.talle, falla: s.falla })
+                }
+                const fallaStockItems = t.stockItems
+                  .filter(s => s.falla > 0)
+                  .map(s => ({ ...s, normal: 0, n: s.falla }))
+                const fallaCtrlAll = allCtrl.filter(c => c.enviado_contacto_id === t.cid && !c.devuelto_taller && c.cant_falla > 0)
+                return (
+                  <div style={{ borderTop: '1px solid #e0c0b0', paddingTop: 6, marginTop: 2 }}>
+                    {devFecha
+                      ? <button onClick={() => onRecibirStock({ id: t.cid, nombre: t.nombre }, fallaStockItems, fallaCtrlAll)}
+                          style={{ fontFamily: F, fontSize: 10, fontWeight: 700, color: '#8a2000', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline dotted', marginBottom: 4, display: 'block' }}>
+                          ⚠️ Fallas — {fmtF(devFecha)}
+                        </button>
+                      : <div style={{ fontSize: 10, fontWeight: 700, color: '#8a2000', marginBottom: 4 }}>⚠️ Fallas</div>
+                    }
+                    {Object.values(porProd).map(p => (
+                      <div key={p.pid} style={{ marginBottom: 3 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 2, color: '#8a2000' }}>⚠️ {p.nombre}</div>
+                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                          {p.filas.map((f, i) => (
+                            <span key={i} style={{ background: '#fff0e8', padding: '1px 6px', border: '1px solid #d08060', color: '#8a2000', fontWeight: 700, fontSize: 11 }}>⚠️ {f.talle} × {f.falla}</span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )
+              })()}
             </div>
           ))}
         </div>
       )}
+
+      {/* Popup hilo de envío */}
     </div>
   )
 }
@@ -1676,6 +1836,146 @@ function StockEnTalleres({ movimientos, controlMap, onRecibirStock }) {
 // ── Modal: Entregar a cliente ─────────────────────────────────────────────────
 
 const TIPOS_TALLER = ['Taller', 'Estampador', 'Bordador']
+
+// ── Modal: Acción desde mi taller (entregar cliente o enviar taller) ──────────
+
+function ModalAccionMiTaller({ producto, filas, onClose, onSave }) {
+  const [accion,     setAccion]    = useState('entregar') // 'entregar' | 'enviar'
+  const [fecha,      setFecha]     = useState(today())
+  const [contactoQ,  setContactoQ] = useState('')
+  const [contactoId, setContactoId]= useState(null)
+  const [contactoNombre, setContactoNombre] = useState('')
+  const [contactoRes,setContactoRes]= useState([])
+  const [nota,       setNota]      = useState('')
+  const [saving,     setSaving]    = useState(false)
+  const [rows,       setRows]      = useState(() => filas.map(f => ({ ...f, cantidad: '' })))
+  const timers = useRef({})
+
+  function setCant(i, val) { setRows(prev => prev.map((r, j) => j === i ? { ...r, cantidad: val } : r)) }
+  function ponerTodo() { setRows(prev => prev.map(r => ({ ...r, cantidad: String(r.ok || r.n || 0) }))) }
+
+  function onContactoInput(val) {
+    setContactoQ(val); setContactoId(null); setContactoNombre('')
+    clearTimeout(timers.current.c)
+    if (!val.trim()) { setContactoRes([]); return }
+    timers.current.c = setTimeout(async () => {
+      const { data } = await supabase.from('contactos').select('id, nombre, tipo').ilike('nombre', `%${val.trim()}%`).limit(8)
+      setContactoRes(data || [])
+    }, 250)
+  }
+
+  async function save() {
+    const validos = rows.filter(r => parseInt(r.cantidad) > 0)
+    if (!validos.length) { alert('Ingresá al menos una cantidad'); return }
+    if (!contactoId) { alert(accion === 'entregar' ? 'Seleccioná un cliente' : 'Seleccioná un taller'); return }
+    setSaving(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    const tipo = accion === 'entregar' ? 'entrega' : 'envio'
+    const { data: mov, error } = await supabase.from('taller_movimientos')
+      .insert({ tipo, fecha, contacto_id: contactoId, nota: nota.trim() || null, user_id: user?.id })
+      .select().single()
+    if (error) { alert('Error: ' + error.message); setSaving(false); return }
+    for (const r of validos) {
+      await supabase.from('taller_movimientos_items').insert({
+        movimiento_id: mov.id, producto_id: r.producto_id, talle: r.talle, cantidad: parseInt(r.cantidad),
+      })
+    }
+    setSaving(false); onSave()
+  }
+
+  const colorH = accion === 'entregar' ? 'linear-gradient(to bottom,#1a5a1a,#0a3a0a)' : 'linear-gradient(to bottom,#1a3a6b,#0a2a5b)'
+  const labelContacto = accion === 'entregar' ? 'Cliente' : 'Taller / Estampador'
+
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={{ ...S.modal, width: 520 }} onClick={e => e.stopPropagation()}>
+        <div style={{ ...S.modalH, background: colorH }}>
+          <span>📦 {producto} — ¿Qué hacemos?</span>
+          <button style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: F }} onClick={onClose}>✕</button>
+        </div>
+        <div style={S.modalB}>
+          {/* Selector de acción */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+            {[{ id: 'entregar', label: '🛍️ Entregar a cliente' }, { id: 'enviar', label: '📦 Enviar a taller' }].map(op => (
+              <button key={op.id} onClick={() => { setAccion(op.id); setContactoQ(''); setContactoId(null); setContactoRes([]) }}
+                style={{ flex: 1, fontFamily: F, fontSize: 11, fontWeight: 700, padding: '6px 0', cursor: 'pointer',
+                  background: accion === op.id ? (op.id === 'entregar' ? '#1a5a1a' : '#1a3a6b') : '#e8eef8',
+                  color: accion === op.id ? '#fff' : '#333',
+                  border: `2px solid ${accion === op.id ? (op.id === 'entregar' ? '#1a5a1a' : '#1a3a6b') : '#c0c8d8'}` }}>
+                {op.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Tabla de cantidades */}
+          <div style={{ fontSize: 10, color: '#555', marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>Cantidades a {accion === 'entregar' ? 'entregar' : 'enviar'}</span>
+            <button style={{ ...S.btn, fontSize: 10, padding: '2px 8px' }} onClick={ponerTodo}>Poner todo</button>
+          </div>
+          <table style={S.tbl}>
+            <thead><tr>
+              <th style={S.th}>Talle</th>
+              <th style={S.th}>Disponible</th>
+              <th style={S.th}>Cantidad</th>
+            </tr></thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={i}>
+                  <td style={{ ...S.td, fontWeight: 700 }}>{r.talle}</td>
+                  <td style={S.td}>{r.ok || r.n || 0}</td>
+                  <td style={S.td}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <input style={{ ...S.inpC, width: 44 }} type="number" min="0"
+                        value={r.cantidad} onChange={e => setCant(i, e.target.value)} onFocus={e => e.target.select()} />
+                      <button style={{ fontFamily: F, fontSize: 10, background: '#e8eef8', border: '1px solid #a0b0c8', cursor: 'pointer', color: '#1a3a6b', padding: '2px 7px' }}
+                        onClick={() => setCant(i, String(r.ok || r.n || 0))}>todo</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {/* Contacto */}
+          <div style={{ marginTop: 12 }}>
+            <span style={S.lbl}>{labelContacto}</span>
+            <div style={{ position: 'relative' }}>
+              <input style={{ ...S.inp, width: '100%' }} value={contactoQ}
+                onChange={e => onContactoInput(e.target.value)}
+                placeholder={`Buscar ${labelContacto.toLowerCase()}...`} />
+              {contactoRes.length > 0 && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#fff', border: '1px solid #c0c8d0', zIndex: 10, maxHeight: 160, overflowY: 'auto' }}>
+                  {contactoRes.map(c => (
+                    <div key={c.id} style={{ padding: '5px 10px', cursor: 'pointer', fontSize: 12 }}
+                      onMouseDown={() => { setContactoId(c.id); setContactoNombre(c.nombre); setContactoQ(c.nombre); setContactoRes([]) }}>
+                      {c.nombre} <span style={{ fontSize: 10, color: '#888' }}>({c.tipo})</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+            <div style={{ flex: 1 }}>
+              <span style={S.lbl}>Fecha</span>
+              <input style={S.inp} type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
+            </div>
+            <div style={{ flex: 2 }}>
+              <span style={S.lbl}>Nota</span>
+              <input style={{ ...S.inp, width: '100%' }} value={nota} onChange={e => setNota(e.target.value)} placeholder="opcional" />
+            </div>
+          </div>
+        </div>
+        <div style={{ padding: '8px 12px', borderTop: '1px solid #c0c0b0', display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+          <button style={S.btn} onClick={onClose}>Cancelar</button>
+          <button style={{ ...S.btnP, background: accion === 'entregar' ? 'linear-gradient(to bottom,#1a5a1a,#0a3a0a)' : 'linear-gradient(to bottom,#1a3a6b,#0a2a5b)', border: 'none' }}
+            onClick={save} disabled={saving}>{saving ? 'Guardando...' : accion === 'entregar' ? '✔ Entregar' : '✔ Enviar'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function ModalEntregarCliente({ miStockItems, onClose, onSave, titulo = '📤 Entregar', contactoLabel = 'Destino' }) {
   const [fecha,       setFecha]      = useState(today())
@@ -1796,6 +2096,7 @@ function ModalEntregarCliente({ miStockItems, onClose, onSave, titulo = '📤 En
 
 function StockEnMiTaller({ movimientos, controlMap, onEntregar, onEnviarFallaStock, onEnviarTodasFallas }) {
   const [open, setOpen] = useState(true)
+  const [accionProd, setAccionProd] = useState(null) // { nombre, filas }
 
   // recepcion suma, devolucion y entrega restan (envio se ignora)
   const stock = {} // { pid: { prodNombre, talles: { talle: { ok, falla } } } }
@@ -1830,8 +2131,15 @@ function StockEnMiTaller({ movimientos, controlMap, onEntregar, onEnviarFallaSto
     }
   }
 
-  for (const mov of movimientos) {
-    if (mov.tipo === 'pago' || mov.tipo === 'envio') continue
+  // Procesar en orden cronológico y nunca bajar de 0:
+  // un envio de producción (sin stock previo) no descuenta — el recepcion de vuelta siempre suma.
+  const movsParaMiTaller = [...movimientos]
+    .filter(m => m.tipo !== 'pago')
+    .sort((a, b) => {
+      const d = a.fecha.localeCompare(b.fecha)
+      return d !== 0 ? d : (a.created_at || '').localeCompare(b.created_at || '')
+    })
+  for (const mov of movsParaMiTaller) {
     const sign = mov.tipo === 'recepcion' ? 1 : -1
     for (const it of (mov.taller_movimientos_items || [])) {
       const pid  = it.producto_id
@@ -1839,7 +2147,7 @@ function StockEnMiTaller({ movimientos, controlMap, onEntregar, onEnviarFallaSto
       if (!stock[pid]) stock[pid] = { prodNombre: it.productos?.nombre || '?', pid, talles: {} }
       const t = it.talle
       if (!stock[pid].talles[t]) stock[pid].talles[t] = { ok: 0 }
-      stock[pid].talles[t].ok = (stock[pid].talles[t].ok || 0) + cant
+      stock[pid].talles[t].ok = Math.max(0, (stock[pid].talles[t].ok || 0) + cant)
     }
   }
 
@@ -1897,18 +2205,14 @@ function StockEnMiTaller({ movimientos, controlMap, onEntregar, onEnviarFallaSto
             return (
               <div key={p.prodNombre} style={{ border: '1px solid #c8a888', background: '#fff', padding: '6px 10px', minWidth: 200, flex: '1 1 200px' }}>
                 <div style={{ marginBottom: 4, borderBottom: '1px solid #e8d8c8', paddingBottom: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontWeight: 700, fontSize: 12, color: tieneFalla ? '#8a2000' : '#7a3a00' }}>
-                    {tieneFalla ? '⚠️ ' : ''}{p.prodNombre}
-                  </span>
+                  <button
+                    style={{ fontFamily: F, fontWeight: 700, fontSize: 12, color: tieneFalla ? '#8a2000' : '#7a3a00', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline dotted', textAlign: 'left' }}
+                    onClick={() => setAccionProd({ nombre: p.prodNombre, filas: p.filas.filter(f => f.ok > 0).map(f => ({ ...f, n: f.ok, producto_id: f.producto_id })) })}
+                  >{tieneFalla ? '⚠️ ' : ''}{p.prodNombre}</button>
                   <span style={{ fontSize: 10, color: '#888' }}>{p.total} u.</span>
                 </div>
                 {tieneOk && (
                   <div style={{ marginBottom: tieneFalla ? 4 : 0 }}>
-                    <button
-                      style={{ fontSize: 10, color: '#7a3a00', fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer', fontFamily: F, padding: 0, textDecoration: 'underline dotted', marginBottom: 3 }}
-                      title="Click para entregar solo este producto"
-                      onClick={() => onEntregar(p.filas.filter(f => f.ok > 0))}
-                    >🛍️ Entregar</button>
                     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                       {p.filas.filter(f => f.ok > 0).map(f => (
                         <span key={f.talle} style={{ fontSize: 11, background: '#f0e4d4', padding: '1px 6px', border: '1px solid #c8a888' }}>
@@ -1953,6 +2257,14 @@ function StockEnMiTaller({ movimientos, controlMap, onEntregar, onEnviarFallaSto
             )
           })}
         </div>
+      )}
+      {accionProd && (
+        <ModalAccionMiTaller
+          producto={accionProd.nombre}
+          filas={accionProd.filas}
+          onClose={() => setAccionProd(null)}
+          onSave={() => { setAccionProd(null); window.location.reload() }}
+        />
       )}
     </div>
   )
@@ -2097,6 +2409,8 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
             </div>
           ))}
 
+          {/* Popup hilo de envío */}
+
           {/* Cuenta corriente (pagos y conceptos) — colapsada por defecto */}
           {cuentaCorriente.length > 0 && (
             <div style={{ borderTop: '1px solid #c0c8d0', marginTop: 4, paddingTop: 4 }}>
@@ -2138,10 +2452,10 @@ export default function Talleres({ onMenuClick }) {
   const [recibiendo,    setRecibiendo]    = useState(null)
   const [filtroTipo,    setFiltroTipo]    = useState('')
   const [filtroQ,       setFiltroQ]       = useState('')
-  const [recibiendoStock,   setRecibiendoStock]   = useState(null) // { taller, stockItems }
-  const [entregando,        setEntregando]        = useState(null) // miStockItems[]
-  const [enviandoFallaStock,   setEnviandoFallaStock]   = useState(null) // fallaGroup individual
-  const [enviandoTodasFallas,  setEnviandoTodasFallas]  = useState(null) // fallaGroups[]
+  const [filtroTaller,  setFiltroTaller]  = useState('')
+  const [filtroProd,    setFiltroProd]    = useState('')
+  const [recibiendoStock,   setRecibiendoStock]   = useState(null)
+  const [selectedTaller,    setSelectedTaller]    = useState(null) // cid seleccionado en el master
 
   useEffect(() => { fetchAll() }, [])
 
@@ -2154,7 +2468,7 @@ export default function Talleres({ onMenuClick }) {
         .select(`id, tipo, fecha, nota, monto, created_at,
           contactos(id, nombre),
           taller_movimientos_items(id, producto_id, talle, cantidad, observacion,
-            productos(id, nombre, tabla))`)
+            productos(id, nombre, tabla, tela1_id, telas:tela1_id(tipo, color))))`)
         .order('fecha', { ascending: false })
         .order('created_at', { ascending: false }),
       supabase.from('taller_control_items')
@@ -2199,7 +2513,16 @@ export default function Talleres({ onMenuClick }) {
   }
 
   const filtered = movimientos.filter(m => {
+    if (m.tipo === 'entrega' || m.tipo === 'devolucion_cliente') return false
     if (filtroTipo && m.tipo !== filtroTipo) return false
+    if (filtroTaller) {
+      const q = filtroTaller.toLowerCase()
+      if (!m.contactos?.nombre?.toLowerCase().includes(q)) return false
+    }
+    if (filtroProd) {
+      const q = filtroProd.toLowerCase()
+      if (!m.taller_movimientos_items?.some(it => it.productos?.nombre?.toLowerCase().includes(q))) return false
+    }
     if (filtroQ) {
       const q = filtroQ.toLowerCase()
       if (!m.contactos?.nombre?.toLowerCase().includes(q) &&
@@ -2208,8 +2531,30 @@ export default function Talleres({ onMenuClick }) {
     return true
   })
 
+  // Agrupar todos los movimientos (sin filtros) para el sidebar — saldo y lista completa
+  const todosTalleres = {}
+  for (const m of movimientos.filter(m => m.tipo !== 'entrega' && m.tipo !== 'devolucion_cliente')) {
+    const cid = m.contactos?.id || '__sin__'
+    if (!todosTalleres[cid]) todosTalleres[cid] = { cid, nombre: m.contactos?.nombre || '(sin taller)', movs: [], lastFecha: '' }
+    todosTalleres[cid].movs.push(m)
+    if (m.fecha > todosTalleres[cid].lastFecha) todosTalleres[cid].lastFecha = m.fecha
+  }
+  const listaSidebar = Object.values(todosTalleres)
+    .filter(g => !filtroTaller || g.nombre.toLowerCase().includes(filtroTaller.toLowerCase()))
+    .sort((a, b) => b.lastFecha.localeCompare(a.lastFecha))
+
+  // Agrupar filtered para el panel derecho
+  const grupos = {}
+  for (const m of filtered) {
+    const cid = m.contactos?.id || '__sin__'
+    if (!grupos[cid]) grupos[cid] = { cid, nombre: m.contactos?.nombre || '(sin taller)', movs: [] }
+    grupos[cid].movs.push(m)
+  }
+  const selCid = selectedTaller || listaSidebar[0]?.cid || null
+  const selGrupo = grupos[selCid] || (selCid && todosTalleres[selCid] ? { ...todosTalleres[selCid], movs: [] } : null)
+
   return (
-    <div style={S.wrap}>
+    <div style={{ ...S.wrap, display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
       <div style={S.tbar}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <button style={S.btn} onClick={onMenuClick}>☰</button>
@@ -2218,43 +2563,67 @@ export default function Talleres({ onMenuClick }) {
         <button style={S.btnP} onClick={() => setModal(true)}>+ Movimiento</button>
       </div>
 
-      <div style={S.body}>
-        <StockEnTalleres movimientos={movimientos} controlMap={controlMap} onRecibirStock={(taller, stockItems, fallaCtrl) => setRecibiendoStock({ taller, stockItems, fallaControlItems: fallaCtrl || [] })} />
-        <StockEnMiTaller movimientos={movimientos} controlMap={controlMap} onEntregar={items => setEntregando(items)} onEnviarFallaStock={group => setEnviandoFallaStock(group)} onEnviarTodasFallas={groups => setEnviandoTodasFallas(groups)} />
-        <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select style={S.sel} value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}>
-            <option value="">Todos los tipos</option>
-            {TIPOS.map(t => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
-          </select>
-          <input style={{ ...S.inp, width: 180 }} value={filtroQ} onChange={e => setFiltroQ(e.target.value)} placeholder="Buscar taller o producto..." />
-          {(filtroTipo || filtroQ) && <button style={S.btn} onClick={() => { setFiltroTipo(''); setFiltroQ('') }}>✕ limpiar</button>}
-          <span style={{ fontSize: 10, color: '#666', marginLeft: 'auto' }}>{filtered.length} movimiento{filtered.length !== 1 ? 's' : ''}</span>
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        {/* Panel izquierdo: lista de talleres */}
+        <div style={{ width: 200, flexShrink: 0, borderRight: '1px solid #c8cce0', background: '#eef0f8', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ padding: '6px 8px', borderBottom: '1px solid #c8cce0' }}>
+            <input style={{ ...S.inp, width: '100%', boxSizing: 'border-box' }} value={filtroTaller}
+              onChange={e => setFiltroTaller(e.target.value)} placeholder="Buscar taller..." />
+          </div>
+          {loading ? (
+            <div style={{ padding: 12, color: '#888', fontSize: 11 }}>Cargando...</div>
+          ) : listaSidebar.length === 0 ? (
+            <div style={{ padding: 12, color: '#888', fontSize: 11 }}>Sin talleres</div>
+          ) : listaSidebar.map(g => {
+            const isActive = (selectedTaller ? selectedTaller === g.cid : g === listaSidebar[0])
+            const saldo = g.movs.reduce((s, m) => {
+              if ((m.tipo === 'recepcion' || m.tipo === 'concepto') && m.monto != null) return s + m.monto
+              if (m.tipo === 'pago' && m.monto != null) return s - m.monto
+              return s
+            }, 0)
+            return (
+              <div key={g.cid}
+                onClick={() => setSelectedTaller(g.cid)}
+                style={{ padding: '8px 10px', cursor: 'pointer', borderBottom: '1px solid #d8dce8',
+                  background: isActive ? '#1a3a6b' : 'transparent',
+                  color: isActive ? '#fff' : '#1a3a6b' }}>
+                <div style={{ fontWeight: 700, fontSize: 12 }}>🧵 {g.nombre}</div>
+                <div style={{ fontSize: 10, marginTop: 2, color: isActive ? '#c8d8f0' : '#888' }}>
+                  {g.movs.length} mov · {g.lastFecha ? g.lastFecha.slice(0,7) : ''}
+                  {saldo > 0 && <span style={{ marginLeft: 6, color: isActive ? '#ffd080' : '#8a5a00' }}>$ {saldo.toLocaleString('es-UY')}</span>}
+                </div>
+              </div>
+            )
+          })}
         </div>
 
-        {loading ? (
-          <div style={{ padding: 20, color: '#666' }}>Cargando...</div>
-        ) : filtered.length === 0 ? (
-          <div style={{ padding: 20, color: '#666', textAlign: 'center' }}>
-            <div style={{ fontSize: 28, marginBottom: 6 }}>🧵</div>
-            <div>Sin movimientos{filtroTipo || filtroQ ? ' con ese filtro' : '. Creá el primero con + Movimiento'}.</div>
+        {/* Panel derecho: detalle del taller seleccionado */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '10px 14px' }}>
+          <StockEnTalleres movimientos={movimientos} controlMap={controlMap} onRecibirStock={(taller, stockItems, fallaCtrl) => setRecibiendoStock({ taller, stockItems, fallaControlItems: fallaCtrl || [] })} />
+
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <select style={S.sel} value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}>
+              <option value="">Todos los tipos</option>
+              {TIPOS.filter(t => t.id !== 'entrega' && t.id !== 'devolucion_cliente').map(t => <option key={t.id} value={t.id}>{t.icon} {t.label}</option>)}
+            </select>
+            <input style={{ ...S.inp, width: 150 }} value={filtroProd} onChange={e => setFiltroProd(e.target.value)} placeholder="Producto..." />
+            {(filtroTipo || filtroProd) && <button style={S.btn} onClick={() => { setFiltroTipo(''); setFiltroProd('') }}>✕ limpiar</button>}
           </div>
-        ) : (() => {
-          // Agrupar por taller (contacto_id), ordenar por movimiento más reciente
-          const grupos = {}
-          for (const m of filtered) {
-            const cid = m.contactos?.id || '__sin__'
-            if (!grupos[cid]) grupos[cid] = { nombre: m.contactos?.nombre || '(sin taller)', movs: [], lastFecha: '' }
-            grupos[cid].movs.push(m)
-            if (m.fecha > grupos[cid].lastFecha) grupos[cid].lastFecha = m.fecha
-          }
-          const lista = Object.values(grupos).sort((a, b) => b.lastFecha.localeCompare(a.lastFecha))
-          return lista.map(g => (
-            <TallerBlock key={g.nombre} nombre={g.nombre} movs={g.movs}
+
+          {loading ? (
+            <div style={{ padding: 20, color: '#666' }}>Cargando...</div>
+          ) : !selGrupo ? (
+            <div style={{ padding: 20, color: '#666', textAlign: 'center' }}>
+              <div style={{ fontSize: 28, marginBottom: 6 }}>🧵</div>
+              <div>Sin movimientos. Creá el primero con + Movimiento.</div>
+            </div>
+          ) : (
+            <TallerBlock key={selGrupo.nombre} nombre={selGrupo.nombre} movs={selGrupo.movs}
               controlMap={controlMap} entregasMap={entregasMap}
               onDelete={deleteMov} onEdit={setEditando}
               onCalidad={setCalidad} onRecibir={setRecibiendo} onEnviarFalla={fetchAll} />
-          ))
-        })()}
+          )}
+        </div>
       </div>
 
       {modal      && <ModalNuevo   onClose={() => setModal(false)}       onSave={() => { setModal(false);       fetchAll() }} />}
@@ -2262,9 +2631,6 @@ export default function Talleres({ onMenuClick }) {
       {calidad    && <ModalCalidad mov={calidad} entregasVinculadas={entregasMap[calidad.id] || []} controlItems={controlMap[calidad.id] || []} onClose={() => setCalidad(null)} onSave={() => { setCalidad(null); fetchAll() }} />}
       {recibiendo && <ModalRecibir envio={recibiendo} onClose={() => setRecibiendo(null)} onSave={() => { setRecibiendo(null); fetchAll() }} />}
       {recibiendoStock && <ModalRecibirStock taller={recibiendoStock.taller} stockItems={recibiendoStock.stockItems} fallaControlItems={recibiendoStock.fallaControlItems} onClose={() => setRecibiendoStock(null)} onSave={() => { setRecibiendoStock(null); fetchAll() }} />}
-      {entregando && <ModalEntregarCliente miStockItems={entregando} onClose={() => setEntregando(null)} onSave={() => { setEntregando(null); fetchAll() }} />}
-      {enviandoFallaStock && <ModalEnviarFallasDesdeStock fallaGroup={enviandoFallaStock} onClose={() => setEnviandoFallaStock(null)} onSave={() => { setEnviandoFallaStock(null); fetchAll() }} />}
-      {enviandoTodasFallas && <ModalEnviarTodasFallas fallaGroups={enviandoTodasFallas} onClose={() => setEnviandoTodasFallas(null)} onSave={() => { setEnviandoTodasFallas(null); fetchAll() }} />}
     </div>
   )
 }

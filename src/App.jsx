@@ -25,6 +25,8 @@ import CuentaCorriente from './pages/CuentaCorriente'
 import Corte from './pages/Corte'
 import Marcada from './pages/Marcada'
 import Talleres from './pages/Talleres'
+import MiTaller from './pages/MiTaller'
+import Clientes from './pages/Clientes'
 import CatalogoPrendas from './pages/CatalogoPrendas'
 import StockPrendas from './pages/StockPrendas'
 import ComprasPrendas from './pages/ComprasPrendas'
@@ -84,6 +86,8 @@ export default function App() {
             <Route path="/corte" element={<Corte onMenuClick={menu} />} />
             <Route path="/marcada" element={<Marcada onMenuClick={menu} />} />
             <Route path="/talleres" element={<Talleres onMenuClick={menu} />} />
+            <Route path="/mi-taller" element={<MiTaller onMenuClick={menu} />} />
+            <Route path="/clientes" element={<Clientes onMenuClick={menu} />} />
             <Route path="/contactos" element={<Contactos onMenuClick={menu} />} />
             <Route path="/diario" element={<Diario onMenuClick={menu} />} />
             <Route path="/bitacora" element={<Navigate to="/diario" replace />} />

@@ -919,8 +919,20 @@ function MarcadaBlock({ marcada, num, allPiezas, allAjustes, onDeleteMarcada, on
 function TelaSection({ tela, marcadas, allPiezas, allAjustes, onDeleteMarcada, onReload, sessionId }) {
   const [collapsed, setCollapsed] = useState(false)
   const [adding,    setAdding]    = useState(false)
+  const [modalTela, setModalTela] = useState(false)
   const label  = tela ? telaLabel(tela) : 'Sin tela'
   const totalM = marcadas.reduce((s, m) => s + calcMetrosTotal(m), 0)
+
+  async function pickTela({ tela_id }) {
+    if (tela && tela.id !== tela_id) {
+      if (!window.confirm(`¿Cambiar tela de "${telaLabel(tela)}" a la nueva selección?`)) return
+    }
+    setModalTela(false)
+    for (const m of marcadas) {
+      await supabase.from('cortes_marcadas').update({ tela_id: tela_id || null }).eq('id', m.id)
+    }
+    onReload()
+  }
 
   async function addMarcada() {
     setAdding(true)
@@ -944,10 +956,14 @@ function TelaSection({ tela, marcadas, allPiezas, allAjustes, onDeleteMarcada, o
             {marcadas.length} marcada{marcadas.length !== 1 ? 's' : ''} · {fmtN(totalM)} m
           </span>
         </span>
-        <button style={S.btnP} onClick={addMarcada} disabled={adding}>
-          {adding ? '...' : '+ Marcada'}
-        </button>
+        <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+          <button style={S.btnS} onClick={() => setModalTela(true)}>✏ tela</button>
+          <button style={S.btnP} onClick={addMarcada} disabled={adding}>
+            {adding ? '...' : '+ Marcada'}
+          </button>
+        </div>
       </div>
+      {modalTela && <ModalElegirTela onPick={pickTela} onClose={() => setModalTela(false)} />}
       {!collapsed && (
         <div style={{ padding:'6px 8px' }}>
           {marcadas.map((m, i) => (
@@ -1090,10 +1106,147 @@ function CorteMarcadaSlim({ marcada, num, prodEntry, prod, talles: tallesProp, a
 
 // ── CorteTelaSection ───────────────────────────────────────────────────────────
 
-function CorteTelaSection({ tela, items, prod, talles: tallesProp, allPiezas, allAjustes, piezasReq, onDeleteMarcada, onReload, sessionId, productoId }) {
-  const [adding, setAdding] = useState(false)
+function ModalElegirTela({ onPick, onClose }) {
+  const [q,     setQ]     = useState('')
+  const [provQ, setProvQ] = useState('')
+  const [telas, setTelas] = useState([])
+  const [provs, setProvs] = useState([])
+
+  useEffect(() => {
+    supabase.from('telas').select('id, tipo, color, proveedor_id, proveedor').order('tipo')
+      .then(({ data }) => setTelas(data || []))
+    supabase.from('proveedores').select('id, nombre').order('nombre')
+      .then(({ data }) => setProvs(data || []))
+  }, [])
+
+  const provSelId = provQ.trim()
+    ? (provs.find(p => p.nombre.toLowerCase() === provQ.toLowerCase())?.id || null)
+    : null
+
+  const telasFiltradas = telas.filter(t => {
+    const matchQ = !q.trim() || `${t.tipo} ${t.color || ''}`.toLowerCase().includes(q.toLowerCase())
+    const matchP = !provSelId || String(t.proveedor_id) === String(provSelId)
+    return matchQ && matchP
+  })
+
+  const provSugeridos = [...new Map(telas.filter(t => t.proveedor_id).map(t => [t.proveedor_id, { id: t.proveedor_id, nombre: t.proveedor }])).values()]
+
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={{ ...S.modal, width: 420, maxHeight:'90vh' }} onClick={e => e.stopPropagation()}>
+        <div style={S.modalH}>
+          <span>🧵 Elegir tela</span>
+          <button style={{ background:'none', border:'none', color:'#fff', cursor:'pointer', fontFamily:F }} onClick={onClose}>✕</button>
+        </div>
+        <div style={S.modalB}>
+          <div style={{ display:'flex', gap:6, marginBottom:8 }}>
+            <input style={{ ...S.inp, flex:1 }} value={q} onChange={e => setQ(e.target.value)}
+              placeholder="Buscar tela..." autoFocus />
+            <div style={{ position:'relative' }}>
+              <input style={{ ...S.inp, width:140 }} value={provQ} onChange={e => setProvQ(e.target.value)}
+                placeholder="Proveedor..." list="prov-list-tela" />
+              <datalist id="prov-list-tela">
+                {provSugeridos.map(p => <option key={p.id} value={p.nombre} />)}
+              </datalist>
+              {provQ && <button onClick={() => setProvQ('')}
+                style={{ position:'absolute', right:4, top:'50%', transform:'translateY(-50%)', border:'none', background:'none', cursor:'pointer', fontSize:11, color:'#888' }}>✕</button>}
+            </div>
+          </div>
+          <div style={{ maxHeight:380, overflowY:'auto', border:'1px solid #d0d0d0' }}>
+            {telasFiltradas.map(t => (
+              <div key={t.id} onClick={() => onPick({ tela_id: t.id, tela: t })}
+                style={{ padding:'5px 8px', cursor:'pointer', borderBottom:'1px solid #eee', fontFamily:F, fontSize:11, display:'flex', justifyContent:'space-between' }}
+                onMouseEnter={e => e.currentTarget.style.background='#ffffcc'}
+                onMouseLeave={e => e.currentTarget.style.background=''}>
+                <span>🧵 {telaLabel(t)}</span>
+                {t.proveedor && <span style={{ color:'#888', fontSize:10 }}>{t.proveedor}</span>}
+              </div>
+            ))}
+            {!telasFiltradas.length && <div style={{ fontSize:10, color:'#888', padding:8 }}>Sin resultados</div>}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ModalElegirCompra({ telaId, onPick, onClose }) {
+  const [compras, setCompras] = useState([])
+  const [fechaDesc, setFechaDesc] = useState(true)
+  useEffect(() => {
+    if (!telaId) return
+    supabase.from('compras_tela').select('id, cantidad, unidad, fecha, compras(proveedor)')
+      .eq('tela_id', telaId).then(({ data }) => setCompras(data || []))
+  }, [telaId])
+  const sorted = [...compras].sort((a, b) => fechaDesc
+    ? (b.fecha||'').localeCompare(a.fecha||'')
+    : (a.fecha||'').localeCompare(b.fecha||''))
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.45)', zIndex:9000, display:'flex', alignItems:'center', justifyContent:'center' }}
+      onClick={onClose}>
+      <div style={{ background:'#fff', borderRadius:6, padding:18, minWidth:300, maxWidth:420, maxHeight:'70vh', display:'flex', flexDirection:'column', gap:10 }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ fontWeight:700, fontSize:13 }}>Elegir compra de tela</div>
+        <div style={{ overflowY:'auto', flex:1 }}>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+            <thead>
+              <tr style={{ borderBottom:'1px solid #ddd' }}>
+                <th style={{ textAlign:'left', padding:'4px 6px', cursor:'pointer', userSelect:'none' }}
+                  onClick={() => setFechaDesc(d => !d)}>Fecha {fechaDesc ? '▼' : '▲'}</th>
+                <th style={{ textAlign:'left', padding:'4px 6px' }}>Cantidad</th>
+                <th style={{ textAlign:'left', padding:'4px 6px' }}>Proveedor</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map(c => (
+                <tr key={c.id} style={{ cursor:'pointer', borderBottom:'1px solid #f0f0f0' }}
+                  onMouseEnter={e => e.currentTarget.style.background='#f5f7ff'}
+                  onMouseLeave={e => e.currentTarget.style.background=''}
+                  onClick={() => onPick(c)}>
+                  <td style={{ padding:'5px 6px' }}>{c.fecha ? new Date(c.fecha+'T00:00:00').toLocaleDateString('es-UY') : '—'}</td>
+                  <td style={{ padding:'5px 6px' }}>{fmtN(c.cantidad)} {c.unidad||''}</td>
+                  <td style={{ padding:'5px 6px', color:'#666' }}>{c.compras?.proveedor || '—'}</td>
+                </tr>
+              ))}
+              {!sorted.length && <tr><td colSpan={3} style={{ padding:8, color:'#999', textAlign:'center' }}>Sin compras registradas</td></tr>}
+            </tbody>
+          </table>
+        </div>
+        <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
+          <button style={S.btnS} onClick={() => onPick(null)}>Sin compra</button>
+          <button style={S.btnS} onClick={onClose}>Cancelar</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CorteTelaSection({ tela, compra, items, prod, talles: tallesProp, allPiezas, allAjustes, piezasReq, onDeleteMarcada, onReload, sessionId, productoId }) {
+  const [adding,      setAdding]      = useState(false)
+  const [collapsed,   setCollapsed]   = useState(false)
+  const [modalTela,   setModalTela]   = useState(false)
+  const [modalCompra, setModalCompra] = useState(false)
   const label = tela ? telaLabel(tela) : 'Sin tela'
   const metrosTotal = items.reduce((s, { marcada }) => s + (parseFloat(marcada.metros)||0) * (parseFloat(marcada.total_pliegues)||0), 0)
+
+  async function pickTela({ tela_id, compra_tela_id }) {
+    if (tela && tela.id !== tela_id) {
+      if (!window.confirm(`¿Cambiar tela de "${telaLabel(tela)}" a la nueva selección? Se actualizan todas las marcadas de esta sección.`)) return
+    }
+    setModalTela(false)
+    for (const { marcada } of items) {
+      await supabase.from('cortes_marcadas').update({ tela_id: tela_id || null, compra_tela_id: compra_tela_id || null }).eq('id', marcada.id)
+    }
+    onReload()
+  }
+
+  async function pickCompra(c) {
+    setModalCompra(false)
+    for (const { marcada } of items) {
+      await supabase.from('cortes_marcadas').update({ compra_tela_id: c?.id || null }).eq('id', marcada.id)
+    }
+    onReload()
+  }
 
   async function addMarcada() {
     setAdding(true)
@@ -1112,8 +1265,12 @@ function CorteTelaSection({ tela, items, prod, talles: tallesProp, allPiezas, al
 
   return (
     <div style={{ ...S.secWrap, margin:'4px 0', border:'1px solid #b0bcd8' }}>
-      <div style={{ ...S.telaHead, background:'linear-gradient(to bottom,#eef0f8,#dde2f0)' }}>
-        <span style={{ flex:1, fontWeight:700, color:'#1a3a6b' }}>🧵 {label}
+      {/* Fila 1: Tela — click colapsa/expande */}
+      <div style={{ ...S.telaHead, background:'linear-gradient(to bottom,#eef0f8,#dde2f0)', cursor:'pointer' }}
+        onClick={() => setCollapsed(c => !c)}>
+        <span style={{ flex:1, fontWeight:700, color:'#1a3a6b' }}>
+          <span style={{ marginRight:6, fontSize:10 }}>{collapsed ? '▶' : '▼'}</span>
+          🧵 {label}
           <span style={{ fontWeight:400, color:'#666', marginLeft:8, fontSize:10 }}>
             {items.length} marcada{items.length!==1?'s':''}
           </span>
@@ -1123,9 +1280,25 @@ function CorteTelaSection({ tela, items, prod, talles: tallesProp, allPiezas, al
             </span>
           )}
         </span>
-        <button style={S.btnP} onClick={addMarcada} disabled={adding}>{adding?'...':'+ Marcada'}</button>
+        <div style={{ display:'flex', gap:6, alignItems:'center' }} onClick={e => e.stopPropagation()}>
+          <button style={S.btnS} onClick={() => setModalTela(true)}>✏ tela</button>
+          <button style={S.btnP} onClick={addMarcada} disabled={adding}>{adding?'...':'+ Marcada'}</button>
+        </div>
       </div>
-      <div style={{ padding:'6px 8px' }}>
+      {/* Fila 2: Compra (solo si hay tela elegida y no colapsado) */}
+      {!collapsed && tela && (
+        <div style={{ background:'#f0f3fa', borderBottom:'1px solid #c8d0e8', padding:'4px 10px', display:'flex', alignItems:'center', gap:8, fontSize:11 }}>
+          <span style={{ color:'#5a6a8a', fontWeight:600 }}>Compra:</span>
+          {compra
+            ? <span style={{ color:'#1a3a6b' }}>{fmtN(compra.cantidad)} {compra.unidad||''} · {compra.fecha ? new Date(compra.fecha+'T00:00:00').toLocaleDateString('es-UY') : ''}</span>
+            : <span style={{ color:'#aaa', fontStyle:'italic' }}>ninguna</span>
+          }
+          <button style={{ ...S.btnS, marginLeft:'auto', fontSize:10, padding:'1px 7px' }} onClick={() => setModalCompra(true)}>✏</button>
+        </div>
+      )}
+      {modalTela && <ModalElegirTela onPick={pickTela} onClose={() => setModalTela(false)} />}
+      {modalCompra && <ModalElegirCompra telaId={tela?.id} onPick={pickCompra} onClose={() => setModalCompra(false)} />}
+      {!collapsed && <div style={{ padding:'6px 8px' }}>
         {items[0] && (
           <CortePiezasPorPrendaSection
             marcadaId={items[0].marcada.id} productoId={productoId}
@@ -1140,7 +1313,7 @@ function CorteTelaSection({ tela, items, prod, talles: tallesProp, allPiezas, al
             onDeleteMarcada={onDeleteMarcada} onReload={onReload}
           />
         ))}
-      </div>
+      </div>}
     </div>
   )
 }
@@ -1163,7 +1336,7 @@ function CorteProductoSection({ prod, entries, allPiezas, allAjustes, piezasReq,
   const telaMap = {}; const telaList = []
   for (const entry of entries) {
     const tid = entry.marcada.telas?.id || '__none__'
-    if (!telaMap[tid]) { telaMap[tid] = { tela: entry.marcada.telas, items: [] }; telaList.push(telaMap[tid]) }
+    if (!telaMap[tid]) { telaMap[tid] = { tela: entry.marcada.telas, compra: entry.marcada.compras_tela || null, items: [] }; telaList.push(telaMap[tid]) }
     telaMap[tid].items.push(entry)
   }
 
@@ -1199,9 +1372,9 @@ function CorteProductoSection({ prod, entries, allPiezas, allAjustes, piezasReq,
             marcadaId={entries[0].marcada.id} productoId={entries[0].prodEntry.producto_id}
             talles={talles} pedidoTalles={pedidoTalles} onReload={onReload}
           />
-          {telaList.map(({ tela, items }) => (
+          {telaList.map(({ tela, compra, items }) => (
             <CorteTelaSection key={tela?.id || '__none__'}
-              tela={tela} items={items} prod={prod} talles={talles}
+              tela={tela} compra={compra} items={items} prod={prod} talles={talles}
               allPiezas={allPiezas} allAjustes={allAjustes}
               piezasReq={piezasReq}
               onDeleteMarcada={onDeleteMarcada} onReload={onReload}
@@ -1322,6 +1495,7 @@ export default function Corte({ onMenuClick }) {
       .from('cortes_marcadas')
       .select(`id, session_id, fecha, created_at, metros, pliegues, total_pliegues, nota, archivo_url,
         telas(id, tipo, color),
+        compra_tela_id, compras_tela:compra_tela_id(id, cantidad, unidad, fecha),
         cortes_marcadas_productos!marcada_id(id, producto_id, tela_rol, tabla_extra,
           productos(id, nombre, tabla, cara_uso, piezas, tela1_id, tela2_id, rib_id))`)
       .eq('session_id', sid).order('created_at')
@@ -1330,6 +1504,7 @@ export default function Corte({ onMenuClick }) {
         .from('cortes_marcadas')
         .select(`id, session_id, fecha, created_at, metros, pliegues, total_pliegues, nota, archivo_url,
           telas(id, tipo, color),
+          compra_tela_id, compras_tela:compra_tela_id(id, cantidad, unidad, fecha),
           cortes_marcadas_productos!marcada_id(id, producto_id, tela_rol, tabla_extra,
             productos(id, nombre, tabla, cara_uso, piezas, tela1_id, tela2_id, rib_id))`)
         .eq('id', sid)
@@ -1529,7 +1704,6 @@ export default function Corte({ onMenuClick }) {
                     {fichaData.marcadas?.length} marcada{fichaData.marcadas?.length !== 1 ? 's' : ''} · {productGroups.length} producto{productGroups.length !== 1 ? 's' : ''}
                   </div>
                 </div>
-                <button style={S.btn} onClick={() => setModalTela(true)}>+ tela</button>
               </div>
 
               <div style={{ ...S.secWrap, padding:'5px 8px', display:'flex', flexWrap:'wrap', gap:6, alignItems:'center' }}>

@@ -238,6 +238,8 @@ export default function Productos({ onMenuClick }) {
   const [editandoCostos,  setEditandoCostos]  = useState(false)
   const [costosDraft,     setCostosDraft]     = useState({})
   const [savingCostos,    setSavingCostos]    = useState(false)
+  const [pvLocal,         setPvLocal]         = useState('')
+  const [margenLocal,     setMargenLocal]     = useState('')
   const [filterProvTela, setFilterProvTela]   = useState('')
   const [filterProvTela2, setFilterProvTela2] = useState('')
   const [filterProvRib, setFilterProvRib]     = useState('')
@@ -290,6 +292,8 @@ export default function Productos({ onMenuClick }) {
 
   useEffect(() => {
     setEditandoCostos(false)
+    setPvLocal(vistaFicha?.precio_venta != null ? String(vistaFicha.precio_venta) : '')
+    setMargenLocal('')
     if (vistaFicha) loadFichaCostos(vistaFicha)
     else { setFichaTelasCosto([]); setFichaRefCot({}) }
   }, [vistaFicha?.id])
@@ -490,6 +494,7 @@ export default function Productos({ onMenuClick }) {
       entretela_id:       base.entretela_id || '',
       piezas:             (base.piezas          || []).map(x => ({ ...x })),
       procesos:           (base.procesos         || emptyForm.procesos).map(x => ({ ...x })),
+      avios_ids:          (base.avios_ids         || []).map(x => ({ ...x })),
       avios_medidas:      (base.avios_medidas    || []).map(x => ({ ...x, medidas: { ...x.medidas } })),
       terminaciones:      { ...(base.terminaciones || {}) },
       terminaciones_extra: (base.terminaciones_extra || []).map(x => ({ ...x })),
@@ -752,6 +757,9 @@ export default function Productos({ onMenuClick }) {
       costo_elasticos:         vistaFicha.costo_elasticos         != null ? String(vistaFicha.costo_elasticos)         : '',
       estampados:              (vistaFicha.estampados || []).map(e => ({ ...e, precio: e.precio != null ? String(e.precio) : '' })),
       costo_otros:             vistaFicha.costo_otros             != null ? String(vistaFicha.costo_otros)             : '',
+      precio_venta:            vistaFicha.precio_venta            != null ? String(vistaFicha.precio_venta)            : '',
+      precio_iva:              vistaFicha.precio_iva              || 'exc',
+      margen_pct:              '',
     })
     setEditandoCostos(true)
   }
@@ -774,6 +782,8 @@ export default function Productos({ onMenuClick }) {
       costo_elasticos:         parseFloat(costosDraft.costo_elasticos)         || 0,
       estampados:              (costosDraft.estampados || []).map(e => ({ ...e, precio: parseFloat(e.precio) || 0 })),
       costo_otros:             parseFloat(costosDraft.costo_otros)             || 0,
+      precio_venta:            parseFloat(costosDraft.precio_venta)            || null,
+      precio_iva:              costosDraft.precio_iva || 'exc',
       avios_ids: (vistaFicha.avios_ids || []).map(av => ({
         ...av,
         cantidad: costosDraft.avios_cantidades?.[av.avio_id] != null
@@ -838,17 +848,21 @@ export default function Productos({ onMenuClick }) {
               <table>
                 <thead>
                   <tr>
-                    <th>Código</th><th>Nombre</th><th>Base/Derivado</th>
+                    <th>Código</th><th>Nombre</th><th>Tela 1</th><th>Base/Derivado</th>
                     <th>Talles</th><th>Procesos</th><th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.map(p => {
                     const base = p.base_id ? productos.find(x => x.id === p.base_id) : null
+                    const tela1 = p.tela1_id ? telas.find(t => t.id === p.tela1_id) : null
                     return (
                       <tr key={p.id} onClick={() => setVistaFicha(vistaFicha?.id === p.id ? null : p)} style={{ cursor: 'pointer' }}>
                         <td style={{ color: 'var(--accent)', fontWeight: 700 }}>{p.codigo || '—'}</td>
                         <td><strong>{p.nombre}</strong></td>
+                        <td style={{ fontSize: 11, color: 'var(--text2)' }}>
+                          {tela1 ? `${tela1.tipo}${tela1.color ? ` · ${tela1.color}` : ''}` : '—'}
+                        </td>
                         <td style={{ fontSize: 11 }}>
                           {base ? <span className="badge badge-blue">hijo · {base.nombre}</span>
                                 : <span className="badge badge-yellow">base</span>}
@@ -888,10 +902,10 @@ export default function Productos({ onMenuClick }) {
                   <span style={{ color: 'var(--text2)' }}>Precio de venta:</span>
                   {vistaFicha.precio_venta != null
                     ? <>
-                        <strong style={{ color: 'var(--success)', fontSize: 15 }}>$ {Number(vistaFicha.precio_venta).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
-                        <span style={{ fontSize: 11, color: vistaFicha.precio_iva === 'inc' ? 'var(--success)' : 'var(--text2)', fontWeight: 600, marginLeft: 4 }}>
-                          {vistaFicha.precio_iva === 'inc' ? 'IVA inc.' : '+ IVA'}
-                        </span>
+                        <strong style={{ color: 'var(--success)', fontSize: 15 }}>
+                          $ {Number(vistaFicha.precio_venta || 0).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </strong>
+                        <span style={{ fontSize: 11, color: 'var(--success)', fontWeight: 600, marginLeft: 4 }}>IVA inc.</span>
                       </>
                     : <span style={{ color: 'var(--text2)', fontStyle: 'italic' }}>— sin precio base</span>
                   }
@@ -1098,15 +1112,7 @@ export default function Productos({ onMenuClick }) {
 
               {/* 💰 Costos */}
               {(() => {
-                const COSTO_KEYS = [
-                  { key: 'costo_confeccion',  label: 'Confección'        },
-                  { key: 'costo_corte',       label: 'Corte'             },
-                  { key: 'costo_elasticos',   label: 'Elásticos'         },
-                  { key: 'costo_otros',       label: 'Otros costos'      },
-                ]
-                const estampadosConPrecio = editandoCostos
-                  ? (costosDraft.estampados || [])
-                  : (vistaFicha.estampados || [])
+
                 const TH  = { padding: '4px 8px', color: '#1a3a6b', background: 'linear-gradient(to bottom, #e8eef7, #c8d4e8)', fontSize: 11, border: '1px solid #c8d4e8', fontWeight: 700 }
                 const TD  = { padding: '5px 8px', border: '1px solid #eee', fontSize: 12, verticalAlign: 'middle' }
                 const SEC = { padding: '3px 8px', background: '#f0f4f8', fontWeight: 700, color: '#1a3a6b', fontSize: 11, border: '1px solid #e0e8f0' }
@@ -1140,6 +1146,13 @@ export default function Productos({ onMenuClick }) {
                   return { avio_id: av.avio_id, nombre: av.nombre, unidad: cat?.unidad || av.unidad || 'u.', cantidad, precio, costo: precio * cantidad }
                 })
                 const subtotalAvios = aviosConCosto.reduce((s, a) => s + a.costo, 0)
+                const COSTO_KEYS = [
+                  { key: 'costo_confeccion',  label: 'Confección' },
+                  { key: 'costo_corte',       label: 'Corte'      },
+                ]
+                const estampadosConPrecio = editandoCostos
+                  ? (costosDraft.estampados || [])
+                  : (vistaFicha.estampados || [])
                 const subtotalOtros = COSTO_KEYS.reduce((a, c) => {
                   const v = editandoCostos ? costosDraft[c.key] : vistaFicha[c.key]
                   return a + (parseFloat(v) || 0)
@@ -1195,14 +1208,15 @@ export default function Productos({ onMenuClick }) {
                           <th style={{ ...TH, textAlign: 'center', width: '16%' }}>Consumo</th>
                           <th style={{ ...TH, textAlign: 'right', width: '16%' }}>Precio/m</th>
                           <th style={{ ...TH, textAlign: 'right', width: '16%' }}>Costo ($)</th>
-                          <th style={{ ...TH, textAlign: 'left',  width: '24%' }}>Ref. catálogo</th>
+                          <th style={{ ...TH, textAlign: 'right', width: '12%' }}>Redondeo</th>
+                          <th style={{ ...TH, textAlign: 'left',  width: '12%' }}>Ref. catálogo</th>
                         </tr>
                       </thead>
                       <tbody>
                         {/* — Telas — */}
-                        <tr><td colSpan={5} style={SEC}>🧶 Telas</td></tr>
+                        <tr><td colSpan={6} style={SEC}>🧶 Telas</td></tr>
                         {telasConCosto.length === 0 ? (
-                          <tr><td colSpan={5} style={{ ...TD, color: '#888', fontStyle: 'italic' }}>Sin telas con datos de precio</td></tr>
+                          <tr><td colSpan={6} style={{ ...TD, color: '#888', fontStyle: 'italic' }}>Sin telas con datos de precio</td></tr>
                         ) : telasConCosto.map(t => (
                           <tr key={t.id} onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'} onMouseLeave={e => e.currentTarget.style.background = ''}>
                             <td style={TD}>
@@ -1236,6 +1250,9 @@ export default function Productos({ onMenuClick }) {
                                   ? <span style={{ color: '#c87000', fontStyle: 'italic', fontWeight: 400 }}>⚠ falta T/C</span>
                                   : '—'}
                             </td>
+                            <td style={{ ...TD, textAlign: 'right', color: '#1a5a1a', fontWeight: 700, fontSize: 11 }}>
+                              {t.costoUYU != null ? fmtUYU(Math.ceil(t.costoUYU / 5) * 5) : '—'}
+                            </td>
                             <td style={{ ...TD, color: '#888', fontStyle: 'italic', fontSize: 10 }}>
                               {t.rendimiento != null ? `rend: ${Number(t.rendimiento).toFixed(2)} m/kg` : '—'}
                             </td>
@@ -1245,11 +1262,12 @@ export default function Productos({ onMenuClick }) {
                           <td colSpan={3} style={{ ...TD, fontWeight: 700 }}>Subtotal telas</td>
                           <td style={{ ...TD, textAlign: 'right', fontWeight: 700 }}>{fmtUYU(subtotalTelas)}</td>
                           <td style={TD}></td>
+                          <td style={TD}></td>
                         </tr>
 
                         {/* — Avíos — */}
                         {aviosConCosto.length > 0 && (<>
-                          <tr><td colSpan={5} style={SEC}>🧷 Avíos</td></tr>
+                          <tr><td colSpan={6} style={SEC}>🧷 Avíos</td></tr>
                           {aviosConCosto.map((av, i) => (
                             <tr key={i} onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'} onMouseLeave={e => e.currentTarget.style.background = ''}>
                               <td style={TD}>{av.nombre}</td>
@@ -1268,6 +1286,9 @@ export default function Productos({ onMenuClick }) {
                               </td>
                               <td style={{ ...TD, textAlign: 'right', color: '#555' }}>{av.precio > 0 ? fmtUYU(av.precio) : '—'}</td>
                               <td style={{ ...TD, textAlign: 'right', fontWeight: 700 }}>{av.costo > 0 ? fmtUYU(av.costo) : '—'}</td>
+                              <td style={{ ...TD, textAlign: 'right', color: '#1a5a1a', fontWeight: 700, fontSize: 11 }}>
+                                {av.costo > 0 ? fmtUYU(Math.ceil(av.costo / 5) * 5) : '—'}
+                              </td>
                               <td style={{ ...TD, color: '#888', fontStyle: 'italic', fontSize: 10 }}>precio catálogo</td>
                             </tr>
                           ))}
@@ -1275,14 +1296,16 @@ export default function Productos({ onMenuClick }) {
                             <td colSpan={3} style={{ ...TD, fontWeight: 700 }}>Subtotal avíos</td>
                             <td style={{ ...TD, textAlign: 'right', fontWeight: 700 }}>{fmtUYU(subtotalAvios)}</td>
                             <td style={TD}></td>
+                            <td style={TD}></td>
                           </tr>
                         </>)}
 
                         {/* — Otros costos — */}
-                        <tr><td colSpan={5} style={SEC}>✂ Confección / Estampado / Otros</td></tr>
+                        <tr><td colSpan={6} style={SEC}>✂ Confección / Estampado / Otros</td></tr>
                         {COSTO_KEYS.map(({ key, label }) => {
                           const val = editandoCostos ? costosDraft[key] : (vistaFicha[key] || 0)
                           const refCot = fichaRefCot[key]
+                          const numVal = parseFloat(val) || 0
                           return (
                             <tr key={key} onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'} onMouseLeave={e => e.currentTarget.style.background = ''}>
                               <td style={TD}>{label}</td>
@@ -1299,6 +1322,9 @@ export default function Productos({ onMenuClick }) {
                                   />
                                 ) : fmtUYU(val)}
                               </td>
+                              <td style={{ ...TD, textAlign: 'right', color: '#1a5a1a', fontWeight: 700, fontSize: 11 }}>
+                                {numVal > 0 ? fmtUYU(Math.ceil(numVal / 5) * 5) : '—'}
+                              </td>
                               <td style={{ ...TD, color: '#888', fontStyle: 'italic', fontSize: 10 }}>
                                 {refCot ? `prom. ${fmtUYU(refCot.promedio)} (${refCot.count})` : '—'}
                               </td>
@@ -1309,7 +1335,7 @@ export default function Productos({ onMenuClick }) {
                         {/* — Estampados / bordados — */}
                         {estampadosConPrecio.length > 0 && (
                           <>
-                            <tr><td colSpan={5} style={SEC}>🎨 Estampados y bordados</td></tr>
+                            <tr><td colSpan={6} style={SEC}>🎨 Estampados y bordados</td></tr>
                             {estampadosConPrecio.map((e, i) => (
                               <tr key={i} onMouseEnter={ev => ev.currentTarget.style.background = '#ffffcc'} onMouseLeave={ev => ev.currentTarget.style.background = ''}>
                                 <td style={TD}>
@@ -1334,6 +1360,9 @@ export default function Productos({ onMenuClick }) {
                                     />
                                   ) : fmtUYU(e.precio || 0)}
                                 </td>
+                                <td style={{ ...TD, textAlign: 'right', color: '#1a5a1a', fontWeight: 700, fontSize: 11 }}>
+                                  {(e.precio || 0) > 0 ? fmtUYU(Math.ceil((e.precio || 0) / 5) * 5) : '—'}
+                                </td>
                                 <td style={{ ...TD, color: '#888', fontStyle: 'italic', fontSize: 10 }}>—</td>
                               </tr>
                             ))}
@@ -1344,33 +1373,92 @@ export default function Productos({ onMenuClick }) {
                         <tr style={{ background: 'linear-gradient(to bottom, #e8eef7, #c8d4e8)' }}>
                           <td colSpan={3} style={{ padding: 8, fontWeight: 700, fontSize: 13, color: '#1a3a6b', border: '1px solid #6b83a8' }}>COSTO TOTAL</td>
                           <td style={{ padding: 8, textAlign: 'right', fontWeight: 700, fontSize: 15, color: '#1a3a6b', border: '1px solid #6b83a8' }}>{fmtUYU(costoTotal)}</td>
+                          <td style={{ padding: 8, textAlign: 'right', fontWeight: 700, fontSize: 13, color: '#1a5a1a', border: '1px solid #6b83a8' }}>
+                            {costoTotal > 0 ? fmtUYU(Math.ceil(costoTotal / 5) * 5) : '—'}
+                          </td>
                           <td style={{ border: '1px solid #6b83a8' }}></td>
                         </tr>
 
-                        {/* — Precio de venta + margen — */}
+                        {/* — Precio de venta + margen — siempre visible — */}
                         {(() => {
-                          const pv = parseFloat(vistaFicha.precio_venta)
-                          if (!pv) return (
-                            <tr>
-                              <td colSpan={5} style={{ ...TD, color: '#888', fontStyle: 'italic' }}>
-                                💲 Precio de venta: — sin precio base
-                              </td>
-                            </tr>
-                          )
-                          const pvSinIva = vistaFicha.precio_iva === 'inc' ? pv / 1.22 : pv
-                          const margen = costoTotal > 0 ? ((pvSinIva - costoTotal) / costoTotal) * 100 : null
-                          const margenColor = margen == null ? '#888' : margen >= 0 ? '#1a7a1a' : '#c06060'
+                          const costoRedondeado = costoTotal > 0 ? Math.ceil(costoTotal / 5) * 5 : 0
+                          // Precios calculados desde margen usando costo redondeado
+                          const mPct = parseFloat(margenLocal)
+                          const refSinIva = (!isNaN(mPct) && costoRedondeado > 0) ? costoRedondeado * (1 + mPct / 100) : null
+                          const refConIva = refSinIva != null ? refSinIva * 1.22 : null
+                          // Margen real desde precio de venta manual vs costo original
+                          const pvManual = parseFloat(pvLocal) || 0
+                          const margenReal = costoTotal > 0 && pvManual > 0 ? ((pvManual / 1.22 - costoTotal) / costoTotal) * 100 : null
+                          const margenColor = margenReal == null ? '#888' : margenReal >= 30 ? '#1a7a1a' : margenReal >= 0 ? '#c87000' : '#c06060'
                           return (
-                            <tr style={{ background: '#f0f8f0' }}>
-                              <td colSpan={3} style={{ ...TD, fontWeight: 700 }}>
-                                💲 Precio de venta
-                                <span style={{ fontSize: 10, fontWeight: 600, marginLeft: 5, color: vistaFicha.precio_iva === 'inc' ? '#1a7a1a' : '#888' }}>
-                                  {vistaFicha.precio_iva === 'inc' ? 'IVA inc.' : '+ IVA'}
-                                </span>
-                              </td>
-                              <td style={{ ...TD, textAlign: 'right', fontWeight: 700, color: '#1a5a1a', fontSize: 13 }}>{fmtUYU(pv)}</td>
-                              <td style={{ ...TD, fontWeight: 700, color: margenColor }}>
-                                {margen != null ? `${margen >= 0 ? '+' : ''}${margen.toFixed(1)}% margen` : '—'}
+                            <tr style={{ background: '#f8f8f0' }}>
+                              <td colSpan={6} style={{ ...TD, paddingTop: 10, paddingBottom: 10 }}>
+                                <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
+                                  {/* Margen % → calcula referencia */}
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <span style={{ fontSize: 11, color: '#555', whiteSpace: 'nowrap' }}>Margen</span>
+                                    <input type="number" style={{ width: 60, fontSize: 11, textAlign: 'right' }}
+                                      value={margenLocal}
+                                      onChange={e => setMargenLocal(e.target.value)}
+                                      placeholder="%" />
+                                    <span style={{ fontSize: 11, color: '#555' }}>%</span>
+                                  </div>
+                                  {/* Referencia calculada (fija) */}
+                                  {refSinIva != null && (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                      <span style={{ fontSize: 11, color: '#888', whiteSpace: 'nowrap' }}>
+                                        Precio + IVA: <strong style={{ color: '#333' }}>{fmtUYU(refSinIva)}</strong>
+                                      </span>
+                                      <span style={{ fontSize: 11, color: '#1a5a1a', whiteSpace: 'nowrap' }}>
+                                        IVA inc.: <strong>{fmtUYU(refConIva)}</strong>
+                                      </span>
+                                    </div>
+                                  )}
+                                  {/* Precio de venta manual (IVA inc.) */}
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    <span style={{ fontSize: 11, color: '#555', whiteSpace: 'nowrap' }}>Precio de venta</span>
+                                    <input type="number" style={{ width: 95, fontSize: 12, textAlign: 'right', fontWeight: 700, border: '2px solid #a0b8d0' }}
+                                      value={pvLocal}
+                                      onChange={e => setPvLocal(e.target.value)}
+                                      onKeyDown={async e => {
+                                        if (e.key !== 'Enter') return
+                                        const val = parseFloat(pvLocal) || null
+                                        await supabase.from('productos').update({ precio_venta: val }).eq('id', vistaFicha.id)
+                                        setVistaFicha(f => ({ ...f, precio_venta: val }))
+                                        setProductos(prev => prev.map(p => p.id === vistaFicha.id ? { ...p, precio_venta: val } : p))
+                                        e.target.blur()
+                                      }}
+                                      onBlur={async () => {
+                                        const val = parseFloat(pvLocal) || null
+                                        await supabase.from('productos').update({ precio_venta: val }).eq('id', vistaFicha.id)
+                                        setVistaFicha(f => ({ ...f, precio_venta: val }))
+                                        setProductos(prev => prev.map(p => p.id === vistaFicha.id ? { ...p, precio_venta: val } : p))
+                                      }}
+                                      placeholder="IVA inc." />
+                                    <span style={{ fontSize: 10, color: '#888' }}>IVA inc.</span>
+                                  </div>
+                                  {/* Margen real + desglose */}
+                                  {margenReal != null && (() => {
+                                    const ventaSinIva = pvManual / 1.22
+                                    const ganancia = ventaSinIva - costoTotal
+                                    return (
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+                                        <strong style={{ color: margenColor, fontSize: 13 }}>
+                                          {margenReal >= 0 ? '+' : ''}{margenReal.toFixed(1)}% margen
+                                        </strong>
+                                        <span style={{ fontSize: 11, color: '#555' }}>
+                                          Costo s/IVA: <strong style={{ color: '#333' }}>{fmtUYU(costoTotal)}</strong>
+                                        </span>
+                                        <span style={{ fontSize: 11, color: '#555' }}>
+                                          Venta s/IVA: <strong style={{ color: '#333' }}>{fmtUYU(ventaSinIva)}</strong>
+                                        </span>
+                                        <span style={{ fontSize: 11, color: '#555' }}>
+                                          Ganancia: <strong style={{ color: margenColor }}>{ganancia >= 0 ? '+' : ''}{fmtUYU(ganancia)}</strong>
+                                        </span>
+                                      </div>
+                                    )
+                                  })()}
+                                </div>
                               </td>
                             </tr>
                           )
@@ -1787,8 +1875,6 @@ export default function Productos({ onMenuClick }) {
                   {[
                     ['costo_confeccion', 'Confección'],
                     ['costo_corte',      'Corte'],
-                    ['costo_elasticos',  'Elásticos y avíos'],
-                    ['costo_otros',      'Otros'],
                   ].map(([key, label]) => (
                     <div key={key} className="form-group">
                       <label>{label}</label>
