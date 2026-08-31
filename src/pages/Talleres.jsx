@@ -322,11 +322,11 @@ function FormMovimiento({ tipo, setTipo, fecha, setFecha, tallerQ, setTallerQ, t
 
 // ── Modal: Nuevo movimiento ───────────────────────────────────────────────────
 
-function ModalNuevo({ onClose, onSave, tipoInicial }) {
+function ModalNuevo({ onClose, onSave, tipoInicial, tallerInicial }) {
   const [tipo,       setTipo]       = useState(tipoInicial || 'envio')
   const [fecha,      setFecha]      = useState(today())
-  const [tallerQ,    setTallerQ]    = useState('')
-  const [tallerId,   setTallerId]   = useState(null)
+  const [tallerQ,    setTallerQ]    = useState(tallerInicial?.nombre || '')
+  const [tallerId,   setTallerId]   = useState(tallerInicial?.id || null)
   const [tallerRes,  setTallerRes]  = useState([])
   const [items,      setItems]      = useState([newItem()])
   const [nota,       setNota]       = useState('')
@@ -1837,6 +1837,56 @@ function StockEnTalleres({ movimientos, controlMap, onRecibirStock }) {
 
 const TIPOS_TALLER = ['Taller', 'Estampador', 'Bordador']
 
+function ModalNuevoTaller({ onClose, onSave }) {
+  const [nombre,  setNombre]  = useState('')
+  const [tipo,    setTipo]    = useState('Taller')
+  const [telefono,setTelefono]= useState('')
+  const [saving,  setSaving]  = useState(false)
+
+  async function save() {
+    if (!nombre.trim()) { alert('Ingresá un nombre'); return }
+    setSaving(true)
+    const { data, error } = await supabase.from('contactos')
+      .insert({ nombre: nombre.trim(), tipo, telefono: telefono.trim() || null })
+      .select().single()
+    if (error) { alert('Error: ' + error.message); setSaving(false); return }
+    setSaving(false); onSave(data.id)
+  }
+
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={{ ...S.modal, width: 360 }} onClick={e => e.stopPropagation()}>
+        <div style={S.modalH}>
+          <span>Nuevo taller / contacto</span>
+          <button style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: F }} onClick={onClose}>✕</button>
+        </div>
+        <div style={S.modalB}>
+          <div style={{ marginBottom: 10 }}>
+            <span style={S.lbl}>Nombre</span>
+            <input style={{ ...S.inp, width: '100%', boxSizing: 'border-box' }} value={nombre}
+              onChange={e => setNombre(e.target.value)} placeholder="Nombre del taller o persona" autoFocus />
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <span style={S.lbl}>Tipo</span>
+            <select style={{ ...S.sel, width: '100%' }} value={tipo} onChange={e => setTipo(e.target.value)}>
+              {TIPOS_TALLER.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <span style={S.lbl}>Teléfono (opcional)</span>
+            <input style={{ ...S.inp, width: '100%', boxSizing: 'border-box' }} value={telefono}
+              onChange={e => setTelefono(e.target.value)} placeholder="Ej: 099 123 456" />
+          </div>
+        </div>
+        <div style={{ padding: '8px 12px', borderTop: '1px solid #c0c0b0', display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+          <button style={S.btn} onClick={onClose}>Cancelar</button>
+          <button style={S.btnP} onClick={save} disabled={saving}>{saving ? 'Guardando...' : '✔ Crear taller'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Modal: Acción desde mi taller (entregar cliente o enviar taller) ──────────
 
 function ModalAccionMiTaller({ producto, filas, onClose, onSave }) {
@@ -2366,11 +2416,42 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
     else loose.movements.push(m)
   }
 
-  const blocks = [
+  const allBlocks = [
     ...enviosAsc.map(e => blockMap[e.id]),
     ...(loose.movements.length ? [loose] : []),
   ]
-  const blocksDesc = [...blocks].reverse()
+
+  // Separar en pendientes (sin recepción) y cerrados (con recepción)
+  const pendientes = allBlocks.filter(b => b.envio && !b.movements.some(m => m.tipo === 'recepcion')).reverse()
+  const cerrados   = allBlocks.filter(b => !b.envio || b.movements.some(m => m.tipo === 'recepcion')).reverse()
+
+  function renderBlock(block, i, isPending) {
+    const borderColor = isPending ? '#c08020' : '#6a8a6a'
+    const bgColor     = isPending ? '#fffbe8' : '#f4f8f4'
+    return (
+      <div key={block.envio?.id || `suelto-${i}`}
+        style={{ border: `2px solid ${borderColor}`, background: bgColor, marginBottom: 8, borderRadius: 2 }}>
+        {/* Envío — arriba del bloque */}
+        {block.envio && (
+          <MovCard mov={block.envio} onDelete={onDelete} onEdit={onEdit}
+            onCalidad={onCalidad} onRecibir={onRecibir}
+            controlItems={controlMap[block.envio.id]} onEnviarFalla={onEnviarFalla}
+            entregasVinculadas={entregasMap[block.envio.id]} />
+        )}
+        {/* Recepciones/devoluciones — debajo del envío */}
+        {block.movements.length > 0 && (
+          <div style={{ borderTop: `1px dashed ${borderColor}`, paddingTop: 4, paddingBottom: 4 }}>
+            {[...block.movements].reverse().map(m => (
+              <MovCard key={m.id} mov={m} onDelete={onDelete} onEdit={onEdit}
+                onCalidad={onCalidad} onRecibir={onRecibir}
+                controlItems={controlMap[m.id]} onEnviarFalla={onEnviarFalla}
+                entregasVinculadas={entregasMap[m.id]} />
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div style={{ border: '2px solid #7a8898', background: '#f4f4f0', marginBottom: 12 }}>
@@ -2387,27 +2468,27 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
 
       {open && (
         <div style={{ padding: '6px 8px' }}>
-          {blocksDesc.map((block, i) => (
-            <div key={block.envio?.id || `suelto-${i}`}
-              style={{ borderLeft: '3px solid #b0b8c8', marginBottom: 10, paddingLeft: 8 }}>
-              {/* Recepciones/devoluciones/entregas — más nueva primero */}
-              {[...block.movements].reverse().map(m => (
-                <MovCard key={m.id} mov={m} onDelete={onDelete} onEdit={onEdit}
-                  onCalidad={onCalidad} onRecibir={onRecibir}
-                  controlItems={controlMap[m.id]} onEnviarFalla={onEnviarFalla}
-                  entregasVinculadas={entregasMap[m.id]} />
-              ))}
-              {/* Envío — ancla del bloque, al fondo */}
-              {block.envio && (
-                <div style={{ borderTop: block.movements.length > 0 ? '1px dashed #b0b8c8' : 'none', paddingTop: block.movements.length > 0 ? 4 : 0 }}>
-                  <MovCard mov={block.envio} onDelete={onDelete} onEdit={onEdit}
-                    onCalidad={onCalidad} onRecibir={onRecibir}
-                    controlItems={controlMap[block.envio.id]} onEnviarFalla={onEnviarFalla}
-                    entregasVinculadas={entregasMap[block.envio.id]} />
+          {/* Lotes pendientes de recepción */}
+          {pendientes.length > 0 && (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#8a5a00', background: '#fff3cc', border: '1px solid #e0c060', padding: '3px 8px', marginBottom: 6 }}>
+                📤 PENDIENTE DE RECEPCIÓN ({pendientes.length})
+              </div>
+              {pendientes.map((b, i) => renderBlock(b, i, true))}
+            </div>
+          )}
+
+          {/* Lotes cerrados */}
+          {cerrados.length > 0 && (
+            <div>
+              {pendientes.length > 0 && (
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#2a5a2a', background: '#e8f4e8', border: '1px solid #80b880', padding: '3px 8px', marginBottom: 6 }}>
+                  📥 RECIBIDOS
                 </div>
               )}
+              {cerrados.map((b, i) => renderBlock(b, i, false))}
             </div>
-          ))}
+          )}
 
           {/* Popup hilo de envío */}
 
@@ -2447,6 +2528,7 @@ export default function Talleres({ onMenuClick }) {
   const [loading,       setLoading]       = useState(true)
   const initialLoad = React.useRef(true)
   const [modal,         setModal]         = useState(false)
+  const [modalNuevoTaller, setModalNuevoTaller] = useState(false)
   const [editando,      setEditando]      = useState(null)
   const [calidad,       setCalidad]       = useState(null)
   const [recibiendo,    setRecibiendo]    = useState(null)
@@ -2560,15 +2642,16 @@ export default function Talleres({ onMenuClick }) {
           <button style={S.btn} onClick={onMenuClick}>☰</button>
           <span style={{ fontWeight: 700, fontSize: 13 }}>🧵 Talleres</span>
         </div>
-        <button style={S.btnP} onClick={() => setModal(true)}>+ Movimiento</button>
       </div>
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         {/* Panel izquierdo: lista de talleres */}
         <div style={{ width: 200, flexShrink: 0, borderRight: '1px solid #c8cce0', background: '#eef0f8', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ padding: '6px 8px', borderBottom: '1px solid #c8cce0' }}>
-            <input style={{ ...S.inp, width: '100%', boxSizing: 'border-box' }} value={filtroTaller}
+          <div style={{ padding: '6px 8px', borderBottom: '1px solid #c8cce0', display: 'flex', gap: 4 }}>
+            <input style={{ ...S.inp, flex: 1, minWidth: 0 }} value={filtroTaller}
               onChange={e => setFiltroTaller(e.target.value)} placeholder="Buscar taller..." />
+            <button style={{ ...S.btnP, padding: '2px 8px', fontWeight: 700, flexShrink: 0 }}
+              title="Nuevo taller" onClick={() => setModalNuevoTaller(true)}>+</button>
           </div>
           {loading ? (
             <div style={{ padding: 12, color: '#888', fontSize: 11 }}>Cargando...</div>
@@ -2601,6 +2684,13 @@ export default function Talleres({ onMenuClick }) {
         <div style={{ flex: 1, overflowY: 'auto', padding: '10px 14px' }}>
           <StockEnTalleres movimientos={movimientos} controlMap={controlMap} onRecibirStock={(taller, stockItems, fallaCtrl) => setRecibiendoStock({ taller, stockItems, fallaControlItems: fallaCtrl || [] })} />
 
+          {selGrupo && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '10px 0 6px' }}>
+              <span style={{ fontWeight: 700, fontSize: 13 }}>🧵 {selGrupo.nombre}</span>
+              <button style={S.btnP} onClick={() => setModal(true)}>+ Movimiento</button>
+            </div>
+          )}
+
           <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <select style={S.sel} value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}>
               <option value="">Todos los tipos</option>
@@ -2626,11 +2716,13 @@ export default function Talleres({ onMenuClick }) {
         </div>
       </div>
 
-      {modal      && <ModalNuevo   onClose={() => setModal(false)}       onSave={() => { setModal(false);       fetchAll() }} />}
+      {modal      && <ModalNuevo   onClose={() => setModal(false)}       onSave={() => { setModal(false);       fetchAll() }}
+                      tallerInicial={selCid && todosTalleres[selCid] ? { id: selCid, nombre: todosTalleres[selCid].nombre } : null} />}
       {editando   && <ModalEditar  mov={editando}   onClose={() => setEditando(null)}   onSave={() => { setEditando(null);   fetchAll() }} />}
       {calidad    && <ModalCalidad mov={calidad} entregasVinculadas={entregasMap[calidad.id] || []} controlItems={controlMap[calidad.id] || []} onClose={() => setCalidad(null)} onSave={() => { setCalidad(null); fetchAll() }} />}
       {recibiendo && <ModalRecibir envio={recibiendo} onClose={() => setRecibiendo(null)} onSave={() => { setRecibiendo(null); fetchAll() }} />}
       {recibiendoStock && <ModalRecibirStock taller={recibiendoStock.taller} stockItems={recibiendoStock.stockItems} fallaControlItems={recibiendoStock.fallaControlItems} onClose={() => setRecibiendoStock(null)} onSave={() => { setRecibiendoStock(null); fetchAll() }} />}
+      {modalNuevoTaller && <ModalNuevoTaller onClose={() => setModalNuevoTaller(false)} onSave={(cid) => { setModalNuevoTaller(false); fetchAll(); setSelectedTaller(cid) }} />}
     </div>
   )
 }
