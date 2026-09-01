@@ -1318,10 +1318,138 @@ function CorteTelaSection({ tela, compra, items, prod, talles: tallesProp, allPi
   )
 }
 
+// ── ModalAgregarTelaProducto ───────────────────────────────────────────────────
+// Dentro de un producto: agrega una tela nueva con su rol (tela1/tela2/rib)
+// rolesExistentes: roles ya presentes en la sesión para este producto
+
+const ROL_TELA_KEY = { tela1: 'tela1_id', tela2: 'tela2_id', tela3: 'tela3_id', rib: 'rib_id' }
+
+function ModalAgregarTelaProducto({ prod, sessionId, productoId, refFecha, onClose, onSave }) {
+  const rolesDisponibles = Object.entries(ROL_LABELS)
+  const [rol,        setRol]        = useState(rolesDisponibles[0]?.[0] || '')
+  const [telaId,     setTelaId]     = useState(null)
+  const [telaLabel_, setTelaLabel_] = useState('')
+  const [telaQ,      setTelaQ]      = useState('')
+  const [telaRes,    setTelaRes]    = useState([])
+  const [compras,    setCompras]    = useState([])
+  const [compraId,   setCompraId]   = useState(null)
+  const [comprasOpen,setComprasOpen]= useState(false)
+  const [saving,     setSaving]     = useState(false)
+  const timer = useRef(null)
+
+  // Al cambiar rol, auto-sugerir la tela del catálogo del producto
+  useEffect(() => {
+    const telaKey = ROL_TELA_KEY[rol]
+    const catalogTelaId = telaKey && prod?.[telaKey]
+setTelaId(null); setTelaLabel_(''); setTelaQ(''); setTelaRes([])
+    setCompras([]); setCompraId(null); setComprasOpen(false)
+    if (!catalogTelaId) return
+    supabase.from('telas').select('id,tipo,color').eq('id', catalogTelaId).single()
+      .then(({ data }) => {
+        if (!data) return
+        setTelaId(data.id); setTelaLabel_(telaLabel(data)); setTelaQ(telaLabel(data))
+        supabase.from('compras_tela').select('id,cantidad,unidad,fecha,compras(proveedor)')
+          .eq('tela_id', data.id).order('fecha', { ascending: false })
+          .then(({ data: c }) => { setCompras(c || []); setComprasOpen(true) })
+      })
+  }, [rol, prod])
+
+  function onTelaInput(val) {
+    setTelaQ(val); setTelaId(null); setTelaLabel_(''); setCompras([]); setCompraId(null); setComprasOpen(false)
+    if (timer.current) clearTimeout(timer.current)
+    if (!val.trim()) { setTelaRes([]); return }
+    timer.current = setTimeout(async () => {
+      const { data } = await supabase.from('telas').select('id,tipo,color').ilike('tipo', `%${val}%`).limit(8)
+      setTelaRes(data || [])
+    }, 220)
+  }
+
+  function pickTela(r) {
+    setTelaId(r.id); setTelaLabel_(telaLabel(r)); setTelaQ(telaLabel(r)); setTelaRes([])
+    setCompras([]); setCompraId(null); setComprasOpen(false)
+    supabase.from('compras_tela').select('id,cantidad,unidad,fecha,compras(proveedor)')
+      .eq('tela_id', r.id).order('fecha', { ascending: false })
+      .then(({ data }) => { setCompras(data || []); setComprasOpen(true) })
+  }
+
+  async function handleSave() {
+    setSaving(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data: m, error } = await supabase.from('cortes_marcadas').insert({
+      session_id: sessionId, tela_id: telaId || null, compra_tela_id: compraId || null,
+      fecha: refFecha, metros: 0, pliegues: 1, total_pliegues: 0, user_id: user?.id,
+    }).select('id').single()
+    if (error) { alert('Error: ' + error.message); setSaving(false); return }
+    await supabase.from('cortes_marcadas_productos').insert({ marcada_id: m.id, producto_id: productoId, tela_rol: rol || null })
+    setSaving(false); onSave()
+  }
+
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={S.modal} onClick={e => e.stopPropagation()}>
+        <div style={S.modalH}>
+          <span>🧵 Agregar tela — {prod?.nombre}</span>
+          <button style={{ background:'none', border:'none', color:'#fff', cursor:'pointer', fontSize:14, fontFamily:F }} onClick={onClose}>✕</button>
+        </div>
+        <div style={S.modalB}>
+          <div style={{ marginBottom:10 }}>
+            <span style={S.lbl}>Rol en el producto</span>
+            <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginTop:4 }}>
+              {rolesDisponibles.map(([r, label]) => (
+                <button key={r} style={{ ...S.btn, background: rol===r ? '#1a3a6b' : undefined, color: rol===r ? '#fff' : undefined }}
+                  onClick={() => setRol(r)}>{label}</button>
+              ))}
+            </div>
+          </div>
+          <div style={{ position:'relative', marginBottom: compras.length ? 0 : 10 }}>
+            <span style={S.lbl}>Tela</span>
+            <input style={{ ...S.inp, width:'100%' }} value={telaQ} onChange={e => onTelaInput(e.target.value)} placeholder="Buscar tela..." />
+            {telaId && <span style={{ fontSize:10, color:'#2a6a2a' }}>✓ {telaLabel_}</span>}
+            <AcList items={telaRes} onPick={pickTela} label={telaLabel} />
+          </div>
+          {compras.length > 0 && (
+            <div style={{ marginTop:6, marginBottom:8 }}>
+              <div style={{ cursor:'pointer', fontWeight:700, fontSize:11, color:'#1a3a6b', padding:'4px 0', userSelect:'none' }}
+                onClick={() => setComprasOpen(o => !o)}>
+                {comprasOpen ? '▼' : '▶'} Compras ({compras.length})
+                {compraId && <span style={{ marginLeft:8, fontWeight:400, color:'#2a6a2a', fontSize:10 }}>
+                  ✓ {compras.find(c=>c.id===compraId)?.fecha ? new Date(compras.find(c=>c.id===compraId).fecha+'T00:00:00').toLocaleDateString('es-UY') : ''}
+                </span>}
+              </div>
+              {comprasOpen && (
+                <div style={{ border:'1px solid #c8d0e8', borderRadius:3, overflow:'hidden', fontSize:11 }}>
+                  {compras.map(c => (
+                    <div key={c.id}
+                      style={{ padding:'5px 8px', cursor:'pointer', borderBottom:'1px solid #e8ecf8',
+                        background: compraId===c.id ? '#d8e8ff' : undefined, display:'flex', gap:10 }}
+                      onClick={() => setCompraId(compraId===c.id ? null : c.id)}>
+                      <span style={{ fontWeight: compraId===c.id ? 700 : 400 }}>
+                        {c.fecha ? new Date(c.fecha+'T00:00:00').toLocaleDateString('es-UY') : '—'}
+                      </span>
+                      <span style={{ color:'#444' }}>{fmtN(c.cantidad)} {c.unidad||''}</span>
+                      <span style={{ color:'#888' }}>{c.compras?.proveedor || ''}</span>
+                      {compraId===c.id && <span style={{ marginLeft:'auto', color:'#1a6a1a' }}>✓</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        <div style={S.modalF}>
+          <button style={S.btn} onClick={onClose}>Cancelar</button>
+          <button style={S.btnP} onClick={handleSave} disabled={saving || !rol}>{saving ? 'Agregando…' : '+ Agregar'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── CorteProductoSection ───────────────────────────────────────────────────────
 
 function CorteProductoSection({ prod, entries, allPiezas, allAjustes, piezasReq, pedidoTalles, onDeleteMarcada, onReload, sessionId }) {
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed,     setCollapsed]     = useState(false)
+  const [modalAddTela,  setModalAddTela]  = useState(false)
   const tabla      = prod?.tabla || 'adulto'
   const tablaExtra = entries.find(e => e.prodEntry.tabla_extra)?.prodEntry.tabla_extra || ''
   const talles     = [...(TABLAS_TALLES[tabla]||TABLAS_TALLES.adulto), ...(tablaExtra ? TABLAS_TALLES[tablaExtra]||[] : [])]
@@ -1381,6 +1509,19 @@ function CorteProductoSection({ prod, entries, allPiezas, allAjustes, piezasReq,
               sessionId={sessionId} productoId={entries[0].prodEntry.producto_id}
             />
           ))}
+          <div style={{ marginTop:4, marginBottom:6 }}>
+            <button style={S.btn} onClick={() => setModalAddTela(true)}>+ Tela</button>
+          </div>
+          {modalAddTela && (
+            <ModalAgregarTelaProducto
+              prod={prod}
+              sessionId={sessionId}
+              productoId={entries[0].prodEntry.producto_id}
+              refFecha={entries[0].marcada.fecha}
+              onClose={() => setModalAddTela(false)}
+              onSave={() => { setModalAddTela(false); onReload() }}
+            />
+          )}
           <CorteResumenSection
             entries={entries} allPiezas={allPiezas} allAjustes={allAjustes}
             piezasReq={piezasReq} pedidoTalles={pedidoTalles} talles={talles}
@@ -1739,6 +1880,9 @@ export default function Corte({ onMenuClick }) {
                   sessionId={fichaData.session_id}
                 />
               ))}
+              <div style={{ padding:'6px 8px' }}>
+                <button style={S.btn} onClick={() => setModalTela(true)}>+ Agregar tela</button>
+              </div>
               <div style={{ height:16 }} />
             </>
           ) : (
