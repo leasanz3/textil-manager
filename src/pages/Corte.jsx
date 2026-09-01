@@ -989,11 +989,13 @@ function CorteMarcadaSlim({ marcada, num, prodEntry, prod, talles: tallesProp, a
   const [cfg, setCfg] = useState({
     metros: String(marcada.metros || ''), pliegues: String(marcada.pliegues || 1),
     total_pliegues: String(marcada.total_pliegues || ''), nota: marcada.nota || '',
+    fecha: marcada.fecha || today(),
   })
   useEffect(() => {
     setCfg({ metros: String(marcada.metros || ''), pliegues: String(marcada.pliegues || 1),
-      total_pliegues: String(marcada.total_pliegues || ''), nota: marcada.nota || '' })
-  }, [marcada.metros, marcada.pliegues, marcada.total_pliegues, marcada.nota])
+      total_pliegues: String(marcada.total_pliegues || ''), nota: marcada.nota || '',
+      fecha: marcada.fecha || today() })
+  }, [marcada.metros, marcada.pliegues, marcada.total_pliegues, marcada.nota, marcada.fecha])
 
   function onCfgChange(k, v) {
     const next = { ...cfg, [k]: v }; setCfg(next)
@@ -1002,6 +1004,7 @@ function CorteMarcadaSlim({ marcada, num, prodEntry, prod, talles: tallesProp, a
       await supabase.from('cortes_marcadas').update({
         metros: parseFloat(next.metros)||0, pliegues: parseFloat(next.pliegues)||1,
         total_pliegues: parseFloat(next.total_pliegues)||0, nota: next.nota.trim()||null,
+        fecha: next.fecha || null,
       }).eq('id', marcada.id); onReload()
     }, 700)
   }
@@ -1041,6 +1044,7 @@ function CorteMarcadaSlim({ marcada, num, prodEntry, prod, talles: tallesProp, a
       <div style={S.marcHead}>
         <span style={{ fontWeight:700, cursor:'pointer', color:'#333' }} onClick={() => setCollapsed(c => !c)}>
           {collapsed ? '▶' : '▼'} Marcada {num}
+          {cfg.fecha && <span style={{ fontWeight:400, fontSize:10, color:'#666', marginLeft:6 }}>{fmtF(cfg.fecha)}</span>}
         </span>
         <span style={{ color:'#555', fontSize:11 }}>
           {cfg.metros||'0'}m · {cfg.pliegues||1}pp/par · {cfg.total_pliegues||0} total
@@ -1052,6 +1056,10 @@ function CorteMarcadaSlim({ marcada, num, prodEntry, prod, talles: tallesProp, a
       {!collapsed && (
         <div style={{ padding:'8px' }}>
           <div style={{ display:'flex', gap:10, alignItems:'flex-end', padding:'6px 8px', background:'#f4f8fc', border:'1px solid #c8d8e8', marginBottom:8, flexWrap:'wrap' }}>
+            <div>
+              <span style={S.lbl}>FECHA</span>
+              <input style={{ ...S.inp, width:110 }} type="date" value={cfg.fecha} onChange={e => onCfgChange('fecha', e.target.value)} />
+            </div>
             {[['METROS','metros',70,0.01],['PLIEGUES/PAR','pliegues',60,1],['TOTAL PLIEGUES','total_pliegues',60,1]].map(([label,k,w,step]) => (
               <div key={k}>
                 <span style={S.lbl}>{label}</span>
