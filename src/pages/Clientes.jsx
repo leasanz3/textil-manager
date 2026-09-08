@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
+import { TABLAS_TALLES, TALLES_ADULTO, TALLES_NINO } from '../constants/talles'
 
 const F = 'Tahoma, Arial, sans-serif'
 const today = () => new Date().toISOString().slice(0, 10)
@@ -9,6 +10,7 @@ const S = {
   tbar:     { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: '#1a3a6b', color: '#fff', position: 'sticky', top: 0, zIndex: 10 },
   btn:      { fontFamily: F, fontSize: 11, padding: '3px 10px', cursor: 'pointer', border: '1px solid #888', background: '#f0f0e8' },
   btnD:     { fontFamily: F, fontSize: 11, background: 'none', border: 'none', color: '#a00', cursor: 'pointer', padding: '0 4px' },
+  inpC:     { fontFamily: F, fontSize: 11, border: '1px solid #a0a0a0', padding: '1px 3px', textAlign: 'center', background: '#fff' },
   inp:      { fontFamily: F, fontSize: 11, padding: '3px 6px', border: '1px solid #aaa', background: '#fff' },
   sel:      { fontFamily: F, fontSize: 11, padding: '3px 6px', border: '1px solid #aaa', background: '#fff' },
   card:     { border: '2px solid #a0a8b8', background: '#f4f4f0', marginBottom: 8, boxShadow: '1px 1px 0 #b8b8b8' },
@@ -135,6 +137,176 @@ function ModalDevolucionCliente({ clienteId, clienteNombre, onClose, onSave }) {
   )
 }
 
+function newEntregaItem() {
+  return { producto_id: null, prodQ: '', prodRes: [], tabla: 'adulto', talles: TALLES_ADULTO, conNino: false, cantidades: {} }
+}
+
+function EntregaItemProd({ item, index, onChange, onRemove, timers }) {
+  const ref = useRef(null)
+
+  function onProdInput(val) {
+    onChange(index, { ...item, prodQ: val, producto_id: null, prodRes: [] })
+    clearTimeout(timers.current[`p${index}`])
+    if (!val.trim()) return
+    timers.current[`p${index}`] = setTimeout(async () => {
+      const { data } = await supabase.from('productos').select('id, nombre, tabla').ilike('nombre', `%${val.trim()}%`).limit(8)
+      onChange(index, { ...item, prodQ: val, producto_id: null, prodRes: data || [] })
+    }, 250)
+  }
+
+  function pickProd(p) {
+    const talles = TABLAS_TALLES[p.tabla] || TALLES_ADULTO
+    onChange(index, { ...item, producto_id: p.id, prodQ: p.nombre, prodRes: [], tabla: p.tabla, talles, conNino: false, cantidades: {} })
+  }
+
+  function toggleNino() {
+    const conNino = !item.conNino
+    onChange(index, { ...item, conNino, talles: conNino ? [...TALLES_ADULTO, ...TALLES_NINO] : TALLES_ADULTO })
+  }
+
+  function setCant(talle, val) {
+    onChange(index, { ...item, cantidades: { ...item.cantidades, [talle]: val } })
+  }
+
+  const qty = Object.values(item.cantidades || {}).reduce((s, v) => s + (parseInt(v) || 0), 0)
+
+  return (
+    <div style={{ border:'1px solid #c0c8d8', background:'#f8f8fc', padding:'6px 8px', marginBottom:8 }}>
+      <div style={{ display:'flex', gap:6, alignItems:'center', marginBottom:6 }}>
+        <div style={{ flex:1, position:'relative' }}>
+          <input ref={ref} style={{ ...S.inp, width:'100%' }} value={item.prodQ}
+            onChange={e => onProdInput(e.target.value)} placeholder="Buscar producto..." />
+          {item.prodRes?.length > 0 && (
+            <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'#fff', border:'1px solid #c0c8d0', zIndex:10, maxHeight:160, overflowY:'auto' }}>
+              {item.prodRes.map(p => (
+                <div key={p.id} style={{ padding:'5px 10px', cursor:'pointer', fontSize:12, borderBottom:'1px solid #eee' }}
+                  onMouseDown={() => pickProd(p)}>{p.nombre}</div>
+              ))}
+            </div>
+          )}
+        </div>
+        {item.producto_id && item.tabla === 'adulto' && (
+          <button style={{ ...S.btn, fontSize:10, background: item.conNino ? '#4a2a6a' : undefined, color: item.conNino ? '#fff' : undefined }}
+            onClick={toggleNino}>{item.conNino ? '✕ niño' : '+ niño'}</button>
+        )}
+        <button style={S.btnD} onClick={() => onRemove(index)}>✕</button>
+      </div>
+      {item.producto_id && (
+        <>
+          <div style={{ overflowX:'auto' }}>
+            <table style={{ ...S.tbl, marginBottom:4 }}>
+              <thead><tr>{item.talles.map(t => <th key={t} style={S.th}>{t}</th>)}</tr></thead>
+              <tbody><tr>
+                {item.talles.map(t => (
+                  <td key={t} style={S.td}>
+                    <input style={{ ...S.inpC, width:36 }} type="number" min="0"
+                      value={item.cantidades?.[t] || ''} placeholder="0"
+                      onChange={e => setCant(t, e.target.value)} />
+                  </td>
+                ))}
+              </tr></tbody>
+            </table>
+          </div>
+          {qty > 0 && <div style={{ fontSize:10, color:'#1a5a1a', fontWeight:700 }}>Total: {qty} prenda{qty !== 1 ? 's' : ''}</div>}
+        </>
+      )}
+    </div>
+  )
+}
+
+function ModalEntregaCliente({ clienteId, clienteNombre, onClose, onSave }) {
+  const [fecha,  setFecha]  = useState(today())
+  const [cliQ,   setCliQ]   = useState(clienteNombre || '')
+  const [cliId,  setCliId]  = useState(clienteId || null)
+  const [cliRes, setCliRes] = useState([])
+  const [nota,   setNota]   = useState('')
+  const [items,  setItems]  = useState([newEntregaItem()])
+  const [saving, setSaving] = useState(false)
+  const timers = useRef({})
+
+  function onCliInput(val) {
+    setCliQ(val); setCliId(null)
+    clearTimeout(timers.current.c)
+    if (!val.trim()) { setCliRes([]); return }
+    timers.current.c = setTimeout(async () => {
+      const { data } = await supabase.from('contactos').select('id, nombre').ilike('nombre', `%${val.trim()}%`).limit(8)
+      setCliRes(data || [])
+    }, 250)
+  }
+
+  function updateItem(i, val) { setItems(prev => prev.map((it, j) => j === i ? val : it)) }
+  function removeItem(i)      { setItems(prev => prev.filter((_, j) => j !== i)) }
+
+  async function save() {
+    if (!cliId) { alert('Seleccioná un cliente'); return }
+    const rows = []
+    for (const it of items) {
+      if (!it.producto_id) continue
+      for (const [talle, val] of Object.entries(it.cantidades || {})) {
+        const cant = parseInt(val) || 0
+        if (cant > 0) rows.push({ producto_id: it.producto_id, talle, cantidad: cant })
+      }
+    }
+    if (!rows.length) { alert('Ingresá al menos una cantidad'); return }
+    setSaving(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data: mov, error } = await supabase.from('taller_movimientos')
+      .insert({ tipo: 'entrega', fecha, contacto_id: cliId, nota: nota.trim() || null, user_id: user?.id })
+      .select().single()
+    if (error) { alert('Error: ' + error.message); setSaving(false); return }
+    await supabase.from('taller_movimientos_items').insert(rows.map(r => ({ movimiento_id: mov.id, ...r })))
+    setSaving(false); onSave()
+  }
+
+  return (
+    <div style={overlay} onClick={onClose}>
+      <div style={{ ...modal, width: 560 }} onClick={e => e.stopPropagation()}>
+        <div style={{ ...modalH, background:'linear-gradient(to bottom,#3a6a00,#1a4a00)' }}>
+          <span>📦 Nueva entrega a cliente</span>
+          <button style={{ background:'none', border:'none', color:'#fff', cursor:'pointer', fontSize:14, fontFamily:F }} onClick={onClose}>✕</button>
+        </div>
+        <div style={modalB}>
+          <div style={{ display:'flex', gap:10, marginBottom:10 }}>
+            <div style={{ flex:1, position:'relative' }}>
+              <span style={lbl}>Cliente</span>
+              <input style={{ ...S.inp, width:'100%', boxSizing:'border-box' }} value={cliQ}
+                onChange={e => onCliInput(e.target.value)} placeholder="Buscar cliente..." />
+              {cliId && <span style={{ fontSize:10, color:'#2a6a2a' }}>✓ {cliQ}</span>}
+              {cliRes.length > 0 && (
+                <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'#fff', border:'1px solid #c0c8d0', zIndex:10, maxHeight:160, overflowY:'auto' }}>
+                  {cliRes.map(c => (
+                    <div key={c.id} style={{ padding:'5px 10px', cursor:'pointer', fontSize:12, borderBottom:'1px solid #eee' }}
+                      onMouseDown={() => { setCliId(c.id); setCliQ(c.nombre); setCliRes([]) }}>{c.nombre}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <span style={lbl}>Fecha</span>
+              <input style={S.inp} type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
+            </div>
+          </div>
+          <span style={lbl}>Productos</span>
+          {items.map((it, i) => (
+            <EntregaItemProd key={i} item={it} index={i} onChange={updateItem} onRemove={removeItem} timers={timers} />
+          ))}
+          <button style={{ ...S.btn, fontSize:10, marginBottom:10 }} onClick={() => setItems(prev => [...prev, newEntregaItem()])}>+ producto</button>
+          <div>
+            <span style={lbl}>Nota (opcional)</span>
+            <input style={{ ...S.inp, width:'100%', boxSizing:'border-box' }} value={nota}
+              onChange={e => setNota(e.target.value)} placeholder="..." />
+          </div>
+        </div>
+        <div style={{ padding:'8px 12px', borderTop:'1px solid #c0c0b0', display:'flex', justifyContent:'flex-end', gap:6 }}>
+          <button style={S.btn} onClick={onClose}>Cancelar</button>
+          <button style={{ ...S.btn, background:'linear-gradient(to bottom,#3a6a00,#1a4a00)', color:'#fff', border:'1px solid #1a4a00' }}
+            onClick={save} disabled={saving}>{saving ? 'Guardando...' : '📦 Registrar entrega'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const TIPOS_CLIENTE = [
   { id: 'entrega',           label: 'Entrega',           icon: '🛍️', color: '#7a3a00' },
   { id: 'devolucion_cliente', label: 'Devolución',        icon: '↩',  color: '#6a006a' },
@@ -217,6 +389,7 @@ export default function Clientes({ onMenuClick }) {
   const [filtroProd,   setFiltroProd]   = useState('')
   const [selected,     setSelected]     = useState(null)
   const [devolviendo,  setDevolviendo]  = useState(false)
+  const [entregando,   setEntregando]   = useState(false)
   const initialLoad = useRef(true)
 
   useEffect(() => { fetchAll() }, [])
@@ -269,12 +442,18 @@ export default function Clientes({ onMenuClick }) {
           <button style={{ ...S.btn, background: 'transparent', border: '1px solid #ffffff88', color: '#fff' }} onClick={onMenuClick}>☰</button>
           <span style={{ fontWeight: 700, fontSize: 13 }}>🛍️ Clientes</span>
         </div>
-        {selGrupo && (
-          <button style={{ ...S.btn, background: 'linear-gradient(to bottom,#6a006a,#4a004a)', color: '#fff', border: '1px solid #4a004a', fontSize: 11 }}
-            onClick={() => setDevolviendo(true)}>
-            ↩ Devolución
+        <div style={{ display:'flex', gap:6 }}>
+          <button style={{ ...S.btn, background:'linear-gradient(to bottom,#3a6a00,#1a4a00)', color:'#fff', border:'1px solid #1a4a00', fontSize:11 }}
+            onClick={() => setEntregando(true)}>
+            📦 Entrega
           </button>
-        )}
+          {selGrupo && (
+            <button style={{ ...S.btn, background:'linear-gradient(to bottom,#6a006a,#4a004a)', color:'#fff', border:'1px solid #4a004a', fontSize:11 }}
+              onClick={() => setDevolviendo(true)}>
+              ↩ Devolución
+            </button>
+          )}
+        </div>
       </div>
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
@@ -337,6 +516,14 @@ export default function Clientes({ onMenuClick }) {
         </div>
       </div>
 
+      {entregando && (
+        <ModalEntregaCliente
+          clienteId={selGrupo?.cid}
+          clienteNombre={selGrupo?.nombre}
+          onClose={() => setEntregando(false)}
+          onSave={() => { setEntregando(false); fetchAll() }}
+        />
+      )}
       {devolviendo && selGrupo && (
         <ModalDevolucionCliente
           clienteId={selGrupo.cid}
