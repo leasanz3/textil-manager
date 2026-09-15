@@ -21,7 +21,6 @@ function textoCopiar(c) {
   if (c.titular) lines.push(`Titular: ${c.titular}`)
   if (c.numero) lines.push(`N° de cuenta (desde otro banco): ${c.numero}`)
   if (c.numero_mismo_banco) lines.push(`N° de cuenta (mismo banco): ${c.numero_mismo_banco}`)
-  if (c.alias) lines.push(`Alias: ${c.alias}`)
   if (c.moneda === 'USD') lines.push('Moneda: USD')
   return lines.join('\n')
 }
