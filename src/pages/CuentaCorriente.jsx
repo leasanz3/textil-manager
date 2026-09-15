@@ -19,6 +19,7 @@ export default function CuentaCorriente({ onMenuClick }) {
   const [search, setSearch]       = useState('')
   const [modal, setModal]         = useState(false)
   const [saving, setSaving]       = useState(false)
+  const [editId, setEditId]       = useState(null)
   const [misBancos, setMisBancos] = useState([])
 
   const hoy = new Date().toISOString().split('T')[0]
@@ -86,6 +87,24 @@ export default function CuentaCorriente({ onMenuClick }) {
 
   function abrirPago() {
     setPago({ ...emptyPago, fecha: hoy })
+    setEditId(null)
+    setModal(true)
+  }
+
+  function abrirEditar(m) {
+    setPago({
+      tipo: m.tipo === 'debito' ? 'debe' : (m.tipo || 'haber'),
+      fecha: m.fecha || hoy,
+      monto: m.monto || '',
+      forma_pago: m.forma_pago || 'efectivo',
+      banco_destino: m.banco_destino || '',
+      cheque_numero: m.cheque_numero || '',
+      cheque_banco: m.cheque_banco || '',
+      cheque_fecha_cobro: m.cheque_fecha_cobro || '',
+      cheque_titular: m.cheque_titular || '',
+      observacion: m.observacion || '',
+    })
+    setEditId(m.id)
     setModal(true)
   }
 
@@ -95,7 +114,6 @@ export default function CuentaCorriente({ onMenuClick }) {
     const { data: { user } } = await supabase.auth.getUser()
     const monto = parseFloat(pago.monto)
     const registro = {
-      contacto_id: selected.id,
       tipo: pago.tipo,
       fecha: pago.fecha,
       monto,
@@ -107,9 +125,13 @@ export default function CuentaCorriente({ onMenuClick }) {
       cheque_fecha_cobro: pago.cheque_fecha_cobro || null,
       cheque_titular: pago.cheque_titular || null,
       observacion: pago.observacion || null,
-      user_id: user?.id,
     }
-    const { error } = await supabase.from('cuenta_corriente').insert(registro)
+    let error
+    if (editId) {
+      ;({ error } = await supabase.from('cuenta_corriente').update(registro).eq('id', editId))
+    } else {
+      ;({ error } = await supabase.from('cuenta_corriente').insert({ ...registro, contacto_id: selected.id, user_id: user?.id }))
+    }
     setSaving(false)
     if (error) { alert('Error al guardar: ' + error.message); return }
     setModal(false)
@@ -287,7 +309,8 @@ export default function CuentaCorriente({ onMenuClick }) {
                             }}>
                               {m.observacion || '—'}
                             </td>
-                            <td>
+                            <td style={{ whiteSpace: 'nowrap' }}>
+                              <button className="btn btn-secondary btn-sm" style={{ marginRight: 4 }} onClick={() => abrirEditar(m)}>✏</button>
                               <button className="btn btn-danger btn-sm" onClick={() => handleDeleteMov(m.id)}>🗑</button>
                             </td>
                           </tr>
@@ -307,7 +330,7 @@ export default function CuentaCorriente({ onMenuClick }) {
         <div className="modal-overlay">
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 440 }}>
             <div className="modal-header">
-              <h3>💳 {selected?.nombre}</h3>
+              <h3>{editId ? '✏ Editar movimiento' : `💳 ${selected?.nombre}`}</h3>
               <button className="close-btn" onClick={() => setModal(false)}>✕</button>
             </div>
             <div className="modal-body">
@@ -421,7 +444,7 @@ export default function CuentaCorriente({ onMenuClick }) {
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setModal(false)}>Cancelar</button>
               <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-                {saving ? 'Guardando...' : '✔ Guardar'}
+                {saving ? 'Guardando...' : editId ? '✔ Actualizar' : '✔ Guardar'}
               </button>
             </div>
           </div>
