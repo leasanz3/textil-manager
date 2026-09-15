@@ -12,7 +12,18 @@ const TIPOS = [
 const MONEDAS = ['UYU', 'USD']
 
 function emptyForm() {
-  return { banco: '', tipo: 'caja_ahorro', numero: '', alias: '', moneda: 'UYU' }
+  return { banco: '', tipo: 'caja_ahorro', numero: '', numero_mismo_banco: '', titular: '', alias: '', moneda: 'UYU' }
+}
+
+function textoCopiar(c) {
+  const lines = []
+  lines.push(`Banco: ${c.banco}`)
+  if (c.titular) lines.push(`Titular: ${c.titular}`)
+  if (c.numero) lines.push(`N° de cuenta (desde otro banco): ${c.numero}`)
+  if (c.numero_mismo_banco) lines.push(`N° de cuenta (mismo banco): ${c.numero_mismo_banco}`)
+  if (c.alias) lines.push(`Alias: ${c.alias}`)
+  if (c.moneda === 'USD') lines.push('Moneda: USD')
+  return lines.join('\n')
 }
 
 export default function MisBancos({ onMenuClick }) {
@@ -22,6 +33,7 @@ export default function MisBancos({ onMenuClick }) {
   const [form, setForm] = useState(emptyForm())
   const [editId, setEditId] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [copiado, setCopiado] = useState(null)
 
   const setF = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
@@ -44,7 +56,11 @@ export default function MisBancos({ onMenuClick }) {
   }
 
   function abrirEditar(c) {
-    setForm({ banco: c.banco, tipo: c.tipo, numero: c.numero || '', alias: c.alias || '', moneda: c.moneda || 'ARS' })
+    setForm({
+      banco: c.banco, tipo: c.tipo,
+      numero: c.numero || '', numero_mismo_banco: c.numero_mismo_banco || '',
+      titular: c.titular || '', alias: c.alias || '', moneda: c.moneda || 'UYU',
+    })
     setEditId(c.id)
     setModal(true)
   }
@@ -56,6 +72,8 @@ export default function MisBancos({ onMenuClick }) {
       banco: form.banco.trim(),
       tipo: form.tipo,
       numero: form.numero.trim() || null,
+      numero_mismo_banco: form.numero_mismo_banco.trim() || null,
+      titular: form.titular.trim() || null,
       alias: form.alias.trim() || null,
       moneda: form.moneda,
     }
@@ -72,6 +90,13 @@ export default function MisBancos({ onMenuClick }) {
   async function toggleActiva(c) {
     await supabase.from('cuentas_bancarias').update({ activa: !c.activa }).eq('id', c.id)
     fetchCuentas()
+  }
+
+  function copiar(c) {
+    navigator.clipboard.writeText(textoCopiar(c)).then(() => {
+      setCopiado(c.id)
+      setTimeout(() => setCopiado(null), 2000)
+    })
   }
 
   return (
@@ -94,40 +119,66 @@ export default function MisBancos({ onMenuClick }) {
             <p>Agregá tus cuentas para usarlas al registrar transferencias</p>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 600 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 620 }}>
             {cuentas.map(c => (
               <div key={c.id} style={{
                 background: 'var(--bg2)', border: '1px solid var(--border)',
-                borderRadius: 6, padding: '12px 16px',
-                display: 'flex', alignItems: 'center', gap: 12,
+                borderRadius: 6, padding: '14px 16px',
                 opacity: c.activa ? 1 : 0.45,
               }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>
-                    {c.banco}
-                    <span style={{ fontWeight: 400, fontSize: 11, color: 'var(--text2)', marginLeft: 8 }}>
-                      {TIPOS.find(t => t.v === c.tipo)?.label} · {c.moneda}
-                    </span>
+                {/* Header */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontWeight: 700, fontSize: 15 }}>{c.banco}</span>
+                  <span style={{ fontSize: 11, color: 'var(--text2)' }}>
+                    {TIPOS.find(t => t.v === c.tipo)?.label}
+                    {c.moneda === 'USD' && ' · USD'}
+                  </span>
+                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                    <button onClick={() => copiar(c)}
+                      title="Copiar datos"
+                      style={{
+                        background: copiado === c.id ? '#1a7a1a22' : 'var(--bg)',
+                        border: '1px solid var(--border)', borderRadius: 4,
+                        padding: '3px 10px', cursor: 'pointer', fontSize: 11,
+                        color: copiado === c.id ? '#1a7a1a' : 'var(--text)',
+                        fontWeight: copiado === c.id ? 700 : 400,
+                      }}>
+                      {copiado === c.id ? '✔ Copiado' : '📋 Copiar'}
+                    </button>
+                    <button onClick={() => abrirEditar(c)}
+                      style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, padding: '3px 10px', cursor: 'pointer', fontSize: 11, color: 'var(--text)' }}>
+                      Editar
+                    </button>
+                    <button onClick={() => toggleActiva(c)} title={c.activa ? 'Desactivar' : 'Activar'}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 15 }}>
+                      {c.activa ? '✅' : '⬜'}
+                    </button>
                   </div>
+                </div>
+
+                {/* Datos */}
+                <div style={{ display: 'grid', gap: '4px 0', fontSize: 12 }}>
+                  {c.titular && (
+                    <div><span style={{ color: 'var(--text2)', marginRight: 6 }}>Titular:</span>{c.titular}</div>
+                  )}
                   {c.numero && (
-                    <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>
-                      N°: {c.numero}
-                      {c.alias && <span style={{ marginLeft: 8 }}>· Alias: {c.alias}</span>}
+                    <div>
+                      <span style={{ color: 'var(--text2)', marginRight: 6 }}>
+                        {c.numero_mismo_banco ? 'Desde otro banco:' : 'N° de cuenta:'}
+                      </span>
+                      <span style={{ fontFamily: 'monospace', letterSpacing: 1 }}>{c.numero}</span>
                     </div>
                   )}
-                  {!c.numero && c.alias && (
-                    <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>Alias: {c.alias}</div>
+                  {c.numero_mismo_banco && (
+                    <div>
+                      <span style={{ color: 'var(--text2)', marginRight: 6 }}>Mismo banco:</span>
+                      <span style={{ fontFamily: 'monospace', letterSpacing: 1 }}>{c.numero_mismo_banco}</span>
+                    </div>
+                  )}
+                  {c.alias && (
+                    <div><span style={{ color: 'var(--text2)', marginRight: 6 }}>Alias:</span>{c.alias}</div>
                   )}
                 </div>
-                <button onClick={() => abrirEditar(c)}
-                  style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 4, padding: '3px 10px', cursor: 'pointer', fontSize: 12, color: 'var(--text)' }}>
-                  Editar
-                </button>
-                <button onClick={() => toggleActiva(c)}
-                  title={c.activa ? 'Desactivar' : 'Activar'}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, opacity: 0.6 }}>
-                  {c.activa ? '✅' : '⬜'}
-                </button>
               </div>
             ))}
           </div>
@@ -136,17 +187,25 @@ export default function MisBancos({ onMenuClick }) {
 
       {modal && (
         <div className="modal-overlay">
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
             <div className="modal-header">
               <h3>{editId ? 'Editar cuenta' : 'Nueva cuenta bancaria'}</h3>
               <button className="close-btn" onClick={() => setModal(false)}>✕</button>
             </div>
             <div className="modal-body">
+
               <div className="form-group">
                 <label>Banco / Entidad *</label>
                 <input value={form.banco} onChange={e => setF('banco', e.target.value)}
-                  placeholder="Ej: Galicia, Mercado Pago, BROU..." autoFocus />
+                  placeholder="Ej: BROU, BBVA, Mercado Pago..." autoFocus />
               </div>
+
+              <div className="form-group">
+                <label>Titular</label>
+                <input value={form.titular} onChange={e => setF('titular', e.target.value)}
+                  placeholder="Nombre completo del titular" />
+              </div>
+
               <div className="form-grid">
                 <div className="form-group">
                   <label>Tipo</label>
@@ -161,16 +220,25 @@ export default function MisBancos({ onMenuClick }) {
                   </select>
                 </div>
               </div>
+
               <div className="form-group">
-                <label>Número de cuenta</label>
+                <label>N° de cuenta (desde otro banco)</label>
                 <input value={form.numero} onChange={e => setF('numero', e.target.value)}
-                  placeholder="Número de cuenta o IBAN" />
+                  placeholder="Número completo para transferencias externas" />
               </div>
+
+              <div className="form-group">
+                <label>N° de cuenta (mismo banco)</label>
+                <input value={form.numero_mismo_banco} onChange={e => setF('numero_mismo_banco', e.target.value)}
+                  placeholder="Número abreviado para transferencias internas" />
+              </div>
+
               <div className="form-group">
                 <label>Alias</label>
                 <input value={form.alias} onChange={e => setF('alias', e.target.value)}
                   placeholder="Ej: leandro.textil" />
               </div>
+
             </div>
             <div className="modal-footer">
               <button className="btn btn-secondary" onClick={() => setModal(false)}>Cancelar</button>
