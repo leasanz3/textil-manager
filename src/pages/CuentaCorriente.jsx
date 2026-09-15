@@ -65,9 +65,9 @@ export default function CuentaCorriente({ onMenuClick }) {
     ;(movs || []).forEach(mv => {
       const cid = mv.contacto_id
       if (!balances[cid]) balances[cid] = 0
-      const esIngreso = mv.tipo === 'cobro' || mv.tipo === 'recibo' || mv.tipo === 'seña' || mv.tipo === 'haber'
-      if (esIngreso) balances[cid] += parseFloat(mv.total_cobrar || mv.monto || 0)
-      else balances[cid] -= parseFloat(mv.total_cobrar || mv.monto || 0)
+      const esDeuda = mv.tipo === 'cobro' || mv.tipo === 'recibo' || mv.tipo === 'seña' || mv.tipo === 'haber'
+      if (esDeuda) balances[cid] -= parseFloat(mv.total_cobrar || mv.monto || 0)
+      else balances[cid] += parseFloat(mv.total_cobrar || mv.monto || 0)
     })
 
     setContactos((clientes || []).map(c => ({ ...c, saldo: balances[c.id] || 0 })))
@@ -152,8 +152,8 @@ export default function CuentaCorriente({ onMenuClick }) {
 
   const saldoTotal = movimientos.reduce((acc, m) => {
     const v = parseFloat(m.total_cobrar || m.monto || 0)
-    const esIngreso = m.tipo === 'cobro' || m.tipo === 'recibo' || m.tipo === 'seña' || m.tipo === 'haber'
-    return esIngreso ? acc + v : acc - v
+    const esDeuda = m.tipo === 'cobro' || m.tipo === 'recibo' || m.tipo === 'seña' || m.tipo === 'haber'
+    return esDeuda ? acc - v : acc + v
   }, 0)
 
   return (
@@ -278,9 +278,9 @@ export default function CuentaCorriente({ onMenuClick }) {
                             <td>
                               <span style={{
                                 fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 2,
-                                background: (m.tipo === 'cobro' || m.tipo === 'recibo' || m.tipo === 'seña' || m.tipo === 'haber') ? '#1a7a1a22' : '#c0606022',
-                                color: (m.tipo === 'cobro' || m.tipo === 'recibo' || m.tipo === 'seña' || m.tipo === 'haber') ? '#1a7a1a' : '#c06060',
-                                border: `1px solid ${(m.tipo === 'cobro' || m.tipo === 'recibo' || m.tipo === 'seña' || m.tipo === 'haber') ? '#1a7a1a88' : '#c0606088'}`,
+                                background: (m.tipo === 'cobro' || m.tipo === 'recibo' || m.tipo === 'seña' || m.tipo === 'haber') ? '#c0606022' : '#1a7a1a22',
+                                color: (m.tipo === 'cobro' || m.tipo === 'recibo' || m.tipo === 'seña' || m.tipo === 'haber') ? '#c06060' : '#1a7a1a',
+                                border: `1px solid ${(m.tipo === 'cobro' || m.tipo === 'recibo' || m.tipo === 'seña' || m.tipo === 'haber') ? '#c0606088' : '#1a7a1a88'}`,
                               }}>
                                 {m.tipo === 'haber' ? '▲ Haber'
                                   : m.tipo === 'recibo' ? '▲ Recibo'
