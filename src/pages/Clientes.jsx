@@ -280,7 +280,7 @@ function ModalEntregaCliente({ clienteId, clienteNombre, onClose, onSave }) {
     const total = rows.reduce((s, r) => s + r.cantidad * r.precio_unitario, 0)
     if (total > 0) {
       await supabase.from('cuenta_corriente').insert({
-        contacto_id: cliId, tipo: 'debito', fecha,
+        contacto_id: cliId, tipo: 'debe', fecha,
         monto: total, total_cobrar: total,
         observacion: nota.trim() || 'Entrega de mercadería',
         movimiento_id: mov.id, user_id: user?.id,
@@ -345,9 +345,12 @@ const TIPOS_CLIENTE = [
 
 function MovCardCliente({ mov, onDelete }) {
   const [collapsed, setCollapsed] = useState(false)
-  const tipo  = TIPOS_CLIENTE.find(t => t.id === mov.tipo) || { label: mov.tipo, icon: '📋', color: '#666' }
-  const items = mov.taller_movimientos_items || []
-  const total = items.reduce((s, it) => s + (it.cantidad || 0), 0)
+  const tipo   = TIPOS_CLIENTE.find(t => t.id === mov.tipo) || { label: mov.tipo, icon: '📋', color: '#666' }
+  const items  = mov.taller_movimientos_items || []
+  const total  = items.reduce((s, it) => s + (it.cantidad || 0), 0)
+  const monto  = mov.tipo === 'entrega'
+    ? items.reduce((s, it) => s + (it.cantidad || 0) * (it.productos?.precio_venta || 0), 0)
+    : 0
 
   return (
     <div style={{ ...S.card, borderColor: tipo.color }}>
@@ -357,6 +360,9 @@ function MovCardCliente({ mov, onDelete }) {
           <span style={S.tag(tipo.color)}>{tipo.icon} {tipo.label}</span>
           <span style={{ fontWeight: 700, fontSize: 12 }}>{fmtF(mov.fecha)}</span>
           <span style={{ fontSize: 10, color: '#888' }}>{total} prenda{total !== 1 ? 's' : ''}</span>
+          {monto > 0 && (
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#c06060', marginLeft: 4 }}>{fmtMoneda(monto)}</span>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
           <button style={S.btnD} onClick={() => onDelete(mov.id)}>✕</button>
@@ -434,7 +440,7 @@ export default function Clientes({ onMenuClick }) {
       .select(`id, tipo, fecha, nota, created_at,
         contactos(id, nombre),
         taller_movimientos_items(id, producto_id, talle, cantidad,
-          productos(id, nombre))`)
+          productos(id, nombre, precio_venta))`)
       .in('tipo', ['entrega', 'devolucion_cliente'])
       .order('fecha', { ascending: false })
       .order('created_at', { ascending: false })

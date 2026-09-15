@@ -24,7 +24,7 @@ export default function CuentaCorriente({ onMenuClick }) {
   const hoy = new Date().toISOString().split('T')[0]
 
   const emptyPago = {
-    tipo: 'recibo',
+    tipo: 'haber',
     fecha: hoy,
     monto: '',
     forma_pago: 'efectivo',
@@ -64,7 +64,7 @@ export default function CuentaCorriente({ onMenuClick }) {
     ;(movs || []).forEach(mv => {
       const cid = mv.contacto_id
       if (!balances[cid]) balances[cid] = 0
-      const esIngreso = mv.tipo === 'cobro' || mv.tipo === 'recibo' || mv.tipo === 'seña'
+      const esIngreso = mv.tipo === 'cobro' || mv.tipo === 'recibo' || mv.tipo === 'seña' || mv.tipo === 'haber'
       if (esIngreso) balances[cid] += parseFloat(mv.total_cobrar || mv.monto || 0)
       else balances[cid] -= parseFloat(mv.total_cobrar || mv.monto || 0)
     })
@@ -130,7 +130,7 @@ export default function CuentaCorriente({ onMenuClick }) {
 
   const saldoTotal = movimientos.reduce((acc, m) => {
     const v = parseFloat(m.total_cobrar || m.monto || 0)
-    const esIngreso = m.tipo === 'cobro' || m.tipo === 'recibo' || m.tipo === 'seña'
+    const esIngreso = m.tipo === 'cobro' || m.tipo === 'recibo' || m.tipo === 'seña' || m.tipo === 'haber'
     return esIngreso ? acc + v : acc - v
   }, 0)
 
@@ -244,9 +244,7 @@ export default function CuentaCorriente({ onMenuClick }) {
                           <th>Fecha</th>
                           <th>Tipo</th>
                           <th>Monto</th>
-                          <th>Facturación</th>
                           <th>Forma de pago</th>
-                          <th>Total cobrar</th>
                           <th>Observación</th>
                           <th></th>
                         </tr>
@@ -258,24 +256,19 @@ export default function CuentaCorriente({ onMenuClick }) {
                             <td>
                               <span style={{
                                 fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 2,
-                                background: (m.tipo === 'cobro' || m.tipo === 'recibo' || m.tipo === 'seña') ? '#1a7a1a22' : '#c0606022',
-                                color: (m.tipo === 'cobro' || m.tipo === 'recibo' || m.tipo === 'seña') ? '#1a7a1a' : '#c06060',
-                                border: `1px solid ${(m.tipo === 'cobro' || m.tipo === 'recibo' || m.tipo === 'seña') ? '#1a7a1a88' : '#c0606088'}`,
+                                background: (m.tipo === 'cobro' || m.tipo === 'recibo' || m.tipo === 'seña' || m.tipo === 'haber') ? '#1a7a1a22' : '#c0606022',
+                                color: (m.tipo === 'cobro' || m.tipo === 'recibo' || m.tipo === 'seña' || m.tipo === 'haber') ? '#1a7a1a' : '#c06060',
+                                border: `1px solid ${(m.tipo === 'cobro' || m.tipo === 'recibo' || m.tipo === 'seña' || m.tipo === 'haber') ? '#1a7a1a88' : '#c0606088'}`,
                               }}>
-                                {m.tipo === 'recibo' ? '▲ Recibo'
+                                {m.tipo === 'haber' ? '▲ Haber'
+                                  : m.tipo === 'recibo' ? '▲ Recibo'
                                   : m.tipo === 'cobro' ? '▲ Cobro'
                                   : m.tipo === 'seña' ? '▲ Seña'
-                                  : m.tipo === 'debito' ? '📦 Entrega'
+                                  : m.tipo === 'debito' || m.tipo === 'debe' ? '📦 Entrega'
                                   : '▼ Pago'}
                               </span>
                             </td>
                             <td>{fmtMoney(m.monto)}</td>
-                            <td style={{ fontSize: 11, color: 'var(--text2)' }}>
-                              {m.tipo === 'debito' ? '—' : m.monto_con_factura != null
-                                ? `Con fact: ${fmtMoney(m.monto_con_factura)} / Sin: ${fmtMoney(m.monto_sin_factura)}`
-                                : m.descuento_pct > 0 ? `Dto ${m.descuento_pct}%` : 'Normal'
-                              }
-                            </td>
                             <td style={{ fontSize: 12 }}>
                               {m.tipo === 'debito' ? '—' : m.forma_pago || '—'}
                               {m.banco_destino && (
@@ -287,9 +280,6 @@ export default function CuentaCorriente({ onMenuClick }) {
                                   {m.cheque_banco && ` (${m.cheque_banco})`}
                                 </span>
                               )}
-                            </td>
-                            <td>
-                              <strong style={{ color: (m.tipo === 'cobro' || m.tipo === 'recibo' || m.tipo === 'seña') ? '#1a7a1a' : '#c06060' }}>{fmtMoney(m.total_cobrar)}</strong>
                             </td>
                             <td style={{
                               fontSize: 11, color: 'var(--text2)', maxWidth: 160,
@@ -327,8 +317,8 @@ export default function CuentaCorriente({ onMenuClick }) {
                 <label>Tipo</label>
                 <div style={{ display: 'flex', gap: 8 }}>
                   {[
-                    { v: 'recibo', label: '▲ Recibo', color: '#1a7a1a' },
-                    { v: 'pago',   label: '▼ Pago',   color: '#c06060' },
+                    { v: 'haber', label: '▲ Haber', color: '#1a7a1a' },
+                    { v: 'debe',  label: '▼ Debe',  color: '#c06060' },
                   ].map(opt => (
                     <button key={opt.v}
                       onClick={() => setP('tipo', opt.v)}
