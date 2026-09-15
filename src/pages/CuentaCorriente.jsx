@@ -19,20 +19,16 @@ export default function CuentaCorriente({ onMenuClick }) {
   const [search, setSearch]       = useState('')
   const [modal, setModal]         = useState(false)
   const [saving, setSaving]       = useState(false)
+  const [misBancos, setMisBancos] = useState([])
 
   const hoy = new Date().toISOString().split('T')[0]
 
   const emptyPago = {
-    tipo: 'cobro',
+    tipo: 'recibo',
     fecha: hoy,
     monto: '',
-    facturacion_tipo: 'normal',
-    descuento_pct: '0',
-    monto_con_factura: '',
-    descuento_sin_factura_pct: '0',
-    monto_sin_factura: '',
-    total_cobrar: '',
     forma_pago: 'efectivo',
+    banco_destino: '',
     cheque_numero: '',
     cheque_banco: '',
     cheque_fecha_cobro: '',
@@ -42,32 +38,15 @@ export default function CuentaCorriente({ onMenuClick }) {
   const [pago, setPago] = useState(emptyPago)
   const setP = (k, v) => setPago(p => ({ ...p, [k]: v }))
 
-  useEffect(() => { fetchContactos() }, [])
+  useEffect(() => {
+    fetchContactos()
+    supabase.from('cuentas_bancarias').select('id,banco,alias,moneda').eq('activa', true).order('banco')
+      .then(({ data }) => setMisBancos(data || []))
+  }, [])
 
   useEffect(() => {
     if (selected) fetchMovimientos(selected.id)
   }, [selected])
-
-  // Recalcular total cuando cambian los campos de facturación
-  useEffect(() => {
-    const m = parseFloat(pago.monto) || 0
-    if (pago.facturacion_tipo === 'normal') {
-      const d = parseFloat(pago.descuento_pct) || 0
-      const total = m * (1 - d / 100)
-      setPago(p => ({ ...p, total_cobrar: m > 0 ? total.toFixed(2) : '' }))
-    } else {
-      const conFact = parseFloat(pago.monto_con_factura) || 0
-      const dSin = parseFloat(pago.descuento_sin_factura_pct) || 0
-      const sinFact = m - conFact
-      const totalSin = sinFact * (1 - dSin / 100)
-      const total = conFact + totalSin
-      setPago(p => ({
-        ...p,
-        monto_sin_factura: sinFact >= 0 ? sinFact.toFixed(2) : '0',
-        total_cobrar: total > 0 ? total.toFixed(2) : '',
-      }))
-    }
-  }, [pago.monto, pago.descuento_pct, pago.monto_con_factura, pago.descuento_sin_factura_pct, pago.facturacion_tipo])
 
   async function fetchContactos() {
     setLoading(true)
@@ -85,7 +64,8 @@ export default function CuentaCorriente({ onMenuClick }) {
     ;(movs || []).forEach(mv => {
       const cid = mv.contacto_id
       if (!balances[cid]) balances[cid] = 0
-      if (mv.tipo === 'cobro') balances[cid] += parseFloat(mv.total_cobrar || mv.monto || 0)
+      const esIngreso = mv.tipo === 'cobro' || mv.tipo === 'recibo' || mv.tipo === 'seña'
+      if (esIngreso) balances[cid] += parseFloat(mv.total_cobrar || mv.monto || 0)
       else balances[cid] -= parseFloat(mv.total_cobrar || mv.monto || 0)
     })
 
@@ -105,8 +85,7 @@ export default function CuentaCorriente({ onMenuClick }) {
   }
 
   function abrirPago() {
-    const ft = selected?.facturacion_tipo || 'normal'
-    setPago({ ...emptyPago, facturacion_tipo: ft, fecha: hoy })
+    setPago({ ...emptyPago, fecha: hoy })
     setModal(true)
   }
 
@@ -114,17 +93,15 @@ export default function CuentaCorriente({ onMenuClick }) {
     if (!pago.monto || parseFloat(pago.monto) <= 0) { alert('El monto es obligatorio'); return }
     setSaving(true)
     const { data: { user } } = await supabase.auth.getUser()
+    const monto = parseFloat(pago.monto)
     const registro = {
       contacto_id: selected.id,
       tipo: pago.tipo,
       fecha: pago.fecha,
-      monto: parseFloat(pago.monto),
-      descuento_pct: parseFloat(pago.descuento_pct) || 0,
-      monto_con_factura: pago.facturacion_tipo === 'parcial' ? (parseFloat(pago.monto_con_factura) || 0) : null,
-      monto_sin_factura: pago.facturacion_tipo === 'parcial' ? (parseFloat(pago.monto_sin_factura) || 0) : null,
-      descuento_sin_factura_pct: pago.facturacion_tipo === 'parcial' ? (parseFloat(pago.descuento_sin_factura_pct) || 0) : null,
-      total_cobrar: parseFloat(pago.total_cobrar) || parseFloat(pago.monto),
+      monto,
+      total_cobrar: monto,
       forma_pago: pago.forma_pago,
+      banco_destino: pago.banco_destino || null,
       cheque_numero: pago.cheque_numero || null,
       cheque_banco: pago.cheque_banco || null,
       cheque_fecha_cobro: pago.cheque_fecha_cobro || null,
@@ -153,7 +130,8 @@ export default function CuentaCorriente({ onMenuClick }) {
 
   const saldoTotal = movimientos.reduce((acc, m) => {
     const v = parseFloat(m.total_cobrar || m.monto || 0)
-    return m.tipo === 'cobro' ? acc + v : acc - v
+    const esIngreso = m.tipo === 'cobro' || m.tipo === 'recibo' || m.tipo === 'seña'
+    return esIngreso ? acc + v : acc - v
   }, 0)
 
   return (
@@ -256,7 +234,7 @@ export default function CuentaCorriente({ onMenuClick }) {
                   <div className="empty-state" style={{ marginTop: 60 }}>
                     <div className="icon">📄</div>
                     <h3>Sin movimientos</h3>
-                    <p>Registrá el primer cobro con el botón de arriba</p>
+                    <p>Registrá el primer movimiento con el botón de arriba</p>
                   </div>
                 ) : (
                   <div style={{ overflowX: 'auto' }}>
@@ -280,22 +258,29 @@ export default function CuentaCorriente({ onMenuClick }) {
                             <td>
                               <span style={{
                                 fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 2,
-                                background: m.tipo === 'cobro' ? '#1a7a1a22' : '#c0606022',
-                                color: m.tipo === 'cobro' ? '#1a7a1a' : '#c06060',
-                                border: `1px solid ${m.tipo === 'cobro' ? '#1a7a1a88' : '#c0606088'}`,
+                                background: (m.tipo === 'cobro' || m.tipo === 'recibo' || m.tipo === 'seña') ? '#1a7a1a22' : '#c0606022',
+                                color: (m.tipo === 'cobro' || m.tipo === 'recibo' || m.tipo === 'seña') ? '#1a7a1a' : '#c06060',
+                                border: `1px solid ${(m.tipo === 'cobro' || m.tipo === 'recibo' || m.tipo === 'seña') ? '#1a7a1a88' : '#c0606088'}`,
                               }}>
-                                {m.tipo === 'cobro' ? '▲ Cobro' : '▼ Gasto'}
+                                {m.tipo === 'recibo' ? '▲ Recibo'
+                                  : m.tipo === 'cobro' ? '▲ Cobro'
+                                  : m.tipo === 'seña' ? '▲ Seña'
+                                  : m.tipo === 'debito' ? '📦 Entrega'
+                                  : '▼ Pago'}
                               </span>
                             </td>
                             <td>{fmtMoney(m.monto)}</td>
                             <td style={{ fontSize: 11, color: 'var(--text2)' }}>
-                              {m.monto_con_factura != null
+                              {m.tipo === 'debito' ? '—' : m.monto_con_factura != null
                                 ? `Con fact: ${fmtMoney(m.monto_con_factura)} / Sin: ${fmtMoney(m.monto_sin_factura)}`
                                 : m.descuento_pct > 0 ? `Dto ${m.descuento_pct}%` : 'Normal'
                               }
                             </td>
                             <td style={{ fontSize: 12 }}>
-                              {m.forma_pago || '—'}
+                              {m.tipo === 'debito' ? '—' : m.forma_pago || '—'}
+                              {m.banco_destino && (
+                                <span style={{ color: 'var(--text2)', marginLeft: 4, fontSize: 11 }}>→ {m.banco_destino}</span>
+                              )}
                               {m.cheque_numero && (
                                 <span style={{ color: 'var(--text2)', marginLeft: 4, fontSize: 11 }}>
                                   #{m.cheque_numero}
@@ -304,7 +289,7 @@ export default function CuentaCorriente({ onMenuClick }) {
                               )}
                             </td>
                             <td>
-                              <strong style={{ color: '#1a7a1a' }}>{fmtMoney(m.total_cobrar)}</strong>
+                              <strong style={{ color: (m.tipo === 'cobro' || m.tipo === 'recibo' || m.tipo === 'seña') ? '#1a7a1a' : '#c06060' }}>{fmtMoney(m.total_cobrar)}</strong>
                             </td>
                             <td style={{
                               fontSize: 11, color: 'var(--text2)', maxWidth: 160,
@@ -330,104 +315,90 @@ export default function CuentaCorriente({ onMenuClick }) {
       {/* ── Modal registrar movimiento ── */}
       {modal && (
         <div className="modal-overlay">
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 440 }}>
             <div className="modal-header">
-              <h3>💳 Registrar movimiento — {selected?.nombre}</h3>
+              <h3>💳 {selected?.nombre}</h3>
               <button className="close-btn" onClick={() => setModal(false)}>✕</button>
             </div>
             <div className="modal-body">
 
-              <div className="form-grid">
-                <div className="form-group">
-                  <label>Tipo</label>
-                  <select value={pago.tipo} onChange={e => setP('tipo', e.target.value)}>
-                    <option value="cobro">▲ Cobro</option>
-                    <option value="gasto">▼ Gasto / Ajuste</option>
-                  </select>
+              {/* Tipo — botones */}
+              <div className="form-group">
+                <label>Tipo</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {[
+                    { v: 'recibo', label: '▲ Recibo', color: '#1a7a1a' },
+                    { v: 'pago',   label: '▼ Pago',   color: '#c06060' },
+                  ].map(opt => (
+                    <button key={opt.v}
+                      onClick={() => setP('tipo', opt.v)}
+                      style={{
+                        flex: 1, padding: '6px 0', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                        border: `2px solid ${opt.color}`,
+                        background: pago.tipo === opt.v ? opt.color : 'transparent',
+                        color: pago.tipo === opt.v ? '#fff' : opt.color,
+                        borderRadius: 4,
+                      }}>
+                      {opt.label}
+                    </button>
+                  ))}
                 </div>
+              </div>
+
+              <div className="form-grid">
                 <div className="form-group">
                   <label>Fecha</label>
                   <input type="date" value={pago.fecha} onChange={e => setP('fecha', e.target.value)} />
                 </div>
-              </div>
-
-              <div className="form-group">
-                <label>Monto *</label>
-                <input
-                  type="number" min="0" step="0.01"
-                  value={pago.monto}
-                  onChange={e => setP('monto', e.target.value)}
-                  placeholder="0.00" autoFocus
-                />
-              </div>
-
-              <div className="form-group">
-                <label>Tipo de facturación</label>
-                <select value={pago.facturacion_tipo} onChange={e => setP('facturacion_tipo', e.target.value)}>
-                  <option value="normal">Normal (con descuento)</option>
-                  <option value="parcial">Parcial con IVA</option>
-                </select>
-              </div>
-
-              {pago.facturacion_tipo === 'normal' ? (
                 <div className="form-group">
-                  <label>Descuento (%)</label>
-                  <input
-                    type="number" min="0" max="100" step="0.1"
-                    value={pago.descuento_pct}
-                    onChange={e => setP('descuento_pct', e.target.value)}
-                    placeholder="0"
-                  />
+                  <label>Monto *</label>
+                  <input type="number" min="0" step="0.01" value={pago.monto}
+                    onChange={e => setP('monto', e.target.value)} placeholder="0.00" autoFocus />
                 </div>
-              ) : (
-                <div className="form-grid">
-                  <div className="form-group">
-                    <label>Monto con factura ($)</label>
-                    <input
-                      type="number" min="0" step="0.01"
-                      value={pago.monto_con_factura}
-                      onChange={e => setP('monto_con_factura', e.target.value)}
-                      placeholder="0.00"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Monto sin factura ($)</label>
-                    <input
-                      type="number" readOnly
-                      value={pago.monto_sin_factura}
-                      style={{ background: 'var(--bg2)' }}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Dto. sin factura (%)</label>
-                    <input
-                      type="number" min="0" max="100" step="0.1"
-                      value={pago.descuento_sin_factura_pct}
-                      onChange={e => setP('descuento_sin_factura_pct', e.target.value)}
-                      placeholder="0"
-                    />
-                  </div>
-                </div>
-              )}
-
-              <div className="form-group">
-                <label>Total a cobrar</label>
-                <input
-                  type="number" readOnly
-                  value={pago.total_cobrar}
-                  style={{ background: 'var(--bg2)', fontWeight: 700, color: '#1a7a1a' }}
-                />
               </div>
 
+              {/* Forma de pago — botones */}
               <div className="form-group">
                 <label>Forma de pago</label>
-                <select value={pago.forma_pago} onChange={e => setP('forma_pago', e.target.value)}>
-                  <option value="efectivo">Efectivo</option>
-                  <option value="transferencia">Transferencia</option>
-                  <option value="cheque">Cheque</option>
-                  <option value="otro">Otro</option>
-                </select>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {['efectivo', 'transferencia', 'cheque', 'otro'].map(fp => (
+                    <button key={fp}
+                      onClick={() => setP('forma_pago', fp)}
+                      style={{
+                        padding: '4px 12px', fontSize: 11, cursor: 'pointer', borderRadius: 4,
+                        border: '1px solid var(--border)',
+                        background: pago.forma_pago === fp ? '#1a3a6b' : 'var(--bg2)',
+                        color: pago.forma_pago === fp ? '#fff' : 'var(--text)',
+                        fontWeight: pago.forma_pago === fp ? 700 : 400,
+                        textTransform: 'capitalize',
+                      }}>
+                      {fp === 'efectivo' ? '💵 Efectivo'
+                        : fp === 'transferencia' ? '🏦 Transferencia'
+                        : fp === 'cheque' ? '📄 Cheque'
+                        : '➕ Otro'}
+                    </button>
+                  ))}
+                </div>
               </div>
+
+              {pago.forma_pago === 'transferencia' && (
+                <div className="form-group">
+                  <label>Banco destino</label>
+                  {misBancos.length > 0 ? (
+                    <select value={pago.banco_destino} onChange={e => setP('banco_destino', e.target.value)}>
+                      <option value="">— Seleccioná una cuenta —</option>
+                      {misBancos.map(b => (
+                        <option key={b.id} value={b.banco}>
+                          {b.banco}{b.alias ? ` (${b.alias})` : ''}{b.moneda !== 'ARS' ? ` · ${b.moneda}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input value={pago.banco_destino} onChange={e => setP('banco_destino', e.target.value)}
+                      placeholder="Ej: Galicia, Mercado Pago..." />
+                  )}
+                </div>
+              )}
 
               {pago.forma_pago === 'cheque' && (
                 <div className="form-grid">
@@ -440,24 +411,20 @@ export default function CuentaCorriente({ onMenuClick }) {
                     <input value={pago.cheque_banco} onChange={e => setP('cheque_banco', e.target.value)} placeholder="Ej: BROU" />
                   </div>
                   <div className="form-group">
-                    <label>Fecha cobro cheque</label>
+                    <label>Fecha de cobro</label>
                     <input type="date" value={pago.cheque_fecha_cobro} onChange={e => setP('cheque_fecha_cobro', e.target.value)} />
                   </div>
                   <div className="form-group">
                     <label>Titular</label>
-                    <input value={pago.cheque_titular} onChange={e => setP('cheque_titular', e.target.value)} placeholder="Nombre del titular" />
+                    <input value={pago.cheque_titular} onChange={e => setP('cheque_titular', e.target.value)} placeholder="Nombre" />
                   </div>
                 </div>
               )}
 
               <div className="form-group">
                 <label>Observación</label>
-                <textarea
-                  value={pago.observacion}
-                  onChange={e => setP('observacion', e.target.value)}
-                  placeholder="Notas adicionales..."
-                  style={{ height: 60 }}
-                />
+                <input value={pago.observacion} onChange={e => setP('observacion', e.target.value)}
+                  placeholder="Ej: seña boxers, transferencia 15/9..." />
               </div>
 
             </div>

@@ -33,6 +33,7 @@ const NAV = [
   { path: '/cotizacion',       icon: '💰', label: 'Cotización' },
   { path: '/iva',              icon: '📄', label: 'IVA' },
   { path: '/cuenta-corriente', icon: '💳', label: 'Cuentas corrientes' },
+  { path: '/mis-bancos',       icon: '🏦', label: 'Mis bancos' },
   { section: 'Directorio' },
   { path: '/contactos',   icon: '👥', label: 'Contactos' },
 ]

@@ -22,6 +22,7 @@ import Diario from './pages/Diario'
 import Home from './pages/Home'
 import Cotizacion from './pages/Cotizacion'
 import CuentaCorriente from './pages/CuentaCorriente'
+import MisBancos from './pages/MisBancos'
 import Corte from './pages/Corte'
 import Marcada from './pages/Marcada'
 import Talleres from './pages/Talleres'
@@ -83,6 +84,7 @@ export default function App() {
             <Route path="/cotizacion" element={<Cotizacion onMenuClick={menu} />} />
             <Route path="/iva" element={<IVA onMenuClick={menu} />} />
             <Route path="/cuenta-corriente" element={<CuentaCorriente onMenuClick={menu} />} />
+            <Route path="/mis-bancos" element={<MisBancos onMenuClick={menu} />} />
             <Route path="/corte" element={<Corte onMenuClick={menu} />} />
             <Route path="/marcada" element={<Marcada onMenuClick={menu} />} />
             <Route path="/talleres" element={<Talleres onMenuClick={menu} />} />

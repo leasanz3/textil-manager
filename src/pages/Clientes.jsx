@@ -138,8 +138,10 @@ function ModalDevolucionCliente({ clienteId, clienteNombre, onClose, onSave }) {
 }
 
 function newEntregaItem() {
-  return { producto_id: null, prodQ: '', prodRes: [], tabla: 'adulto', talles: TALLES_ADULTO, conNino: false, cantidades: {} }
+  return { producto_id: null, prodQ: '', prodRes: [], tabla: 'adulto', talles: TALLES_ADULTO, conNino: false, cantidades: {}, precio_unitario: '' }
 }
+
+const fmtMoneda = v => v == null ? '—' : `$${Number(v).toLocaleString('es-UY', { minimumFractionDigits: 0 })}`
 
 function EntregaItemProd({ item, index, onChange, onRemove, timers }) {
   const ref = useRef(null)
@@ -149,14 +151,14 @@ function EntregaItemProd({ item, index, onChange, onRemove, timers }) {
     clearTimeout(timers.current[`p${index}`])
     if (!val.trim()) return
     timers.current[`p${index}`] = setTimeout(async () => {
-      const { data } = await supabase.from('productos').select('id, nombre, tabla').ilike('nombre', `%${val.trim()}%`).limit(8)
+      const { data } = await supabase.from('productos').select('id, nombre, tabla, precio_venta').ilike('nombre', `%${val.trim()}%`).limit(8)
       onChange(index, { ...item, prodQ: val, producto_id: null, prodRes: data || [] })
     }, 250)
   }
 
   function pickProd(p) {
     const talles = TABLAS_TALLES[p.tabla] || TALLES_ADULTO
-    onChange(index, { ...item, producto_id: p.id, prodQ: p.nombre, prodRes: [], tabla: p.tabla, talles, conNino: false, cantidades: {} })
+    onChange(index, { ...item, producto_id: p.id, prodQ: p.nombre, prodRes: [], tabla: p.tabla, talles, conNino: false, cantidades: {}, precio_unitario: p.precio_venta != null ? String(p.precio_venta) : '' })
   }
 
   function toggleNino() {
@@ -169,6 +171,8 @@ function EntregaItemProd({ item, index, onChange, onRemove, timers }) {
   }
 
   const qty = Object.values(item.cantidades || {}).reduce((s, v) => s + (parseInt(v) || 0), 0)
+  const precio = parseFloat(item.precio_unitario) || 0
+  const subtotal = qty * precio
 
   return (
     <div style={{ border:'1px solid #c0c8d8', background:'#f8f8fc', padding:'6px 8px', marginBottom:8 }}>
@@ -180,7 +184,10 @@ function EntregaItemProd({ item, index, onChange, onRemove, timers }) {
             <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'#fff', border:'1px solid #c0c8d0', zIndex:10, maxHeight:160, overflowY:'auto' }}>
               {item.prodRes.map(p => (
                 <div key={p.id} style={{ padding:'5px 10px', cursor:'pointer', fontSize:12, borderBottom:'1px solid #eee' }}
-                  onMouseDown={() => pickProd(p)}>{p.nombre}</div>
+                  onMouseDown={() => pickProd(p)}>
+                  {p.nombre}
+                  {p.precio_venta != null && <span style={{ color:'#888', marginLeft:6 }}>${p.precio_venta}</span>}
+                </div>
               ))}
             </div>
           )}
@@ -207,7 +214,21 @@ function EntregaItemProd({ item, index, onChange, onRemove, timers }) {
               </tr></tbody>
             </table>
           </div>
-          {qty > 0 && <div style={{ fontSize:10, color:'#1a5a1a', fontWeight:700 }}>Total: {qty} prenda{qty !== 1 ? 's' : ''}</div>}
+          <div style={{ display:'flex', gap:10, alignItems:'center', marginTop:4, background:'#eaf4ea', border:'1px solid #b0d0b0', padding:'4px 8px' }}>
+            <span style={{ fontSize:11, color:'#555' }}>Precio/u:</span>
+            <span style={{ fontWeight:700 }}>$</span>
+            <input style={{ ...S.inp, width:80, fontSize:12, fontWeight:700 }} type="number" min="0" step="0.01"
+              value={item.precio_unitario} onChange={e => onChange(index, { ...item, precio_unitario: e.target.value })}
+              placeholder="0.00" />
+            {qty > 0 && precio > 0 && (
+              <span style={{ fontSize:12, color:'#1a5a1a', fontWeight:700, marginLeft:4 }}>
+                × {qty} u. = {fmtMoneda(subtotal)}
+              </span>
+            )}
+            {qty > 0 && precio === 0 && (
+              <span style={{ fontSize:10, color:'#888' }}>{qty} prenda{qty !== 1 ? 's' : ''} · sin precio</span>
+            )}
+          </div>
         </>
       )}
     </div>
@@ -244,7 +265,7 @@ function ModalEntregaCliente({ clienteId, clienteNombre, onClose, onSave }) {
       if (!it.producto_id) continue
       for (const [talle, val] of Object.entries(it.cantidades || {})) {
         const cant = parseInt(val) || 0
-        if (cant > 0) rows.push({ producto_id: it.producto_id, talle, cantidad: cant })
+        if (cant > 0) rows.push({ producto_id: it.producto_id, talle, cantidad: cant, precio_unitario: parseFloat(it.precio_unitario) || 0 })
       }
     }
     if (!rows.length) { alert('Ingresá al menos una cantidad'); return }
@@ -254,7 +275,17 @@ function ModalEntregaCliente({ clienteId, clienteNombre, onClose, onSave }) {
       .insert({ tipo: 'entrega', fecha, contacto_id: cliId, nota: nota.trim() || null, user_id: user?.id })
       .select().single()
     if (error) { alert('Error: ' + error.message); setSaving(false); return }
-    await supabase.from('taller_movimientos_items').insert(rows.map(r => ({ movimiento_id: mov.id, ...r })))
+    await supabase.from('taller_movimientos_items').insert(rows.map(r => ({ movimiento_id: mov.id, producto_id: r.producto_id, talle: r.talle, cantidad: r.cantidad })))
+    // Crear deuda automática en cuenta corriente
+    const total = rows.reduce((s, r) => s + r.cantidad * r.precio_unitario, 0)
+    if (total > 0) {
+      await supabase.from('cuenta_corriente').insert({
+        contacto_id: cliId, tipo: 'debito', fecha,
+        monto: total, total_cobrar: total,
+        observacion: nota.trim() || 'Entrega de mercadería',
+        movimiento_id: mov.id, user_id: user?.id,
+      })
+    }
     setSaving(false); onSave()
   }
 
