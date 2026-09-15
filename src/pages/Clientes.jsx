@@ -343,14 +343,91 @@ const TIPOS_CLIENTE = [
   { id: 'devolucion_cliente', label: 'Devolución',        icon: '↩',  color: '#6a006a' },
 ]
 
-function MovCardCliente({ mov, onDelete }) {
-  const [collapsed, setCollapsed] = useState(false)
+function ModalEditarMonto({ mov, onClose, onSave }) {
+  const [monto,  setMonto]  = useState('')
+  const [nota,   setNota]   = useState(mov.nota || '')
+  const [saving, setSaving] = useState(false)
+  const [ccId,   setCcId]   = useState(null)
+
+  useEffect(() => {
+    supabase.from('cuenta_corriente')
+      .select('id, monto, observacion')
+      .eq('movimiento_id', mov.id)
+      .single()
+      .then(({ data }) => {
+        if (data) { setCcId(data.id); setMonto(String(data.monto || '')); setNota(data.observacion || mov.nota || '') }
+      })
+  }, [mov.id])
+
+  async function save() {
+    const m = parseFloat(monto)
+    if (!m || m <= 0) { alert('Ingresá un monto válido'); return }
+    setSaving(true)
+    if (ccId) {
+      await supabase.from('cuenta_corriente').update({ monto: m, total_cobrar: m, observacion: nota || null }).eq('id', ccId)
+    } else {
+      const { data: { user } } = await supabase.auth.getUser()
+      await supabase.from('cuenta_corriente').insert({
+        contacto_id: mov.contactos?.id, tipo: 'debe', fecha: mov.fecha,
+        monto: m, total_cobrar: m, observacion: nota || null,
+        movimiento_id: mov.id, user_id: user?.id,
+      })
+    }
+    if (nota !== mov.nota) await supabase.from('taller_movimientos').update({ nota }).eq('id', mov.id)
+    setSaving(false); onSave()
+  }
+
+  return (
+    <div style={overlay} onClick={onClose}>
+      <div style={modal} onClick={e => e.stopPropagation()}>
+        <div style={{ ...modalH, background: 'linear-gradient(to bottom,#3a6a00,#1a4a00)' }}>
+          <span>✏ Editar entrega · {fmtF(mov.fecha)}</span>
+          <button style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: F }} onClick={onClose}>✕</button>
+        </div>
+        <div style={modalB}>
+          <div style={{ marginBottom: 10 }}>
+            <span style={lbl}>Monto total *</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontWeight: 700 }}>$</span>
+              <input style={{ ...S.inp, width: 140, fontSize: 14, fontWeight: 700 }}
+                type="number" min="0" step="0.01" value={monto} autoFocus
+                onChange={e => setMonto(e.target.value)} placeholder="0.00" />
+            </div>
+          </div>
+          <div>
+            <span style={lbl}>Nota (opcional)</span>
+            <input style={{ ...S.inp, width: '100%', boxSizing: 'border-box' }}
+              value={nota} onChange={e => setNota(e.target.value)} />
+          </div>
+        </div>
+        <div style={{ padding: '8px 12px', borderTop: '1px solid #c0c0b0', display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+          <button style={S.btn} onClick={onClose}>Cancelar</button>
+          <button style={{ ...S.btn, background: 'linear-gradient(to bottom,#3a6a00,#1a4a00)', color: '#fff', border: '1px solid #1a4a00' }}
+            onClick={save} disabled={saving}>{saving ? 'Guardando...' : '✔ Guardar'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function MovCardCliente({ mov, onDelete, onRefresh }) {
+  const [collapsed,  setCollapsed]  = useState(false)
+  const [editando,   setEditando]   = useState(false)
+  const [ccMonto,    setCcMonto]    = useState(null)
   const tipo   = TIPOS_CLIENTE.find(t => t.id === mov.tipo) || { label: mov.tipo, icon: '📋', color: '#666' }
   const items  = mov.taller_movimientos_items || []
   const total  = items.reduce((s, it) => s + (it.cantidad || 0), 0)
-  const monto  = mov.tipo === 'entrega'
+  const montoCalc = mov.tipo === 'entrega'
     ? items.reduce((s, it) => s + (it.cantidad || 0) * (it.productos?.precio_venta || 0), 0)
     : 0
+
+  useEffect(() => {
+    if (mov.tipo !== 'entrega') return
+    supabase.from('cuenta_corriente').select('monto').eq('movimiento_id', mov.id).single()
+      .then(({ data }) => { if (data) setCcMonto(data.monto) })
+  }, [mov.id, mov.tipo])
+
+  const montoMostrar = ccMonto != null ? ccMonto : montoCalc
 
   return (
     <div style={{ ...S.card, borderColor: tipo.color }}>
@@ -360,11 +437,14 @@ function MovCardCliente({ mov, onDelete }) {
           <span style={S.tag(tipo.color)}>{tipo.icon} {tipo.label}</span>
           <span style={{ fontWeight: 700, fontSize: 12 }}>{fmtF(mov.fecha)}</span>
           <span style={{ fontSize: 10, color: '#888' }}>{total} prenda{total !== 1 ? 's' : ''}</span>
-          {monto > 0 && (
-            <span style={{ fontSize: 11, fontWeight: 700, color: '#c06060', marginLeft: 4 }}>{fmtMoneda(monto)}</span>
+          {montoMostrar > 0 && (
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#c06060', marginLeft: 4 }}>{fmtMoneda(montoMostrar)}</span>
           )}
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
+          {mov.tipo === 'entrega' && (
+            <button style={{ ...S.btn, fontSize: 10, padding: '1px 7px' }} onClick={e => { e.stopPropagation(); setEditando(true) }}>✏</button>
+          )}
           <button style={S.btnD} onClick={() => onDelete(mov.id)}>✕</button>
         </div>
       </div>
@@ -391,11 +471,14 @@ function MovCardCliente({ mov, onDelete }) {
           </table>
         </div>
       )}
+      {editando && (
+        <ModalEditarMonto mov={mov} onClose={() => setEditando(false)} onSave={() => { setEditando(false); onRefresh() }} />
+      )}
     </div>
   )
 }
 
-function ClienteBlock({ nombre, movs, onDelete, filtroTipo, filtroProd }) {
+function ClienteBlock({ nombre, movs, onDelete, onRefresh, filtroTipo, filtroProd }) {
   const filtered = movs.filter(m => {
     if (filtroTipo && m.tipo !== filtroTipo) return false
     if (filtroProd) {
@@ -412,7 +495,7 @@ function ClienteBlock({ nombre, movs, onDelete, filtroTipo, filtroProd }) {
     <div>
       {sortedDesc.length === 0
         ? <div style={{ padding: 10, color: '#999', fontStyle: 'italic' }}>Sin movimientos con ese filtro.</div>
-        : sortedDesc.map(m => <MovCardCliente key={m.id} mov={m} onDelete={onDelete} />)
+        : sortedDesc.map(m => <MovCardCliente key={m.id} mov={m} onDelete={onDelete} onRefresh={onRefresh} />)
       }
     </div>
   )
@@ -546,6 +629,7 @@ export default function Clientes({ onMenuClick }) {
               nombre={selGrupo.nombre}
               movs={selGrupo.movs}
               onDelete={deleteMov}
+              onRefresh={fetchAll}
               filtroTipo={filtroTipo}
               filtroProd={filtroProd}
             />
