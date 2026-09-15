@@ -389,7 +389,7 @@ export default function CuentaCorriente({ onMenuClick }) {
                       <option value="">— Seleccioná una cuenta —</option>
                       {misBancos.map(b => (
                         <option key={b.id} value={b.banco}>
-                          {b.banco}{b.alias ? ` (${b.alias})` : ''}{b.moneda !== 'ARS' ? ` · ${b.moneda}` : ''}
+                          {b.banco}{b.alias ? ` (${b.alias})` : ''}{b.moneda === 'USD' ? ' · USD' : ''}
                         </option>
                       ))}
                     </select>

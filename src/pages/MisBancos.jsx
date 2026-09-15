@@ -9,10 +9,10 @@ const TIPOS = [
   { v: 'virtual', label: 'Cuenta virtual' },
 ]
 
-const MONEDAS = ['ARS', 'USD']
+const MONEDAS = ['UYU', 'USD']
 
 function emptyForm() {
-  return { banco: '', tipo: 'caja_ahorro', numero: '', alias: '', moneda: 'ARS' }
+  return { banco: '', tipo: 'caja_ahorro', numero: '', alias: '', moneda: 'UYU' }
 }
 
 export default function MisBancos({ onMenuClick }) {
