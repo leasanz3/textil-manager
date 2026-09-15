@@ -162,9 +162,9 @@ export default function MisBancos({ onMenuClick }) {
                 </div>
               </div>
               <div className="form-group">
-                <label>Número de cuenta / CBU</label>
+                <label>Número de cuenta</label>
                 <input value={form.numero} onChange={e => setF('numero', e.target.value)}
-                  placeholder="CBU o número de cuenta" />
+                  placeholder="Número de cuenta o IBAN" />
               </div>
               <div className="form-group">
                 <label>Alias</label>
