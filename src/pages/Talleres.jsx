@@ -1627,7 +1627,7 @@ function ModalRecibirStock({ taller, stockItems, fallaControlItems, onClose, onS
 
 // ── Resumen: stock actual en talleres ────────────────────────────────────────
 
-function StockEnTalleres({ movimientos, controlMap, onRecibirStock }) {
+function StockEnTalleres({ movimientos, controlMap, onRecibirStock, filterCid }) {
   const [open, setOpen] = useState(true)
 
   // Acumular por contacto → producto → talle, separando normal (envio) y falla (devolucion)
@@ -1714,16 +1714,21 @@ function StockEnTalleres({ movimientos, controlMap, onRecibirStock }) {
     const stockItems = prodList.flatMap(p => p.filas)
     const envios = (enviosPorTaller[cid] || []).filter(b => Object.values(b.cap).some(v => v > 0))
     return { nombre, cid, prodList, total, stockItems, envios }
-  }).filter(t => t.prodList.length > 0)
+  }).filter(t => t.prodList.length > 0 && (!filterCid || t.cid === filterCid))
 
   if (!talleres.length) return null
 
+  const esFiltrado = !!filterCid
+  const titulo = esFiltrado
+    ? `📦 En manos · ${talleres[0]?.total || 0} prendas`
+    : `📦 En manos de talleres`
+
   return (
-    <div style={{ border: '2px solid #1a3a6b', background: '#eef2f8', marginBottom: 10 }}>
-      <div style={{ background: 'linear-gradient(to bottom,#1a3a6b,#0a2a5b)', color: '#fff', padding: '5px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
+    <div style={{ border: `2px solid ${esFiltrado ? '#5a8a3a' : '#1a3a6b'}`, background: esFiltrado ? '#f0f6ec' : '#eef2f8', marginBottom: 10 }}>
+      <div style={{ background: esFiltrado ? 'linear-gradient(to bottom,#5a8a3a,#3a6a1a)' : 'linear-gradient(to bottom,#1a3a6b,#0a2a5b)', color: '#fff', padding: '5px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
         onClick={() => setOpen(o => !o)}>
-        <span style={{ fontWeight: 700, fontSize: 12 }}>{open ? '▼' : '▶'} 📦 En manos de talleres</span>
-        <span style={{ fontSize: 10 }}>{talleres.length} taller{talleres.length !== 1 ? 'es' : ''} · {talleres.reduce((s, t) => s + t.total, 0)} prendas</span>
+        <span style={{ fontWeight: 700, fontSize: 12 }}>{open ? '▼' : '▶'} {titulo}</span>
+        {!esFiltrado && <span style={{ fontSize: 10 }}>{talleres.length} taller{talleres.length !== 1 ? 'es' : ''} · {talleres.reduce((s, t) => s + t.total, 0)} prendas</span>}
       </div>
       {open && (
         <div style={{ padding: '8px 10px', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
@@ -2323,7 +2328,7 @@ function StockEnMiTaller({ movimientos, controlMap, onEntregar, onEnviarFallaSto
 // ── Bloque por taller ────────────────────────────────────────────────────────
 
 function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, onCalidad, onRecibir, onEnviarFalla }) {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)
   const [cuentaOpen, setCuentaOpen] = useState(false)
 
   // Saldo
@@ -2457,7 +2462,7 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
     <div style={{ border: '2px solid #7a8898', background: '#f4f4f0', marginBottom: 12 }}>
       <div style={{ background: 'linear-gradient(to bottom,#4a5a6a,#2a3a4a)', color: '#fff', padding: '6px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
         onClick={() => setOpen(o => !o)}>
-        <span style={{ fontWeight: 700, fontSize: 13 }}>{open ? '▼' : '▶'} {nombre}</span>
+        <span style={{ fontWeight: 700, fontSize: 12 }}>{open ? '▼' : '▶'} 📋 Historial de movimientos</span>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
           {tieneSaldo && <span style={{ fontSize: 11, fontWeight: 700, color: saldo > 0 ? '#ffb0a0' : saldo < 0 ? '#a0ffb0' : '#ccc' }}>
             {saldo > 0 ? `Adeudado: ${fmtMoneda(saldo)}` : saldo < 0 ? `A tu favor: ${fmtMoneda(-saldo)}` : '✓ Al día'}
@@ -2682,14 +2687,17 @@ export default function Talleres({ onMenuClick }) {
 
         {/* Panel derecho: detalle del taller seleccionado */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '10px 14px' }}>
-          <StockEnTalleres movimientos={movimientos} controlMap={controlMap} onRecibirStock={(taller, stockItems, fallaCtrl) => setRecibiendoStock({ taller, stockItems, fallaControlItems: fallaCtrl || [] })} />
-
           {selGrupo && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '10px 0 6px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '0 0 8px' }}>
               <span style={{ fontWeight: 700, fontSize: 13 }}>🧵 {selGrupo.nombre}</span>
               <button style={S.btnP} onClick={() => setModal(true)}>+ Movimiento</button>
             </div>
           )}
+
+          <StockEnTalleres movimientos={movimientos} controlMap={controlMap}
+            filterCid={selCid}
+            onRecibirStock={(taller, stockItems, fallaCtrl) => setRecibiendoStock({ taller, stockItems, fallaControlItems: fallaCtrl || [] })} />
+
 
           <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <select style={S.sel} value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)}>
