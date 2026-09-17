@@ -2340,8 +2340,8 @@ function StockEnMiTaller({ movimientos, controlMap, onEntregar, onEnviarFallaSto
 // ── Bloque por taller ────────────────────────────────────────────────────────
 
 function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, onCalidad, onRecibir, onEnviarFalla, onRepetir }) {
-  const [open, setOpen] = useState(true)
   const [openRows, setOpenRows] = useState({})
+  const [sortMode, setSortMode] = useState('producto') // 'producto' | 'fecha'
   function toggleRow(id) { setOpenRows(o => ({ ...o, [id]: !o[id] })) }
 
   // Saldo
@@ -2353,181 +2353,309 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
   const saldo = debe - haber
   const tieneSaldo = debe > 0 || haber > 0
 
-  // Construir filas cronológicas con saldo acumulado por producto
   const sortedAsc = [...movs].sort((a, b) => {
     const d = a.fecha.localeCompare(b.fecha)
     return d !== 0 ? d : (a.created_at || '').localeCompare(b.created_at || '')
   })
 
-  const balance = {} // producto_id → qty en manos del taller
+  const balance = {}
   const rows = []
 
   const TIPO_CFG = {
-    envio:     { label: 'ENVIADO',        border: '#4a6a9a', bg: '#f0f4fa', sign: +1 },
-    recepcion: { label: 'RECIBIDO',       border: '#4a8a4a', bg: '#f4faf4', sign: -1 },
-    devolucion:{ label: 'ENVIADO-FALLA',  border: '#c08020', bg: '#fff8e8', sign: +1 },
-    pago:      { label: 'PAGO',           border: '#6a4a8a', bg: '#f8f4fc', sign:  0 },
-    concepto:  { label: 'CONCEPTO',       border: '#888888', bg: '#fafaf8', sign:  0 },
+    envio:     { label: 'ENVIADO',       border: '#4a6a9a', bg: '#edf2fa', sign: +1 },
+    recepcion: { label: 'RECIBIDO',      border: '#2d7a3a', bg: '#edf7ee', sign: -1 },
+    devolucion:{ label: 'ENVIADO-FALLA', border: '#b06010', bg: '#fdf3e0', sign: +1 },
+    pago:      { label: 'PAGO',          border: '#5a3a8a', bg: '#f4eefa', sign:  0 },
+    concepto:  { label: 'CONCEPTO',      border: '#555555', bg: '#f2f2ee', sign:  0 },
   }
 
   for (const m of sortedAsc) {
-    const cfg = TIPO_CFG[m.tipo] || { label: m.tipo?.toUpperCase(), border: '#aaa', bg: '#fafaf8', sign: 0 }
+    const cfg = TIPO_CFG[m.tipo] || { label: m.tipo?.toUpperCase(), border: '#777', bg: '#f2f2ee', sign: 0 }
     const mItems = m.taller_movimientos_items || []
     const mFallas = (controlMap[m.id] || []).filter(c => (c.cant_falla || 0) > 0 && !c.devuelto_taller)
     const hasFalla = mFallas.length > 0
 
     if (mItems.length > 0) {
-      // Agrupar por producto
       const byProd = {}
       for (const it of mItems) {
         const pid = it.producto_id
-        if (!byProd[pid]) byProd[pid] = { nombre: it.productos?.nombre || '?', items: [], total: 0 }
+        if (!byProd[pid]) byProd[pid] = { nombre: it.productos?.nombre || '?', codigo: it.productos?.codigo || null, items: [], total: 0 }
         byProd[pid].items.push(it)
         byProd[pid].total += it.cantidad || 0
       }
       for (const [pid, pd] of Object.entries(byProd)) {
         balance[pid] = (balance[pid] || 0) + cfg.sign * pd.total
         const prodFallas = mFallas.filter(f => f.producto_id === Number(pid))
+        const effectiveCfg = hasFalla && m.tipo === 'recepcion'
+          ? { ...cfg, label: 'RECIBIDO-FALLA', border: '#b03030', bg: '#fdeaea' }
+          : cfg
         rows.push({
           key: `${m.id}-${pid}`, movId: m.id, mov: m, pid: Number(pid),
-          fecha: m.fecha, cfg: hasFalla && m.tipo === 'recepcion'
-            ? { ...cfg, label: 'RECIBIDO-FALLA', border: '#c04040', bg: '#fff4f4' }
-            : cfg,
-          prodNombre: pd.nombre, items: pd.items, total: pd.total,
+          fecha: m.fecha, cfg: effectiveCfg,
+          prodNombre: pd.nombre, prodCodigo: pd.codigo, items: pd.items, total: pd.total,
           enManos: Math.max(0, balance[pid] || 0),
           fallas: prodFallas, monto: null, nota: m.nota,
         })
       }
     } else {
-      // PAGO, CONCEPTO, o recepcion sin items
       rows.push({
         key: m.id, movId: m.id, mov: m, pid: null,
         fecha: m.fecha, cfg,
-        prodNombre: m.nota || null, items: [], total: null,
+        prodNombre: null, items: [], total: null,
         enManos: null, fallas: [], monto: m.monto, nota: m.nota,
       })
     }
   }
 
-  const rowsDesc = [...rows].reverse()
   const totalEnManos = Object.values(balance).reduce((s, v) => s + Math.max(0, v), 0)
 
-  const enviosPendientes = sortedAsc.filter(m =>
-    m.tipo === 'envio' && !sortedAsc.some(r =>
-      r.tipo === 'recepcion' && r.fecha >= m.fecha &&
-      (r.taller_movimientos_items || []).some(it =>
-        (m.taller_movimientos_items || []).some(ei => ei.producto_id === it.producto_id))))
+  // Vista por producto: agrupar filas con pid
+  const prodRowsOnly = rows.filter(r => r.pid != null)
+  const pagoRows     = rows.filter(r => r.pid == null)
+  const prodMap = {}
+  for (const r of prodRowsOnly) {
+    if (!prodMap[r.pid]) prodMap[r.pid] = { nombre: r.prodNombre, pid: r.pid, rows: [] }
+    prodMap[r.pid].rows.push(r)
+  }
+  const prodGroups = Object.values(prodMap).sort((a, b) => a.nombre.localeCompare(b.nombre))
+
+  // Subcomponente reutilizable: tabla de talles expandida
+  function TalleDetalle({ row }) {
+    return (
+      <div style={{ padding: '0 12px 10px 20px' }}>
+        {row.nota && <div style={{ fontSize: 12, color: '#444', fontStyle: 'italic', padding: '4px 0' }}>📝 {row.nota}</div>}
+        <table style={{ borderCollapse: 'collapse', fontSize: 13, marginTop: 4 }}>
+          <thead>
+            <tr>
+              <th style={{ border: '1px solid #b8b8b0', padding: '3px 10px', background: '#dcdcd4', fontWeight: 700, textAlign: 'center', color: '#111' }}>Talle</th>
+              <th style={{ border: '1px solid #b8b8b0', padding: '3px 10px', background: '#dcdcd4', fontWeight: 700, textAlign: 'center', color: '#111' }}>Cant.</th>
+              {row.fallas.length > 0 && <th style={{ border: '1px solid #b8b8b0', padding: '3px 10px', background: '#f0d8d8', fontWeight: 700, textAlign: 'center', color: '#111' }}>⚠ Falla</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {[...row.items].sort((a, b) => cmpTalle(a.talle, b.talle)).map(it => {
+              const falla = row.fallas.find(f => f.talle === it.talle)
+              return (
+                <tr key={it.id} style={{ background: falla ? '#fdeaea' : 'transparent' }}>
+                  <td style={{ border: '1px solid #c8c8c0', padding: '3px 10px', textAlign: 'center', fontWeight: 700, color: '#111' }}>{it.talle}</td>
+                  <td style={{ border: '1px solid #c8c8c0', padding: '3px 10px', textAlign: 'center', color: '#111' }}>{it.cantidad}</td>
+                  {row.fallas.length > 0 && <td style={{ border: '1px solid #c8c8c0', padding: '3px 10px', textAlign: 'center', color: '#b03030', fontWeight: 700 }}>{falla ? falla.cant_falla : '—'}</td>}
+                </tr>
+              )
+            })}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td style={{ border: '1px solid #b8b8b0', padding: '3px 10px', background: '#dcdcd4', fontWeight: 700, textAlign: 'right', color: '#111' }}>Total</td>
+              <td style={{ border: '1px solid #b8b8b0', padding: '3px 10px', background: '#dcdcd4', fontWeight: 700, textAlign: 'center', color: '#111' }}>{row.total}</td>
+              {row.fallas.length > 0 && <td style={{ border: '1px solid #b8b8b0', padding: '3px 10px', background: '#f0d8d8', fontWeight: 700, textAlign: 'center', color: '#b03030' }}>{row.fallas.reduce((s, f) => s + (f.cant_falla || 0), 0)}</td>}
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    )
+  }
+
+  function AccionesFila({ row }) {
+    return (
+      <div style={{ display: 'flex', gap: 3, justifyContent: 'flex-end' }}>
+        {row.mov.tipo === 'envio' && !sortedAsc.some(r => r.tipo === 'recepcion' && r.fecha >= row.mov.fecha) && (
+          <button style={{ ...S.btn, fontSize: 10, padding: '1px 6px' }} onClick={() => onRecibir(row.mov)}>Recibir</button>
+        )}
+        {row.mov.tipo === 'envio' && onRepetir && (
+          <button style={{ ...S.btn, fontSize: 10, padding: '1px 6px' }} title="Repetir" onClick={() => onRepetir(row.mov)}>🔁</button>
+        )}
+        {row.mov.tipo === 'recepcion' && (
+          <button style={{ ...S.btn, fontSize: 10, padding: '1px 6px' }} onClick={() => onCalidad(row.mov)}>Calidad</button>
+        )}
+        <button style={{ ...S.btn, fontSize: 10, padding: '1px 6px' }} onClick={() => onEdit(row.mov)}>✏️</button>
+        <button style={S.btnD} onClick={() => onDelete(row.mov.id)}>✕</button>
+      </div>
+    )
+  }
+
+  const thBase = { padding: '5px 8px', fontWeight: 700, borderBottom: '2px solid #a8a8a0', color: '#111', fontSize: 12, background: '#dcdcd4', userSelect: 'none' }
 
   return (
-    <div style={{ background: '#fafaf8', marginBottom: 12 }}>
+    <div style={{ background: '#f8f8f4', marginBottom: 12, border: '1px solid #c8c8c0' }}>
       {/* Header */}
-      <div style={{ background: 'linear-gradient(to bottom,#4a5a6a,#2a3a4a)', color: '#fff', padding: '6px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontWeight: 700, fontSize: 12 }}>📋 Movimientos</span>
+      <div style={{ background: 'linear-gradient(to bottom,#3a4a5a,#1e2e3e)', color: '#fff', padding: '7px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontWeight: 700, fontSize: 13 }}>📋 Movimientos</span>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          {totalEnManos > 0 && <span style={{ fontSize: 10, color: '#ffd080' }}>📤 {totalEnManos} en taller</span>}
-          {tieneSaldo && <span style={{ fontSize: 11, fontWeight: 700, color: saldo > 0 ? '#ffb0a0' : '#a0ffb0' }}>
+          {totalEnManos > 0 && <span style={{ fontSize: 11, color: '#ffd080', fontWeight: 700 }}>📤 {totalEnManos} en taller</span>}
+          {tieneSaldo && <span style={{ fontSize: 12, fontWeight: 700, color: saldo > 0 ? '#ffb0a0' : '#90f090' }}>
             {saldo > 0 ? `Adeudado: ${fmtMoneda(saldo)}` : `A tu favor: ${fmtMoneda(-saldo)}`}
           </span>}
         </div>
       </div>
 
-      {/* Tabla cronológica */}
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
-          <thead>
-            <tr style={{ background: '#e8e8e0', fontSize: 11 }}>
-              <th style={{ padding: '4px 8px', textAlign: 'left', fontWeight: 700, borderBottom: '2px solid #c8c8c0', whiteSpace: 'nowrap' }}>Fecha</th>
-              <th style={{ padding: '4px 8px', textAlign: 'left', fontWeight: 700, borderBottom: '2px solid #c8c8c0', whiteSpace: 'nowrap' }}>Movimiento</th>
-              <th style={{ padding: '4px 8px', textAlign: 'left', fontWeight: 700, borderBottom: '2px solid #c8c8c0' }}>Producto</th>
-              <th style={{ padding: '4px 8px', textAlign: 'center', fontWeight: 700, borderBottom: '2px solid #c8c8c0', whiteSpace: 'nowrap' }}>Cant.</th>
-              <th style={{ padding: '4px 8px', textAlign: 'center', fontWeight: 700, borderBottom: '2px solid #c8c8c0', whiteSpace: 'nowrap' }}>En manos</th>
-              <th style={{ padding: '4px 8px', borderBottom: '2px solid #c8c8c0' }}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rowsDesc.map(row => {
-              const isOpen = !!openRows[row.key]
-              const cfg = row.cfg
-              return (
-                <React.Fragment key={row.key}>
-                  <tr
-                    onClick={() => row.items.length > 0 && toggleRow(row.key)}
-                    style={{ borderLeft: `4px solid ${cfg.border}`, background: isOpen ? cfg.bg : 'transparent',
-                      cursor: row.items.length > 0 ? 'pointer' : 'default',
-                      borderBottom: '1px solid #e8e8e0' }}>
-                    <td style={{ padding: '5px 8px', whiteSpace: 'nowrap', color: '#555', fontSize: 12 }}>{fmtF(row.fecha)}</td>
-                    <td style={{ padding: '5px 8px', whiteSpace: 'nowrap' }}>
-                      <span style={{ fontWeight: 700, fontSize: 12, color: cfg.border }}>{cfg.label}</span>
-                      {row.fallas.length > 0 && <span style={{ marginLeft: 4, fontSize: 11, color: '#c04040' }}>⚠</span>}
-                      {row.monto != null && <span style={{ marginLeft: 6, fontWeight: 700, color: '#1a5a1a', fontSize: 12 }}>{fmtMoneda(row.monto)}</span>}
-                    </td>
-                    <td style={{ padding: '5px 8px', color: '#333' }}>
-                      {row.prodNombre || <span style={{ color: '#aaa', fontSize: 11 }}>—</span>}
-                      {row.nota && !row.prodNombre && <span style={{ fontSize: 11, color: '#888', fontStyle: 'italic' }}> {row.nota}</span>}
-                    </td>
-                    <td style={{ padding: '5px 8px', textAlign: 'center', fontWeight: 700 }}>
-                      {row.total != null ? `${row.total}u` : '—'}
-                    </td>
-                    <td style={{ padding: '5px 8px', textAlign: 'center', fontWeight: 700, color: row.enManos > 0 ? '#8a5a00' : '#4a8a4a' }}>
-                      {row.enManos != null ? `${row.enManos}u` : '—'}
-                    </td>
-                    <td style={{ padding: '5px 8px', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
-                      <div style={{ display: 'flex', gap: 3, justifyContent: 'flex-end' }}>
-                        {row.mov.tipo === 'envio' && !sortedAsc.some(r => r.tipo === 'recepcion' && r.fecha >= row.mov.fecha) && (
-                          <button style={{ ...S.btn, fontSize: 10, padding: '1px 6px' }} onClick={() => onRecibir(row.mov)}>Recibir</button>
-                        )}
-                        {row.mov.tipo === 'envio' && onRepetir && (
-                          <button style={{ ...S.btn, fontSize: 10, padding: '1px 6px' }} title="Repetir" onClick={() => onRepetir(row.mov)}>🔁</button>
-                        )}
-                        {row.mov.tipo === 'recepcion' && (
-                          <button style={{ ...S.btn, fontSize: 10, padding: '1px 6px' }} onClick={() => onCalidad(row.mov)}>Calidad</button>
-                        )}
-                        <button style={{ ...S.btn, fontSize: 10, padding: '1px 6px' }} onClick={() => onEdit(row.mov)}>✏️</button>
-                        <button style={S.btnD} onClick={() => onDelete(row.mov.id)}>✕</button>
-                      </div>
-                    </td>
-                  </tr>
-                  {isOpen && row.items.length > 0 && (
-                    <tr style={{ background: cfg.bg }}>
-                      <td colSpan={6} style={{ padding: '0 16px 10px 24px', borderBottom: '1px solid #ddd' }}>
-                        {row.nota && <div style={{ fontSize: 11, color: '#666', fontStyle: 'italic', padding: '4px 0' }}>📝 {row.nota}</div>}
-                        <table style={{ borderCollapse: 'collapse', fontSize: 13, marginTop: 4 }}>
-                          <thead>
-                            <tr>
-                              <th style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#e8e8e0', fontWeight: 700, textAlign: 'center' }}>Talle</th>
-                              <th style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#e8e8e0', fontWeight: 700, textAlign: 'center' }}>Cant.</th>
-                              {row.fallas.length > 0 && <th style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#f8e8e8', fontWeight: 700, textAlign: 'center' }}>⚠ Falla</th>}
+      {/* ── Vista POR PRODUCTO ── */}
+      {sortMode === 'producto' && (
+        <div>
+          {/* encabezado de columnas */}
+          <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
+            <thead>
+              <tr>
+                <th style={{ ...thBase, textAlign: 'left', width: '30%' }}>Producto / Estado</th>
+                <th style={{ ...thBase, textAlign: 'left', cursor: 'pointer', color: '#4a6aaa' }}
+                  onClick={() => setSortMode('fecha')}>Fecha ↕</th>
+                <th style={{ ...thBase, textAlign: 'left' }}>Movimiento</th>
+                <th style={{ ...thBase, textAlign: 'center' }}>Cant.</th>
+                <th style={{ ...thBase, textAlign: 'center' }}>En manos</th>
+                <th style={{ ...thBase }}></th>
+              </tr>
+            </thead>
+          </table>
+          {/* grupos por producto */}
+          {prodGroups.map(g => {
+            const lastRow = g.rows[g.rows.length - 1]
+            const enManosActual = lastRow?.enManos ?? 0
+            const isGroupOpen = openRows[`g-${g.pid}`] !== false // default open
+            return (
+              <div key={g.pid} style={{ borderBottom: '2px solid #c8c8c0' }}>
+                {/* header del grupo */}
+                <div onClick={() => setOpenRows(o => ({ ...o, [`g-${g.pid}`]: !isGroupOpen }))}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', background: '#eeeee8', cursor: 'pointer', userSelect: 'none' }}>
+                  <span style={{ fontSize: 11, color: '#666' }}>{isGroupOpen ? '▼' : '▶'}</span>
+                  <div style={{ flex: 1, display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                    <span style={{ fontWeight: 700, fontSize: 14, color: '#111' }}>{g.nombre}</span>
+                    {lastRow?.prodCodigo && <span style={{ fontSize: 11, color: '#555', fontFamily: 'monospace', background: '#d8d8d0', padding: '1px 5px', borderRadius: 2 }}>{lastRow.prodCodigo}</span>}
+                  </div>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: enManosActual > 0 ? '#7a4a00' : '#1e6a1e' }}>
+                    {enManosActual > 0 ? `${enManosActual}u en taller` : '✓ recibido todo'}
+                  </span>
+                </div>
+                {isGroupOpen && (
+                  <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
+                    <tbody>
+                      {g.rows.map(row => {
+                        const isOpen = !!openRows[row.key]
+                        const cfg = row.cfg
+                        return (
+                          <React.Fragment key={row.key}>
+                            <tr onClick={() => row.items.length > 0 && toggleRow(row.key)}
+                              style={{ borderLeft: `4px solid ${cfg.border}`, background: isOpen ? cfg.bg : 'transparent',
+                                cursor: row.items.length > 0 ? 'pointer' : 'default', borderBottom: '1px solid #e0e0d8' }}>
+                              <td style={{ padding: '5px 8px', width: '30%', color: '#333' }}></td>
+                              <td style={{ padding: '5px 8px', whiteSpace: 'nowrap', color: '#222', fontSize: 12 }}>{fmtF(row.fecha)}</td>
+                              <td style={{ padding: '5px 8px', whiteSpace: 'nowrap' }}>
+                                <span style={{ fontWeight: 700, fontSize: 12, color: cfg.border }}>{cfg.label}</span>
+                                {row.fallas.length > 0 && <span style={{ marginLeft: 4, fontSize: 11, color: '#b03030' }}>⚠</span>}
+                              </td>
+                              <td style={{ padding: '5px 8px', textAlign: 'center', fontWeight: 700, color: '#111' }}>
+                                {row.total != null ? `${row.total}u` : '—'}
+                              </td>
+                              <td style={{ padding: '5px 8px', textAlign: 'center', fontWeight: 700, color: row.enManos > 0 ? '#7a4a00' : '#1e6a1e' }}>
+                                {row.enManos != null ? `${row.enManos}u` : '—'}
+                              </td>
+                              <td style={{ padding: '5px 8px', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+                                <AccionesFila row={row} />
+                              </td>
                             </tr>
-                          </thead>
-                          <tbody>
-                            {[...row.items].sort((a, b) => cmpTalle(a.talle, b.talle)).map(it => {
-                              const falla = row.fallas.find(f => f.talle === it.talle)
-                              return (
-                                <tr key={it.id} style={{ background: falla ? '#fff4f4' : 'transparent' }}>
-                                  <td style={{ border: '1px solid #d8d8d0', padding: '3px 8px', textAlign: 'center', fontWeight: 700 }}>{it.talle}</td>
-                                  <td style={{ border: '1px solid #d8d8d0', padding: '3px 8px', textAlign: 'center' }}>{it.cantidad}</td>
-                                  {row.fallas.length > 0 && <td style={{ border: '1px solid #d8d8d0', padding: '3px 8px', textAlign: 'center', color: '#c04040', fontWeight: 700 }}>{falla ? falla.cant_falla : '—'}</td>}
-                                </tr>
-                              )
-                            })}
-                          </tbody>
-                          <tfoot>
-                            <tr>
-                              <td style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#e8e8e0', fontWeight: 700, textAlign: 'right', fontSize: 12 }}>Total</td>
-                              <td style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#e8e8e0', fontWeight: 700, textAlign: 'center', fontSize: 12 }}>{row.total}</td>
-                              {row.fallas.length > 0 && <td style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#f8e8e8', fontWeight: 700, textAlign: 'center', fontSize: 12, color: '#c04040' }}>{row.fallas.reduce((s, f) => s + (f.cant_falla || 0), 0)}</td>}
-                            </tr>
-                          </tfoot>
-                        </table>
+                            {isOpen && row.items.length > 0 && (
+                              <tr style={{ background: cfg.bg }}>
+                                <td colSpan={6} style={{ borderBottom: '1px solid #ddd' }}>
+                                  <TalleDetalle row={row} />
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )
+          })}
+          {/* Pagos / conceptos al final */}
+          {pagoRows.length > 0 && (
+            <div style={{ borderTop: '2px solid #c8c8c0' }}>
+              <div style={{ padding: '5px 10px', background: '#eeeee8', fontSize: 12, fontWeight: 700, color: '#333' }}>💰 Pagos y conceptos</div>
+              <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
+                <tbody>
+                  {[...pagoRows].reverse().map(row => {
+                    const cfg = row.cfg
+                    return (
+                      <tr key={row.key} style={{ borderLeft: `4px solid ${cfg.border}`, background: 'transparent', borderBottom: '1px solid #e0e0d8' }}>
+                        <td style={{ padding: '5px 8px', color: '#222', fontSize: 12, whiteSpace: 'nowrap' }}>{fmtF(row.fecha)}</td>
+                        <td style={{ padding: '5px 8px' }}>
+                          <span style={{ fontWeight: 700, fontSize: 12, color: cfg.border }}>{cfg.label}</span>
+                        </td>
+                        <td style={{ padding: '5px 8px', color: '#111' }}>{row.nota || '—'}</td>
+                        <td style={{ padding: '5px 8px', fontWeight: 700, color: '#111' }}>{row.monto != null ? fmtMoneda(row.monto) : '—'}</td>
+                        <td style={{ padding: '5px 8px' }} onClick={e => e.stopPropagation()}>
+                          <AccionesFila row={row} />
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Vista CRONOLÓGICA ── */}
+      {sortMode === 'fecha' && (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
+            <thead>
+              <tr>
+                <th style={{ ...thBase, textAlign: 'left', cursor: 'pointer', color: '#4a6aaa' }}
+                  onClick={() => setSortMode('producto')}>Fecha ↕</th>
+                <th style={{ ...thBase, textAlign: 'left' }}>Movimiento</th>
+                <th style={{ ...thBase, textAlign: 'left' }}>Producto</th>
+                <th style={{ ...thBase, textAlign: 'center' }}>Cant.</th>
+                <th style={{ ...thBase, textAlign: 'center' }}>En manos</th>
+                <th style={{ ...thBase }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...rows].reverse().map(row => {
+                const isOpen = !!openRows[row.key]
+                const cfg = row.cfg
+                return (
+                  <React.Fragment key={row.key}>
+                    <tr onClick={() => row.items.length > 0 && toggleRow(row.key)}
+                      style={{ borderLeft: `4px solid ${cfg.border}`, background: isOpen ? cfg.bg : 'transparent',
+                        cursor: row.items.length > 0 ? 'pointer' : 'default', borderBottom: '1px solid #e0e0d8' }}>
+                      <td style={{ padding: '5px 8px', whiteSpace: 'nowrap', color: '#222', fontSize: 12 }}>{fmtF(row.fecha)}</td>
+                      <td style={{ padding: '5px 8px', whiteSpace: 'nowrap' }}>
+                        <span style={{ fontWeight: 700, fontSize: 12, color: cfg.border }}>{cfg.label}</span>
+                        {row.fallas.length > 0 && <span style={{ marginLeft: 4, fontSize: 11, color: '#b03030' }}>⚠</span>}
+                        {row.monto != null && <span style={{ marginLeft: 6, fontWeight: 700, color: '#1a4a1a', fontSize: 12 }}>{fmtMoneda(row.monto)}</span>}
+                      </td>
+                      <td style={{ padding: '5px 8px', color: '#111' }}>
+                        {row.prodNombre
+                          ? <span>{row.prodNombre}{row.prodCodigo && <span style={{ marginLeft: 6, fontSize: 11, color: '#555', fontFamily: 'monospace', background: '#d8d8d0', padding: '1px 4px', borderRadius: 2 }}>{row.prodCodigo}</span>}</span>
+                          : <span style={{ color: '#666', fontSize: 11 }}>{row.nota || '—'}</span>}
+                      </td>
+                      <td style={{ padding: '5px 8px', textAlign: 'center', fontWeight: 700, color: '#111' }}>
+                        {row.total != null ? `${row.total}u` : '—'}
+                      </td>
+                      <td style={{ padding: '5px 8px', textAlign: 'center', fontWeight: 700, color: row.enManos > 0 ? '#7a4a00' : '#1e6a1e' }}>
+                        {row.enManos != null ? `${row.enManos}u` : '—'}
+                      </td>
+                      <td style={{ padding: '5px 8px', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+                        <AccionesFila row={row} />
                       </td>
                     </tr>
-                  )}
-                </React.Fragment>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
+                    {isOpen && row.items.length > 0 && (
+                      <tr style={{ background: cfg.bg }}>
+                        <td colSpan={6} style={{ borderBottom: '1px solid #ddd' }}>
+                          <TalleDetalle row={row} />
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }
@@ -2564,7 +2692,7 @@ export default function Talleres({ onMenuClick }) {
         .select(`id, tipo, fecha, nota, monto, created_at,
           contactos(id, nombre),
           taller_movimientos_items(id, producto_id, talle, cantidad, observacion,
-            productos(id, nombre, tabla, tela1_id, telas:tela1_id(tipo, color))))`)
+            productos(id, nombre, codigo, tabla, tela1_id, telas:tela1_id(tipo, color))))`)
         .order('fecha', { ascending: false })
         .order('created_at', { ascending: false }),
       supabase.from('taller_control_items')
