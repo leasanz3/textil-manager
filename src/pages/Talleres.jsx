@@ -5,6 +5,17 @@ import { TABLAS_TALLES, TALLES_ADULTO, TALLES_NINO } from '../constants/talles'
 const F = 'Tahoma, Trebuchet MS, sans-serif'
 const today = () => new Date().toISOString().slice(0, 10)
 const fmtF  = (f) => { if (!f) return '—'; const [y, m, d] = f.split('-'); return `${d}/${m}/${y}` }
+const TALLE_ORD = ['XS','S','M','L','XL','XXL','XXXL','XXXXL']
+function cmpTalle(a, b) {
+  const ai = TALLE_ORD.indexOf(String(a).toUpperCase())
+  const bi = TALLE_ORD.indexOf(String(b).toUpperCase())
+  if (ai !== -1 && bi !== -1) return ai - bi
+  const an = parseInt(a), bn = parseInt(b)
+  if (!isNaN(an) && !isNaN(bn)) return an - bn
+  if (!isNaN(an)) return -1   // numérico antes que letra
+  if (!isNaN(bn)) return 1
+  return String(a).localeCompare(String(b))
+}
 
 const TIPOS = [
   { id: 'envio',      label: 'Envío al taller',      icon: '📤', color: '#1a3a6b' },
@@ -322,13 +333,13 @@ function FormMovimiento({ tipo, setTipo, fecha, setFecha, tallerQ, setTallerQ, t
 
 // ── Modal: Nuevo movimiento ───────────────────────────────────────────────────
 
-function ModalNuevo({ onClose, onSave, tipoInicial, tallerInicial }) {
+function ModalNuevo({ onClose, onSave, tipoInicial, tallerInicial, itemsInicial }) {
   const [tipo,       setTipo]       = useState(tipoInicial || 'envio')
   const [fecha,      setFecha]      = useState(today())
   const [tallerQ,    setTallerQ]    = useState(tallerInicial?.nombre || '')
   const [tallerId,   setTallerId]   = useState(tallerInicial?.id || null)
   const [tallerRes,  setTallerRes]  = useState([])
-  const [items,      setItems]      = useState([newItem()])
+  const [items,      setItems]      = useState(itemsInicial || [newItem()])
   const [nota,       setNota]       = useState('')
   const [monto,      setMonto]      = useState('')
   const [tabItems,   setTabItems]   = useState('nuevo')
@@ -1707,6 +1718,7 @@ function StockEnTalleres({ movimientos, controlMap, onRecibirStock, filterCid })
       const filas = Object.entries(talles)
         .filter(([, v]) => v.normal > 0 || v.falla > 0)
         .map(([talle, v]) => ({ talle, normal: Math.max(0, v.normal), falla: Math.max(0, v.falla), n: Math.max(0, v.normal) + Math.max(0, v.falla), producto_id: pid, prodNombre }))
+        .sort((a, b) => cmpTalle(a.talle, b.talle))
       const total = filas.reduce((s, f) => s + f.n, 0)
       return { prodNombre, filas, total }
     }).filter(p => p.filas.length > 0)
@@ -1780,7 +1792,7 @@ function StockEnTalleres({ movimientos, controlMap, onRecibirStock, filterCid })
                             {p.nombre} <span style={{ fontWeight: 400, color: '#555' }}>· {total} u.</span>
                           </div>
                           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                            {p.filas.map((f, i) => (
+                            {[...p.filas].sort((a,b) => cmpTalle(a.talle, b.talle)).map((f, i) => (
                               <span key={i} style={{ background: '#e0e8f4', padding: '1px 6px', border: '1px solid #a0b0c8', fontSize: 11 }}>{f.talle} × {f.cant}</span>
                             ))}
                           </div>
@@ -1819,7 +1831,7 @@ function StockEnTalleres({ movimientos, controlMap, onRecibirStock, filterCid })
                       <div key={p.pid} style={{ marginBottom: 3 }}>
                         <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 2, color: '#8a2000' }}>⚠️ {p.nombre}</div>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                          {p.filas.map((f, i) => (
+                          {[...p.filas].sort((a,b) => cmpTalle(a.talle, b.talle)).map((f, i) => (
                             <span key={i} style={{ background: '#fff0e8', padding: '1px 6px', border: '1px solid #d08060', color: '#8a2000', fontWeight: 700, fontSize: 11 }}>⚠️ {f.talle} × {f.falla}</span>
                           ))}
                         </div>
@@ -2327,9 +2339,12 @@ function StockEnMiTaller({ movimientos, controlMap, onEntregar, onEnviarFallaSto
 
 // ── Bloque por taller ────────────────────────────────────────────────────────
 
-function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, onCalidad, onRecibir, onEnviarFalla }) {
+function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, onCalidad, onRecibir, onEnviarFalla, onRepetir }) {
   const [open, setOpen] = useState(false)
   const [cuentaOpen, setCuentaOpen] = useState(false)
+  const [openBlocks, setOpenBlocks] = useState({})
+  const [filtroEstado, setFiltroEstado] = useState('')
+  function toggleBlock(id) { setOpenBlocks(o => ({ ...o, [id]: !o[id] })) }
 
   // Saldo
   let debe = 0, haber = 0
@@ -2384,20 +2399,23 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
       return ant.length ? ant[ant.length - 1].id : null
     }
 
-    // Nivel 1: oldest envío con capacidad exacta por producto+talle
+    // Nivel 1: envío con MEJOR match por producto+talle (más ítems coincidentes), FIFO en empate
+    let bestId = null, bestScore = 0
     for (const e of enviosAsc) {
       if (e.fecha > mov.fecha) continue
       const cap = envioCapacity[e.id]
-      const tieneCapacidad = movItems.some(it => (cap[`${it.producto_id}__${it.talle}`] || 0) > 0)
-      if (tieneCapacidad) {
-        if (mov.tipo === 'recepcion') {
-          for (const it of movItems) {
-            const k = `${it.producto_id}__${it.talle}`
-            if (cap[k]) cap[k] = Math.max(0, cap[k] - (it.cantidad || 0))
-          }
+      const score = movItems.filter(it => (cap[`${it.producto_id}__${it.talle}`] || 0) > 0).length
+      if (score > bestScore) { bestScore = score; bestId = e.id }
+    }
+    if (bestId && bestScore > 0) {
+      if (mov.tipo === 'recepcion') {
+        const cap = envioCapacity[bestId]
+        for (const it of movItems) {
+          const k = `${it.producto_id}__${it.talle}`
+          if (cap[k]) cap[k] = Math.max(0, cap[k] - (it.cantidad || 0))
         }
-        return e.id
       }
+      return bestId
     }
 
     // Nivel 2: oldest envío que directamente contiene el mismo producto (sin importar talle ni capacidad)
@@ -2427,31 +2445,215 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
   ]
 
   // Separar en pendientes (sin recepción) y cerrados (con recepción)
-  const pendientes = allBlocks.filter(b => b.envio && !b.movements.some(m => m.tipo === 'recepcion')).reverse()
-  const cerrados   = allBlocks.filter(b => !b.envio || b.movements.some(m => m.tipo === 'recepcion')).reverse()
+  const pendientesAll = allBlocks.filter(b => b.envio && !b.movements.some(m => m.tipo === 'recepcion')).reverse()
+  const cerradosAll   = allBlocks.filter(b => !b.envio || b.movements.some(m => m.tipo === 'recepcion')).reverse()
 
-  function renderBlock(block, i, isPending) {
-    const borderColor = isPending ? '#c08020' : '#6a8a6a'
-    const bgColor     = isPending ? '#fffbe8' : '#f4f8f4'
+  function blockStatus(b) {
+    const items = b.envio?.taller_movimientos_items || []
+    const envTotal = items.reduce((s, it) => s + (it.cantidad || 0), 0)
+    const recTotal = b.movements.filter(m => m.tipo === 'recepcion').reduce((s, m) => s + (m.taller_movimientos_items || []).reduce((ss, it) => ss + (it.cantidad || 0), 0), 0)
+    const fallas   = b.movements.some(m => (controlMap[m.id] || []).some(c => (c.cant_falla || 0) > 0 && !c.devuelto_taller))
+    const hasRec   = b.movements.some(m => m.tipo === 'recepcion')
+    return !hasRec ? 'en taller' : fallas ? 'con fallas' : recTotal < envTotal ? 'incompleto' : 'completo'
+  }
+
+  const pendientes = filtroEstado === 'en taller' ? pendientesAll : filtroEstado ? [] : pendientesAll
+  const cerrados   = filtroEstado && filtroEstado !== 'en taller'
+    ? cerradosAll.filter(b => blockStatus(b) === filtroEstado)
+    : filtroEstado === 'en taller' ? [] : cerradosAll
+
+  const totalPrendasEnTaller = pendientesAll.reduce((s, b) =>
+    s + (b.envio?.taller_movimientos_items || []).reduce((ss, it) => ss + (it.cantidad || 0), 0), 0)
+
+  function renderBlock(block, i) {
+    const blockId    = block.envio?.id || `suelto-${i}`
+    const isOpen     = !!openBlocks[blockId]
+    const envioItems = block.envio?.taller_movimientos_items || []
+
+    // Resumen por producto para el header
+    const byProd = {}
+    for (const it of envioItems) {
+      const nm = it.productos?.nombre || '?'
+      if (!byProd[nm]) byProd[nm] = { total: 0, talles: {} }
+      byProd[nm].total += it.cantidad || 0
+      byProd[nm].talles[it.talle] = (byProd[nm].talles[it.talle] || 0) + (it.cantidad || 0)
+    }
+    const totalEnviado  = envioItems.reduce((s, it) => s + (it.cantidad || 0), 0)
+    const totalRecibido = block.movements
+      .filter(m => m.tipo === 'recepcion')
+      .reduce((s, m) => s + (m.taller_movimientos_items || []).reduce((ss, it) => ss + (it.cantidad || 0), 0), 0)
+    const hasFallas = block.movements.some(m =>
+      (controlMap[m.id] || []).some(c => (c.cant_falla || 0) > 0 && !c.devuelto_taller))
+
+    // Última fecha de actividad
+    const allDates = [block.envio?.fecha, ...block.movements.map(m => m.fecha)].filter(Boolean).sort()
+    const lastDate  = allDates[allDates.length - 1]
+    const enviDate  = block.envio?.fecha
+
+    // Estado (solo texto, sin fondos de colores)
+    const hasRec = block.movements.some(m => m.tipo === 'recepcion')
+    const status = !hasRec ? 'en taller' : hasFallas ? 'con fallas' : totalRecibido < totalEnviado ? 'incompleto' : 'completo'
+    const blkBorder = !hasRec ? '#c08020' : hasFallas ? '#c04040' : totalRecibido < totalEnviado ? '#d07030' : '#4a8a4a'
+    const montoRecibido = block.movements
+      .filter(m => m.tipo === 'recepcion' && m.monto != null)
+      .reduce((s, m) => s + m.monto, 0)
+
+    // Movimientos en bloque ordenados: más reciente arriba, envío al final
+    const movsDesc = [...block.movements].sort((a, b) => b.fecha.localeCompare(a.fecha))
+
+    const labelFor = tipo => {
+      if (tipo === 'recepcion') return 'RECIBIDO'
+      if (tipo === 'pago')      return 'PAGO'
+      if (tipo === 'envio')     return 'ENVIADO'
+      if (tipo === 'concepto')  return 'CONCEPTO'
+      return tipo?.toUpperCase() || '?'
+    }
+
     return (
-      <div key={block.envio?.id || `suelto-${i}`}
-        style={{ border: `2px solid ${borderColor}`, background: bgColor, marginBottom: 8, borderRadius: 2 }}>
-        {/* Envío — arriba del bloque */}
-        {block.envio && (
-          <MovCard mov={block.envio} onDelete={onDelete} onEdit={onEdit}
-            onCalidad={onCalidad} onRecibir={onRecibir}
-            controlItems={controlMap[block.envio.id]} onEnviarFalla={onEnviarFalla}
-            entregasVinculadas={entregasMap[block.envio.id]} />
-        )}
-        {/* Recepciones/devoluciones — debajo del envío */}
-        {block.movements.length > 0 && (
-          <div style={{ borderTop: `1px dashed ${borderColor}`, paddingTop: 4, paddingBottom: 4 }}>
-            {[...block.movements].reverse().map(m => (
-              <MovCard key={m.id} mov={m} onDelete={onDelete} onEdit={onEdit}
-                onCalidad={onCalidad} onRecibir={onRecibir}
-                controlItems={controlMap[m.id]} onEnviarFalla={onEnviarFalla}
-                entregasVinculadas={entregasMap[m.id]} />
+      <div key={blockId} style={{ borderTop: '1px solid #c8c4bc', borderRight: '1px solid #c8c4bc', borderBottom: '1px solid #c8c4bc', borderLeft: `4px solid ${blkBorder}`, marginBottom: 6, borderRadius: 2, background: '#fafaf8' }}>
+
+        {/* ── Header colapsable ── */}
+        <div onClick={() => toggleBlock(blockId)}
+          style={{ padding: '8px 10px', cursor: 'pointer', userSelect: 'none', display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          <span style={{ fontSize: 11, color: '#999', marginTop: 3, flexShrink: 0 }}>{isOpen ? '▼' : '▶'}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {/* Línea principal: última fecha + estado */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: '#222' }}>{fmtF(lastDate)}</span>
+              <span style={{ fontSize: 12, color: '#666' }}>{status}</span>
+              {montoRecibido > 0 && <span style={{ fontSize: 13, fontWeight: 700, color: '#1a5a1a' }}>{fmtMoneda(montoRecibido)}</span>}
+              {lastDate !== enviDate && (
+                <span style={{ fontSize: 11, color: '#bbb' }}>enviado {fmtF(enviDate)}</span>
+              )}
+            </div>
+            {/* Productos con talles y totales */}
+            {Object.entries(byProd).map(([nm, d]) => (
+              <div key={nm} style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap', marginBottom: 2 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: '#333' }}>{nm}</span>
+                {Object.entries(d.talles).sort(([a],[b]) => cmpTalle(a,b)).map(([t, c]) => (
+                  <span key={t} style={{ fontSize: 12, color: '#555' }}>{t}×{c}</span>
+                ))}
+                <span style={{ fontSize: 11, color: '#999' }}>({d.total}u)</span>
+              </div>
             ))}
+            {block.envio?.nota && (
+              <div style={{ fontSize: 11, color: '#888', fontStyle: 'italic', marginTop: 2 }}>📝 {block.envio.nota}</div>
+            )}
+          </div>
+          {/* Acciones rápidas */}
+          <div onClick={e => e.stopPropagation()} style={{ display: 'flex', gap: 3, flexShrink: 0, alignItems: 'center' }}>
+            {!hasRec && block.envio && (
+              <button style={{ ...S.btn, fontSize: 11, padding: '2px 8px' }} onClick={() => onRecibir(block.envio)}>Recibir</button>
+            )}
+            {block.envio && onRepetir && (
+              <button style={{ ...S.btn, fontSize: 11, padding: '2px 6px' }} title="Repetir este envío" onClick={() => onRepetir(block.envio)}>🔁</button>
+            )}
+            {block.envio && <button style={{ ...S.btn, fontSize: 11, padding: '2px 6px' }} onClick={() => onEdit(block.envio)}>✏️</button>}
+            {block.envio && <button style={S.btnD} onClick={() => onDelete(block.envio.id)}>✕</button>}
+          </div>
+        </div>
+
+        {/* ── Detalle expandido ── */}
+        {isOpen && (
+          <div style={{ borderTop: '1px solid #ddd' }}>
+            {/* Movimientos recientes primero (PAGO, RECIBIDO…) */}
+            {movsDesc.map(m => {
+              const mItems  = m.taller_movimientos_items || []
+              const mTotal  = mItems.reduce((s, it) => s + (it.cantidad || 0), 0)
+              const mFallas = (controlMap[m.id] || []).filter(c => (c.cant_falla || 0) > 0 && !c.devuelto_taller)
+              const accentL = m.tipo === 'recepcion' ? '#4a8a4a' : m.tipo === 'pago' ? '#6a4a8a' : '#888'
+              const bgL     = m.tipo === 'recepcion' ? '#f4faf4' : m.tipo === 'pago' ? '#f8f4fc' : '#fafaf8'
+              return (
+                <div key={m.id} style={{ borderBottom: '1px solid #e8e8e0', borderLeft: `4px solid ${accentL}`, background: bgL }}>
+                  {/* Sub-header */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px' }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#333' }}>{labelFor(m.tipo)}</span>
+                    <span style={{ fontSize: 13, color: '#555' }}>{fmtF(m.fecha)}</span>
+                    {mTotal > 0 && <span style={{ fontSize: 11, color: '#999' }}>{mTotal}u</span>}
+                    {mFallas.length > 0 && <span style={{ fontSize: 11, color: '#c04040', fontWeight: 700 }}>⚠ fallas</span>}
+                    {m.monto != null && <span style={{ fontSize: 13, color: '#333', fontWeight: 700 }}>{fmtMoneda(m.monto)}</span>}
+                    <div style={{ marginLeft: 'auto', display: 'flex', gap: 3 }}>
+                      {m.tipo === 'recepcion' && <button style={{ ...S.btn, fontSize: 11, padding: '2px 6px' }} onClick={() => onCalidad(m)}>Calidad</button>}
+                      <button style={{ ...S.btn, fontSize: 11, padding: '2px 6px' }} onClick={() => onEdit(m)}>✏️</button>
+                      <button style={S.btnD} onClick={() => onDelete(m.id)}>✕</button>
+                    </div>
+                  </div>
+                  {/* Tabla Producto | Talle | Cant. */}
+                  {mItems.length > 0 && (
+                    <div style={{ padding: '0 10px 8px' }}>
+                      {m.nota && <div style={{ fontSize: 11, color: '#666', fontStyle: 'italic', marginBottom: 4 }}>📝 {m.nota}</div>}
+                      <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
+                        <thead>
+                          <tr>
+                            <th style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#e8e8e0', fontWeight: 700, textAlign: 'left' }}>Producto</th>
+                            <th style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#e8e8e0', fontWeight: 700, textAlign: 'center' }}>Talle</th>
+                            <th style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#e8e8e0', fontWeight: 700, textAlign: 'center' }}>Cant.</th>
+                            {mFallas.length > 0 && <th style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#f8e8e8', fontWeight: 700, textAlign: 'center' }}>⚠ Falla</th>}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[...mItems].sort((a,b) => {
+                            const nm = (a.productos?.nombre||'').localeCompare(b.productos?.nombre||'')
+                            return nm !== 0 ? nm : cmpTalle(a.talle, b.talle)
+                          }).map(it => {
+                            const falla = mFallas.find(f => f.producto_id === it.producto_id && f.talle === it.talle)
+                            return (
+                              <tr key={it.id} style={{ background: falla ? '#fff4f4' : 'transparent' }}>
+                                <td style={{ border: '1px solid #d8d8d0', padding: '3px 8px', textAlign: 'left' }}>{it.productos?.nombre || '?'}</td>
+                                <td style={{ border: '1px solid #d8d8d0', padding: '3px 8px', textAlign: 'center', fontWeight: 700 }}>{it.talle}</td>
+                                <td style={{ border: '1px solid #d8d8d0', padding: '3px 8px', textAlign: 'center' }}>{it.cantidad}</td>
+                                {mFallas.length > 0 && <td style={{ border: '1px solid #d8d8d0', padding: '3px 8px', textAlign: 'center', color: '#c04040', fontWeight: 700 }}>{falla ? falla.cant_falla : '—'}</td>}
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+            {/* Envío al final */}
+            {block.envio && (
+              <div style={{ borderLeft: '4px solid #4a6a9a', background: '#f0f4fa' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px' }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#333' }}>ENVIADO</span>
+                  <span style={{ fontSize: 13, color: '#555' }}>{fmtF(block.envio.fecha)}</span>
+                  <span style={{ fontSize: 11, color: '#999' }}>{totalEnviado}u</span>
+                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 3 }}>
+                    {!hasRec && <button style={{ ...S.btn, fontSize: 11, padding: '2px 8px' }} onClick={() => onRecibir(block.envio)}>Recibir</button>}
+                    <button style={{ ...S.btn, fontSize: 11, padding: '2px 6px' }} onClick={() => onEdit(block.envio)}>✏️</button>
+                    <button style={S.btnD} onClick={() => onDelete(block.envio.id)}>✕</button>
+                  </div>
+                </div>
+                {envioItems.length > 0 && (
+                  <div style={{ padding: '0 10px 8px' }}>
+                    {block.envio.nota && <div style={{ fontSize: 11, color: '#666', fontStyle: 'italic', marginBottom: 4 }}>📝 {block.envio.nota}</div>}
+                    <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
+                      <thead>
+                        <tr>
+                          <th style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#e8e8e0', fontWeight: 700, textAlign: 'left' }}>Producto</th>
+                          <th style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#e8e8e0', fontWeight: 700, textAlign: 'center' }}>Talle</th>
+                          <th style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#e8e8e0', fontWeight: 700, textAlign: 'center' }}>Cant.</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...envioItems].sort((a,b) => {
+                          const nm = (a.productos?.nombre||'').localeCompare(b.productos?.nombre||'')
+                          return nm !== 0 ? nm : cmpTalle(a.talle, b.talle)
+                        }).map(it => (
+                          <tr key={it.id}>
+                            <td style={{ border: '1px solid #d8d8d0', padding: '3px 8px', textAlign: 'left' }}>{it.productos?.nombre || '?'}</td>
+                            <td style={{ border: '1px solid #d8d8d0', padding: '3px 8px', textAlign: 'center', fontWeight: 700 }}>{it.talle}</td>
+                            <td style={{ border: '1px solid #d8d8d0', padding: '3px 8px', textAlign: 'center' }}>{it.cantidad}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -2464,22 +2666,34 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
         onClick={() => setOpen(o => !o)}>
         <span style={{ fontWeight: 700, fontSize: 12 }}>{open ? '▼' : '▶'} 📋 Historial de movimientos</span>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          {totalPrendasEnTaller > 0 && <span style={{ fontSize: 10, color: '#ffd080' }}>📤 {totalPrendasEnTaller} en taller</span>}
           {tieneSaldo && <span style={{ fontSize: 11, fontWeight: 700, color: saldo > 0 ? '#ffb0a0' : saldo < 0 ? '#a0ffb0' : '#ccc' }}>
             {saldo > 0 ? `Adeudado: ${fmtMoneda(saldo)}` : saldo < 0 ? `A tu favor: ${fmtMoneda(-saldo)}` : '✓ Al día'}
           </span>}
-          <span style={{ fontSize: 10, color: '#ccc' }}>{movs.length} movimientos</span>
+          <span style={{ fontSize: 10, color: '#ccc' }}>{movs.length} mov</span>
         </div>
       </div>
 
       {open && (
         <div style={{ padding: '6px 8px' }}>
+          {/* Filtro por estado */}
+          <div style={{ display: 'flex', gap: 4, marginBottom: 6, flexWrap: 'wrap' }}>
+            {['', 'en taller', 'completo', 'incompleto', 'con fallas'].map(est => (
+              <button key={est} onClick={() => setFiltroEstado(est)}
+                style={{ fontFamily: F, fontSize: 10, padding: '2px 8px', cursor: 'pointer', border: '1px solid #b0b8c8',
+                  background: filtroEstado === est ? '#2a3a4a' : '#e8eaf0',
+                  color: filtroEstado === est ? '#fff' : '#333', borderRadius: 2 }}>
+                {est || 'Todos'}
+              </button>
+            ))}
+          </div>
           {/* Lotes pendientes de recepción */}
           {pendientes.length > 0 && (
             <div style={{ marginBottom: 8 }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: '#8a5a00', background: '#fff3cc', border: '1px solid #e0c060', padding: '3px 8px', marginBottom: 6 }}>
                 📤 PENDIENTE DE RECEPCIÓN ({pendientes.length})
               </div>
-              {pendientes.map((b, i) => renderBlock(b, i, true))}
+              {pendientes.map((b, i) => renderBlock(b, i))}
             </div>
           )}
 
@@ -2491,7 +2705,7 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
                   📥 RECIBIDOS
                 </div>
               )}
-              {cerrados.map((b, i) => renderBlock(b, i, false))}
+              {cerrados.map((b, i) => renderBlock(b, i))}
             </div>
           )}
 
@@ -2542,6 +2756,7 @@ export default function Talleres({ onMenuClick }) {
   const [filtroTaller,  setFiltroTaller]  = useState('')
   const [filtroProd,    setFiltroProd]    = useState('')
   const [recibiendoStock,   setRecibiendoStock]   = useState(null)
+  const [repitiendo,        setRepitiendo]        = useState(null) // { taller, itemsInicial }
   const [selectedTaller,    setSelectedTaller]    = useState(null) // cid seleccionado en el master
 
   useEffect(() => { fetchAll() }, [])
@@ -2640,6 +2855,23 @@ export default function Talleres({ onMenuClick }) {
   const selCid = selectedTaller || listaSidebar[0]?.cid || null
   const selGrupo = grupos[selCid] || (selCid && todosTalleres[selCid] ? { ...todosTalleres[selCid], movs: [] } : null)
 
+  function handleRepetir(envio) {
+    const byProd = {}
+    for (const it of (envio.taller_movimientos_items || [])) {
+      const pid = it.producto_id
+      if (!byProd[pid]) {
+        const tabla  = it.productos?.tabla || 'adulto'
+        const talles = TABLAS_TALLES[tabla] || TALLES_ADULTO
+        byProd[pid] = { producto_id: pid, prodQ: it.productos?.nombre || '', prodRes: [], tabla, talles, conNino: false, cantidades: {}, observacion: '', precio_confeccion: it.productos?.costo_confeccion ?? null }
+      }
+      byProd[pid].cantidades[it.talle] = String(it.cantidad)
+      if (TALLES_NINO.includes(it.talle)) { byProd[pid].conNino = true; byProd[pid].talles = [...TALLES_ADULTO, ...TALLES_NINO] }
+    }
+    const itemsInicial = Object.values(byProd).length ? Object.values(byProd) : [newItem()]
+    const taller = envio.contactos ? { id: envio.contacto_id, nombre: envio.contactos.nombre } : null
+    setRepitiendo({ taller, itemsInicial })
+  }
+
   return (
     <div style={{ ...S.wrap, display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
       <div style={S.tbar}>
@@ -2719,13 +2951,16 @@ export default function Talleres({ onMenuClick }) {
             <TallerBlock key={selGrupo.nombre} nombre={selGrupo.nombre} movs={selGrupo.movs}
               controlMap={controlMap} entregasMap={entregasMap}
               onDelete={deleteMov} onEdit={setEditando}
-              onCalidad={setCalidad} onRecibir={setRecibiendo} onEnviarFalla={fetchAll} />
+              onCalidad={setCalidad} onRecibir={setRecibiendo} onEnviarFalla={fetchAll}
+              onRepetir={handleRepetir} />
           )}
         </div>
       </div>
 
       {modal      && <ModalNuevo   onClose={() => setModal(false)}       onSave={() => { setModal(false);       fetchAll() }}
                       tallerInicial={selCid && todosTalleres[selCid] ? { id: selCid, nombre: todosTalleres[selCid].nombre } : null} />}
+      {repitiendo && <ModalNuevo   onClose={() => setRepitiendo(null)}  onSave={() => { setRepitiendo(null);  fetchAll() }}
+                      tipoInicial="envio" tallerInicial={repitiendo.taller} itemsInicial={repitiendo.itemsInicial} />}
       {editando   && <ModalEditar  mov={editando}   onClose={() => setEditando(null)}   onSave={() => { setEditando(null);   fetchAll() }} />}
       {calidad    && <ModalCalidad mov={calidad} entregasVinculadas={entregasMap[calidad.id] || []} controlItems={controlMap[calidad.id] || []} onClose={() => setCalidad(null)} onSave={() => { setCalidad(null); fetchAll() }} />}
       {recibiendo && <ModalRecibir envio={recibiendo} onClose={() => setRecibiendo(null)} onSave={() => { setRecibiendo(null); fetchAll() }} />}
