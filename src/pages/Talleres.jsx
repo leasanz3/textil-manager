@@ -2507,91 +2507,120 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
   // ── Detalle de lote ─────────────────────────────────────────────────────────
   if (selectedLote) {
     const loteRows = rows.filter(r => r.loteId === selectedLote)
-    // Entregas vinculadas a recepciones de este lote
     const recIds = loteRows.filter(r => r.mov.tipo === 'recepcion').map(r => r.mov.id)
     const entregasLote = recIds.flatMap(rid => entregasMap[rid] || [])
-    const loteName = loteRows.find(r => r.prodNombre)?.prodNombre || selectedLote
     const loteShort = selectedLote.slice(-6)
     const loteBg = loteColorMap[selectedLote] || '#e8e8e0'
 
+    // Agrupar por producto para mostrar header por producto
+    const loteByProd = {}
+    for (const r of loteRows) {
+      const k = r.pid ?? 'pago'
+      if (!loteByProd[k]) loteByProd[k] = { nombre: r.prodNombre, rows: [] }
+      loteByProd[k].rows.push(r)
+    }
+    const loteProdGroups = Object.values(loteByProd)
+
+    // Resumen general del lote
+    const enviado = loteRows.filter(r => r.mov.tipo === 'envio').reduce((s,r) => s + (r.total||0), 0)
+    const recibido = loteRows.filter(r => r.mov.tipo === 'recepcion').reduce((s,r) => s + (r.total||0), 0)
+    const enManosFinal = loteRows.length > 0 ? Math.max(0, loteRows[loteRows.length-1].enManos ?? 0) : 0
+    const ultimoMovLote = loteRows.length > 0 ? loteRows[loteRows.length-1].fecha : null
+    const hayFallas = loteRows.some(r => r.fallas.length > 0)
+
     return (
       <div style={{ background: '#f8f8f4', marginBottom: 12, border: '1px solid #c8c8c0' }}>
-        {/* Header detalle */}
-        <div style={{ background: 'linear-gradient(to bottom,#3a4a5a,#1e2e3e)', color: '#fff', padding: '7px 10px', display: 'flex', alignItems: 'center', gap: 10 }}>
+        {/* ── Barra superior ── */}
+        <div style={{ background: 'linear-gradient(to bottom,#3a4a5a,#1e2e3e)', color: '#fff', padding: '7px 10px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <button onClick={() => setSelectedLote(null)}
             style={{ fontFamily: F, fontSize: 11, padding: '2px 8px', cursor: 'pointer', border: '1px solid #7a9aba', background: 'rgba(255,255,255,0.1)', color: '#fff', borderRadius: 2 }}>
             ← Volver
           </button>
-          <span style={{ fontWeight: 700, fontSize: 13 }}>Lote</span>
           <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 700, background: loteBg, color: '#222', padding: '2px 7px', borderRadius: 3 }}>{loteShort}</span>
-          <span style={{ fontSize: 12, color: '#ccc' }}>{loteName}</span>
+          {ultimoMovLote && <span style={{ fontSize: 11, color: '#bbb' }}>último mov. {fmtF(ultimoMovLote)}</span>}
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            {enviado > 0 && <span style={{ fontSize: 11, color: '#ccc' }}>Enviado <strong style={{ color: '#fff' }}>{enviado}u</strong></span>}
+            {recibido > 0 && <span style={{ fontSize: 11, color: '#ccc' }}>Recibido <strong style={{ color: '#fff' }}>{recibido}u</strong></span>}
+            {hayFallas && <span style={{ fontSize: 11, color: '#ffb0a0', fontWeight: 700 }}>⚠ con fallas</span>}
+            {entregasLote.length > 0 && <span style={{ fontSize: 11, color: '#90f090', fontWeight: 700 }}>✓ entregado al cliente</span>}
+            <span style={{ fontSize: 12, fontWeight: 700, color: enManosFinal > 0 ? '#ffd080' : '#90f090' }}>
+              {enManosFinal > 0 ? `📤 ${enManosFinal}u en taller` : '✓ todo recibido'}
+            </span>
+          </div>
         </div>
 
-        {/* Timeline del lote — uno por movimiento, expandido por defecto */}
-        <div>
-          {loteRows.map(row => {
-            const cfg = row.cfg
-            const isOpen = openRows[row.key] !== false // default abierto
-            return (
-              <div key={row.key} style={{ borderLeft: `5px solid ${cfg.border}`, background: cfg.bg, borderBottom: '2px solid #d8d8d0' }}>
-                {/* Header del movimiento */}
-                <div onClick={() => row.items.length > 0 && setOpenRows(o => ({ ...o, [row.key]: !isOpen }))}
-                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', cursor: row.items.length > 0 ? 'pointer' : 'default', userSelect: 'none' }}>
-                  <span style={{ fontWeight: 700, fontSize: 13, color: cfg.border }}>{cfg.label}</span>
-                  <span style={{ fontSize: 12, color: '#333' }}>{fmtF(row.fecha)}</span>
-                  {row.total != null && <span style={{ fontSize: 12, fontWeight: 700, color: '#111' }}>{row.total}u</span>}
-                  {row.monto != null && <span style={{ fontSize: 13, fontWeight: 700, color: '#1a4a1a' }}>{fmtMoneda(row.monto)}</span>}
-                  {row.fallas.length > 0 && <span style={{ fontSize: 11, color: '#b03030', fontWeight: 700 }}>⚠ {row.fallas.reduce((s,f) => s + (f.cant_falla||0), 0)} fallas</span>}
-                  {row.prodNombre && <span style={{ fontSize: 12, color: '#555', marginLeft: 4 }}>{row.prodNombre}</span>}
-                  {row.nota && <span style={{ fontSize: 11, color: '#666', fontStyle: 'italic' }}>📝 {row.nota}</span>}
-                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 3 }} onClick={e => e.stopPropagation()}>
-                    <AccionesFila row={row} />
+        {/* ── Grupos por producto ── */}
+        {loteProdGroups.map((g, gi) => (
+          <div key={gi}>
+            {/* Header de producto */}
+            {g.nombre && (
+              <div style={{ padding: '8px 12px', background: '#eeeee8', borderBottom: '1px solid #d8d8d0', borderTop: gi > 0 ? '2px solid #c0c0b8' : undefined }}>
+                <span style={{ fontWeight: 700, fontSize: 14, color: '#111' }}>{g.nombre}</span>
+              </div>
+            )}
+            {/* Movimientos del producto */}
+            {g.rows.map(row => {
+              const cfg = row.cfg
+              const isOpen = openRows[row.key] !== false
+              const esFalla = row.mov.tipo === 'devolucion'
+              const notaRelevante = row.nota && !esFalla ? row.nota : null
+              return (
+                <div key={row.key} style={{ borderLeft: `5px solid ${cfg.border}`, background: cfg.bg, borderBottom: '1px solid #d8d8d0' }}>
+                  <div onClick={() => row.items.length > 0 && setOpenRows(o => ({ ...o, [row.key]: !isOpen }))}
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', cursor: row.items.length > 0 ? 'pointer' : 'default', userSelect: 'none' }}>
+                    <span style={{ fontWeight: 700, fontSize: 13, color: cfg.border, minWidth: 130 }}>{cfg.label}</span>
+                    <span style={{ fontSize: 12, color: '#444' }}>{fmtF(row.fecha)}</span>
+                    {row.total != null && <span style={{ fontSize: 13, fontWeight: 700, color: '#111' }}>{row.total}u</span>}
+                    {row.monto != null && <span style={{ fontSize: 13, fontWeight: 700, color: '#1a4a1a' }}>{fmtMoneda(row.monto)}</span>}
+                    {row.fallas.length > 0 && <span style={{ fontSize: 11, color: '#b03030', fontWeight: 700 }}>⚠ {row.fallas.reduce((s,f) => s+(f.cant_falla||0),0)} fallas</span>}
+                    {notaRelevante && <span style={{ fontSize: 11, color: '#666', fontStyle: 'italic' }}>📝 {notaRelevante}</span>}
+                    <div style={{ marginLeft: 'auto', display: 'flex', gap: 3 }} onClick={e => e.stopPropagation()}>
+                      <AccionesFila row={row} />
+                    </div>
                   </div>
+                  {isOpen && row.items.length > 0 && (
+                    <div style={{ padding: '0 12px 10px 20px' }}>
+                      <TalleDetalle row={row} />
+                    </div>
+                  )}
                 </div>
-                {/* Detalle de talles (abierto por default) */}
-                {isOpen && row.items.length > 0 && (
-                  <div style={{ padding: '0 16px 10px 20px' }}>
-                    <TalleDetalle row={row} />
-                  </div>
-                )}
-              </div>
-            )
-          })}
+              )
+            })}
+          </div>
+        ))}
 
-          {/* Entregas al cliente vinculadas a este lote */}
-          {entregasLote.length > 0 && (
-            <div style={{ borderLeft: '5px solid #1a6a1a', background: '#e8f4e8', borderBottom: '2px solid #d8d8d0' }}>
-              <div style={{ padding: '8px 12px' }}>
-                <span style={{ fontWeight: 700, fontSize: 13, color: '#1a6a1a' }}>ENTREGADO</span>
-                <span style={{ fontSize: 12, color: '#333', marginLeft: 10 }}>al cliente</span>
-              </div>
-              {entregasLote.map(e => (
-                <div key={e.id} style={{ padding: '4px 16px 8px 20px' }}>
-                  <div style={{ fontSize: 12, color: '#222', marginBottom: 4 }}>
-                    <strong>{e.contactos?.nombre || '?'}</strong> — {fmtF(e.fecha)}
-                  </div>
-                  {(e.taller_movimientos_items || []).length > 0 && (
+        {/* ── Entregado al cliente ── */}
+        {entregasLote.length > 0 && (
+          <div style={{ borderLeft: '5px solid #1a6a1a', background: '#eaf4ea', borderTop: '2px solid #c0d8c0' }}>
+            {entregasLote.map(e => (
+              <div key={e.id}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px' }}>
+                  <span style={{ fontWeight: 700, fontSize: 13, color: '#1a6a1a', minWidth: 130 }}>ENTREGADO</span>
+                  <span style={{ fontSize: 12, color: '#444' }}>{fmtF(e.fecha)}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#111' }}>{e.contactos?.nombre || '?'}</span>
+                </div>
+                {(e.taller_movimientos_items || []).length > 0 && (
+                  <div style={{ padding: '0 12px 10px 20px' }}>
                     <table style={{ borderCollapse: 'collapse', fontSize: 13 }}>
                       <tbody>
                         {[...e.taller_movimientos_items].sort((a,b) => cmpTalle(a.talle,b.talle)).map(it => (
                           <tr key={it.id}>
-                            <td style={{ border: '1px solid #c8d8c8', padding: '2px 8px', fontWeight: 700 }}>{it.talle}</td>
-                            <td style={{ border: '1px solid #c8d8c8', padding: '2px 8px' }}>{it.cantidad}u</td>
-                            <td style={{ border: '1px solid #c8d8c8', padding: '2px 8px', color: '#444' }}>{it.productos?.nombre}</td>
+                            <td style={{ border: '1px solid #c8d8c8', padding: '2px 10px', fontWeight: 700 }}>{it.talle}</td>
+                            <td style={{ border: '1px solid #c8d8c8', padding: '2px 10px' }}>{it.cantidad}u</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
 
-          {loteRows.length === 0 && (
-            <div style={{ padding: 16, color: '#888', fontSize: 13 }}>Sin movimientos en este lote.</div>
-          )}
-        </div>
+        {loteRows.length === 0 && (
+          <div style={{ padding: 16, color: '#888', fontSize: 13 }}>Sin movimientos en este lote.</div>
+        )}
       </div>
     )
   }
