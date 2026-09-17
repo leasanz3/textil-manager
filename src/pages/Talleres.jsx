@@ -369,14 +369,19 @@ function ModalNuevo({ onClose, onSave, tipoInicial, tallerInicial, itemsInicial 
           return sum + qty * (parseFloat(it.precio_confeccion) || 0)
         }, 0) || null)
       : (monto && parseFloat(monto) > 0 ? parseFloat(monto) : null)
-    const loteId = tipo === 'envio'
-      ? 'LOT-' + fecha.replace(/-/g, '') + '-' + Math.random().toString(36).slice(2, 8).toUpperCase()
-      : null
+    // Un lote por producto (no por movimiento)
+    const lotesPorProd = {}
+    if (tipo === 'envio') {
+      for (const r of rows) {
+        if (!lotesPorProd[r.producto_id])
+          lotesPorProd[r.producto_id] = 'LOT-' + fecha.replace(/-/g, '') + '-' + Math.random().toString(36).slice(2, 8).toUpperCase()
+      }
+    }
     const { data: mov, error } = await supabase.from('taller_movimientos')
-      .insert({ tipo, fecha, contacto_id: tallerId, nota: nota.trim() || null, monto: montoVal, lote_id: loteId, user_id: user?.id })
+      .insert({ tipo, fecha, contacto_id: tallerId, nota: nota.trim() || null, monto: montoVal, user_id: user?.id })
       .select().single()
     if (error) { alert('Error: ' + error.message); setSaving(false); return }
-    for (const r of rows) await supabase.from('taller_movimientos_items').insert({ movimiento_id: mov.id, ...r })
+    for (const r of rows) await supabase.from('taller_movimientos_items').insert({ movimiento_id: mov.id, ...r, lote_id: lotesPorProd[r.producto_id] || null })
     setSaving(false); onSave()
   }
 
@@ -469,8 +474,12 @@ function ModalEditar({ mov, onClose, onSave }) {
         }, 0) || null)
       : (monto && parseFloat(monto) > 0 ? parseFloat(monto) : null)
     await supabase.from('taller_movimientos').update({ tipo, fecha, contacto_id: tallerId, nota: nota.trim() || null, monto: montoVal }).eq('id', mov.id)
+    // Preservar lote_id por producto antes de borrar
+    const { data: existingItems } = await supabase.from('taller_movimientos_items').select('producto_id, lote_id').eq('movimiento_id', mov.id)
+    const lotesPorProd = {}
+    for (const it of (existingItems || [])) if (it.lote_id) lotesPorProd[it.producto_id] = it.lote_id
     await supabase.from('taller_movimientos_items').delete().eq('movimiento_id', mov.id)
-    for (const r of rows) await supabase.from('taller_movimientos_items').insert({ movimiento_id: mov.id, ...r })
+    for (const r of rows) await supabase.from('taller_movimientos_items').insert({ movimiento_id: mov.id, ...r, lote_id: lotesPorProd[r.producto_id] || null })
     setSaving(false); onSave()
   }
 
@@ -638,6 +647,7 @@ function ModalRecibir({ envio, onClose, onSave }) {
       talle:       it.talle,
       enviado:     it.cantidad,
       cantidad:    String(it.cantidad),
+      lote_id:     it.lote_id || null,
     }))
   )
 
@@ -651,13 +661,14 @@ function ModalRecibir({ envio, onClose, onSave }) {
     setSaving(true)
     const { data: { user } } = await supabase.auth.getUser()
     const { data: mov, error } = await supabase.from('taller_movimientos')
-      .insert({ tipo: 'recepcion', fecha, contacto_id: envio.contactos?.id || null, nota: nota.trim() || null, lote_id: envio.lote_id || null, user_id: user?.id })
+      .insert({ tipo: 'recepcion', fecha, contacto_id: envio.contactos?.id || null, nota: nota.trim() || null, user_id: user?.id })
       .select().single()
     if (error) { alert('Error: ' + error.message); setSaving(false); return }
     for (const r of rows) {
       await supabase.from('taller_movimientos_items').insert({
         movimiento_id: mov.id, producto_id: r.producto_id,
         talle: r.talle, cantidad: parseInt(r.cantidad) || 0,
+        lote_id: r.lote_id || null,
       })
     }
     setSaving(false); onSave()
@@ -2383,7 +2394,7 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
       const byProd = {}
       for (const it of mItems) {
         const pid = it.producto_id
-        if (!byProd[pid]) byProd[pid] = { nombre: it.productos?.nombre || '?', codigo: it.productos?.codigo || null, items: [], total: 0 }
+        if (!byProd[pid]) byProd[pid] = { nombre: it.productos?.nombre || '?', codigo: it.productos?.codigo || null, items: [], total: 0, loteId: it.lote_id || null }
         byProd[pid].items.push(it)
         byProd[pid].total += it.cantidad || 0
       }
@@ -2398,7 +2409,7 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
           fecha: m.fecha, cfg: effectiveCfg,
           prodNombre: pd.nombre, prodCodigo: pd.codigo, items: pd.items, total: pd.total,
           enManos: Math.max(0, balance[pid] || 0),
-          fallas: prodFallas, monto: null, nota: m.nota, loteId: m.lote_id || null,
+          fallas: prodFallas, monto: null, nota: m.nota, loteId: pd.loteId,
         })
       }
     } else {
@@ -2519,12 +2530,14 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
       if (!loteByProd[k]) loteByProd[k] = { nombre: r.prodNombre, rows: [] }
       loteByProd[k].rows.push(r)
     }
+    // Más reciente primero dentro de cada grupo
+    for (const g of Object.values(loteByProd)) g.rows.reverse()
     const loteProdGroups = Object.values(loteByProd)
 
     // Resumen general del lote
     const enviado = loteRows.filter(r => r.mov.tipo === 'envio').reduce((s,r) => s + (r.total||0), 0)
     const recibido = loteRows.filter(r => r.mov.tipo === 'recepcion').reduce((s,r) => s + (r.total||0), 0)
-    const enManosFinal = loteRows.length > 0 ? Math.max(0, loteRows[loteRows.length-1].enManos ?? 0) : 0
+    const enManosFinal = Math.max(0, enviado - recibido)
     const ultimoMovLote = loteRows.length > 0 ? loteRows[loteRows.length-1].fecha : null
     const hayFallas = loteRows.some(r => r.fallas.length > 0)
 
@@ -2842,7 +2855,7 @@ export default function Talleres({ onMenuClick }) {
       supabase.from('taller_movimientos')
         .select(`id, tipo, fecha, nota, monto, lote_id, created_at,
           contactos(id, nombre),
-          taller_movimientos_items(id, producto_id, talle, cantidad, observacion,
+          taller_movimientos_items(id, producto_id, talle, cantidad, observacion, lote_id,
             productos(id, nombre, codigo, tabla, tela1_id, telas:tela1_id(tipo, color))))`)
         .order('fecha', { ascending: false })
         .order('created_at', { ascending: false }),
