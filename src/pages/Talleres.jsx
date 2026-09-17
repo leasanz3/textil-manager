@@ -369,8 +369,11 @@ function ModalNuevo({ onClose, onSave, tipoInicial, tallerInicial, itemsInicial 
           return sum + qty * (parseFloat(it.precio_confeccion) || 0)
         }, 0) || null)
       : (monto && parseFloat(monto) > 0 ? parseFloat(monto) : null)
+    const loteId = tipo === 'envio'
+      ? 'LOT-' + fecha.replace(/-/g, '') + '-' + Math.random().toString(36).slice(2, 8).toUpperCase()
+      : null
     const { data: mov, error } = await supabase.from('taller_movimientos')
-      .insert({ tipo, fecha, contacto_id: tallerId, nota: nota.trim() || null, monto: montoVal, user_id: user?.id })
+      .insert({ tipo, fecha, contacto_id: tallerId, nota: nota.trim() || null, monto: montoVal, lote_id: loteId, user_id: user?.id })
       .select().single()
     if (error) { alert('Error: ' + error.message); setSaving(false); return }
     for (const r of rows) await supabase.from('taller_movimientos_items').insert({ movimiento_id: mov.id, ...r })
@@ -648,7 +651,7 @@ function ModalRecibir({ envio, onClose, onSave }) {
     setSaving(true)
     const { data: { user } } = await supabase.auth.getUser()
     const { data: mov, error } = await supabase.from('taller_movimientos')
-      .insert({ tipo: 'recepcion', fecha, contacto_id: envio.contactos?.id || null, nota: nota.trim() || null, user_id: user?.id })
+      .insert({ tipo: 'recepcion', fecha, contacto_id: envio.contactos?.id || null, nota: nota.trim() || null, lote_id: envio.lote_id || null, user_id: user?.id })
       .select().single()
     if (error) { alert('Error: ' + error.message); setSaving(false); return }
     for (const r of rows) {
@@ -2394,7 +2397,7 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
           fecha: m.fecha, cfg: effectiveCfg,
           prodNombre: pd.nombre, prodCodigo: pd.codigo, items: pd.items, total: pd.total,
           enManos: Math.max(0, balance[pid] || 0),
-          fallas: prodFallas, monto: null, nota: m.nota,
+          fallas: prodFallas, monto: null, nota: m.nota, loteId: m.lote_id || null,
         })
       }
     } else {
@@ -2402,7 +2405,7 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
         key: m.id, movId: m.id, mov: m, pid: null,
         fecha: m.fecha, cfg,
         prodNombre: null, items: [], total: null,
-        enManos: null, fallas: [], monto: m.monto, nota: m.nota,
+        enManos: null, fallas: [], monto: m.monto, nota: m.nota, loteId: m.lote_id || null,
       })
     }
   }
@@ -2476,29 +2479,111 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
 
   const thBase = { padding: '5px 8px', fontWeight: 700, borderBottom: '2px solid #a8a8a0', color: '#111', fontSize: 12, background: '#dcdcd4', userSelect: 'none' }
 
+  // Última fecha de movimiento para mostrar en header
+  const ultimaFecha = rows.length > 0 ? rows[rows.length - 1].fecha : null
+
+  // Color de badge por lote (paleta pastel para distinguir lotes)
+  const LOTE_COLORS = ['#d0e8ff','#d0f0d8','#fff0c8','#f0d8ff','#ffd8d0','#d8f0f0','#f8e0b8','#e0d8f8']
+  const loteColorMap = {}
+  let loteIdx = 0
+  for (const r of rows) {
+    if (r.loteId && !loteColorMap[r.loteId]) loteColorMap[r.loteId] = LOTE_COLORS[loteIdx++ % LOTE_COLORS.length]
+  }
+  function LoteBadge({ loteId }) {
+    if (!loteId) return null
+    const bg = loteColorMap[loteId] || '#e8e8e0'
+    const short = loteId.slice(-6) // mostrar solo últimos 6 chars
+    return <span style={{ marginLeft: 5, fontSize: 10, fontFamily: 'monospace', fontWeight: 700, background: bg, color: '#333', padding: '1px 5px', borderRadius: 3, border: '1px solid #bbb', whiteSpace: 'nowrap' }} title={loteId}>{short}</span>
+  }
+
   return (
     <div style={{ background: '#f8f8f4', marginBottom: 12, border: '1px solid #c8c8c0' }}>
       {/* Header */}
       <div style={{ background: 'linear-gradient(to bottom,#3a4a5a,#1e2e3e)', color: '#fff', padding: '7px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontWeight: 700, fontSize: 13 }}>📋 Movimientos</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontWeight: 700, fontSize: 13 }}>📋 Movimientos</span>
+          {ultimaFecha && <span style={{ fontSize: 11, color: '#bbb' }}>último: {fmtF(ultimaFecha)}</span>}
+        </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           {totalEnManos > 0 && <span style={{ fontSize: 11, color: '#ffd080', fontWeight: 700 }}>📤 {totalEnManos} en taller</span>}
           {tieneSaldo && <span style={{ fontSize: 12, fontWeight: 700, color: saldo > 0 ? '#ffb0a0' : '#90f090' }}>
             {saldo > 0 ? `Adeudado: ${fmtMoneda(saldo)}` : `A tu favor: ${fmtMoneda(-saldo)}`}
           </span>}
+          <button onClick={() => setSortMode(m => m === 'fecha' ? 'producto' : 'fecha')}
+            style={{ fontFamily: F, fontSize: 10, padding: '2px 7px', cursor: 'pointer', border: '1px solid #7a9aba', background: sortMode === 'producto' ? '#4a7aaa' : 'transparent', color: '#fff', borderRadius: 2 }}>
+            {sortMode === 'fecha' ? '📦 Por producto' : '📅 Por fecha'}
+          </button>
         </div>
       </div>
+
+      {/* ── Vista CRONOLÓGICA (default) ── */}
+      {sortMode === 'fecha' && (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
+            <thead>
+              <tr>
+                <th style={{ ...thBase, textAlign: 'left' }}>Fecha</th>
+                <th style={{ ...thBase, textAlign: 'left' }}>Movimiento</th>
+                <th style={{ ...thBase, textAlign: 'left' }}>Producto</th>
+                <th style={{ ...thBase, textAlign: 'center' }}>Cant.</th>
+                <th style={{ ...thBase, textAlign: 'center' }}>En manos</th>
+                <th style={{ ...thBase }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...rows].reverse().map(row => {
+                const isOpen = !!openRows[row.key]
+                const cfg = row.cfg
+                return (
+                  <React.Fragment key={row.key}>
+                    <tr onClick={() => row.items.length > 0 && toggleRow(row.key)}
+                      style={{ borderLeft: `4px solid ${cfg.border}`, background: isOpen ? cfg.bg : 'transparent',
+                        cursor: row.items.length > 0 ? 'pointer' : 'default', borderBottom: '1px solid #e0e0d8' }}>
+                      <td style={{ padding: '5px 8px', whiteSpace: 'nowrap', color: '#222', fontSize: 12 }}>{fmtF(row.fecha)}</td>
+                      <td style={{ padding: '5px 8px', whiteSpace: 'nowrap' }}>
+                        <span style={{ fontWeight: 700, fontSize: 12, color: cfg.border }}>{cfg.label}</span>
+                        {row.fallas.length > 0 && <span style={{ marginLeft: 4, fontSize: 11, color: '#b03030' }}>⚠</span>}
+                        {row.monto != null && <span style={{ marginLeft: 6, fontWeight: 700, color: '#1a4a1a', fontSize: 12 }}>{fmtMoneda(row.monto)}</span>}
+                        <LoteBadge loteId={row.loteId} />
+                      </td>
+                      <td style={{ padding: '5px 8px', color: '#111' }}>
+                        {row.prodNombre
+                          ? <span>{row.prodNombre}{row.prodCodigo && <span style={{ marginLeft: 6, fontSize: 11, color: '#444', fontFamily: 'monospace', background: '#d8d8d0', padding: '1px 4px', borderRadius: 2 }}>{row.prodCodigo}</span>}</span>
+                          : <span style={{ color: '#555', fontSize: 11 }}>{row.nota || '—'}</span>}
+                      </td>
+                      <td style={{ padding: '5px 8px', textAlign: 'center', fontWeight: 700, color: '#111' }}>
+                        {row.total != null ? `${row.total}u` : '—'}
+                      </td>
+                      <td style={{ padding: '5px 8px', textAlign: 'center', fontWeight: 700, color: row.enManos > 0 ? '#7a4a00' : '#1e6a1e' }}>
+                        {row.enManos != null ? `${row.enManos}u` : '—'}
+                      </td>
+                      <td style={{ padding: '5px 8px', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+                        <AccionesFila row={row} />
+                      </td>
+                    </tr>
+                    {isOpen && row.items.length > 0 && (
+                      <tr style={{ background: cfg.bg }}>
+                        <td colSpan={6} style={{ borderBottom: '1px solid #ddd' }}>
+                          <TalleDetalle row={row} />
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* ── Vista POR PRODUCTO ── */}
       {sortMode === 'producto' && (
         <div>
-          {/* encabezado de columnas */}
           <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
             <thead>
               <tr>
-                <th style={{ ...thBase, textAlign: 'left', width: '30%' }}>Producto / Estado</th>
-                <th style={{ ...thBase, textAlign: 'left', cursor: 'pointer', color: '#4a6aaa' }}
-                  onClick={() => setSortMode('fecha')}>Fecha ↕</th>
+                <th style={{ ...thBase, textAlign: 'left', width: '35%' }}>Producto</th>
+                <th style={{ ...thBase, textAlign: 'left' }}>Último mov.</th>
                 <th style={{ ...thBase, textAlign: 'left' }}>Movimiento</th>
                 <th style={{ ...thBase, textAlign: 'center' }}>Cant.</th>
                 <th style={{ ...thBase, textAlign: 'center' }}>En manos</th>
@@ -2506,21 +2591,20 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
               </tr>
             </thead>
           </table>
-          {/* grupos por producto */}
           {prodGroups.map(g => {
             const lastRow = g.rows[g.rows.length - 1]
             const enManosActual = lastRow?.enManos ?? 0
-            const isGroupOpen = openRows[`g-${g.pid}`] !== false // default open
+            const isGroupOpen = openRows[`g-${g.pid}`] !== false
             return (
               <div key={g.pid} style={{ borderBottom: '2px solid #c8c8c0' }}>
-                {/* header del grupo */}
                 <div onClick={() => setOpenRows(o => ({ ...o, [`g-${g.pid}`]: !isGroupOpen }))}
                   style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', background: '#eeeee8', cursor: 'pointer', userSelect: 'none' }}>
-                  <span style={{ fontSize: 11, color: '#666' }}>{isGroupOpen ? '▼' : '▶'}</span>
+                  <span style={{ fontSize: 11, color: '#555' }}>{isGroupOpen ? '▼' : '▶'}</span>
                   <div style={{ flex: 1, display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                    <span style={{ fontWeight: 700, fontSize: 14, color: '#111' }}>{g.nombre}</span>
-                    {lastRow?.prodCodigo && <span style={{ fontSize: 11, color: '#555', fontFamily: 'monospace', background: '#d8d8d0', padding: '1px 5px', borderRadius: 2 }}>{lastRow.prodCodigo}</span>}
+                    <span style={{ fontWeight: 700, fontSize: 13, color: '#111' }}>{g.nombre}</span>
+                    {lastRow?.prodCodigo && <span style={{ fontSize: 11, color: '#444', fontFamily: 'monospace', background: '#d0d0c8', padding: '1px 5px', borderRadius: 2 }}>{lastRow.prodCodigo}</span>}
                   </div>
+                  <span style={{ fontSize: 11, color: '#666', marginRight: 8 }}>{lastRow ? fmtF(lastRow.fecha) : ''}</span>
                   <span style={{ fontSize: 12, fontWeight: 700, color: enManosActual > 0 ? '#7a4a00' : '#1e6a1e' }}>
                     {enManosActual > 0 ? `${enManosActual}u en taller` : '✓ recibido todo'}
                   </span>
@@ -2536,11 +2620,12 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
                             <tr onClick={() => row.items.length > 0 && toggleRow(row.key)}
                               style={{ borderLeft: `4px solid ${cfg.border}`, background: isOpen ? cfg.bg : 'transparent',
                                 cursor: row.items.length > 0 ? 'pointer' : 'default', borderBottom: '1px solid #e0e0d8' }}>
-                              <td style={{ padding: '5px 8px', width: '30%', color: '#333' }}></td>
+                              <td style={{ padding: '5px 8px', width: '35%' }}></td>
                               <td style={{ padding: '5px 8px', whiteSpace: 'nowrap', color: '#222', fontSize: 12 }}>{fmtF(row.fecha)}</td>
                               <td style={{ padding: '5px 8px', whiteSpace: 'nowrap' }}>
                                 <span style={{ fontWeight: 700, fontSize: 12, color: cfg.border }}>{cfg.label}</span>
                                 {row.fallas.length > 0 && <span style={{ marginLeft: 4, fontSize: 11, color: '#b03030' }}>⚠</span>}
+                                <LoteBadge loteId={row.loteId} />
                               </td>
                               <td style={{ padding: '5px 8px', textAlign: 'center', fontWeight: 700, color: '#111' }}>
                                 {row.total != null ? `${row.total}u` : '—'}
@@ -2568,7 +2653,6 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
               </div>
             )
           })}
-          {/* Pagos / conceptos al final */}
           {pagoRows.length > 0 && (
             <div style={{ borderTop: '2px solid #c8c8c0' }}>
               <div style={{ padding: '5px 10px', background: '#eeeee8', fontSize: 12, fontWeight: 700, color: '#333' }}>💰 Pagos y conceptos</div>
@@ -2579,14 +2663,10 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
                     return (
                       <tr key={row.key} style={{ borderLeft: `4px solid ${cfg.border}`, background: 'transparent', borderBottom: '1px solid #e0e0d8' }}>
                         <td style={{ padding: '5px 8px', color: '#222', fontSize: 12, whiteSpace: 'nowrap' }}>{fmtF(row.fecha)}</td>
-                        <td style={{ padding: '5px 8px' }}>
-                          <span style={{ fontWeight: 700, fontSize: 12, color: cfg.border }}>{cfg.label}</span>
-                        </td>
+                        <td style={{ padding: '5px 8px' }}><span style={{ fontWeight: 700, fontSize: 12, color: cfg.border }}>{cfg.label}</span></td>
                         <td style={{ padding: '5px 8px', color: '#111' }}>{row.nota || '—'}</td>
                         <td style={{ padding: '5px 8px', fontWeight: 700, color: '#111' }}>{row.monto != null ? fmtMoneda(row.monto) : '—'}</td>
-                        <td style={{ padding: '5px 8px' }} onClick={e => e.stopPropagation()}>
-                          <AccionesFila row={row} />
-                        </td>
+                        <td style={{ padding: '5px 8px' }} onClick={e => e.stopPropagation()}><AccionesFila row={row} /></td>
                       </tr>
                     )
                   })}
@@ -2594,66 +2674,6 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
               </table>
             </div>
           )}
-        </div>
-      )}
-
-      {/* ── Vista CRONOLÓGICA ── */}
-      {sortMode === 'fecha' && (
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
-            <thead>
-              <tr>
-                <th style={{ ...thBase, textAlign: 'left', cursor: 'pointer', color: '#4a6aaa' }}
-                  onClick={() => setSortMode('producto')}>Fecha ↕</th>
-                <th style={{ ...thBase, textAlign: 'left' }}>Movimiento</th>
-                <th style={{ ...thBase, textAlign: 'left' }}>Producto</th>
-                <th style={{ ...thBase, textAlign: 'center' }}>Cant.</th>
-                <th style={{ ...thBase, textAlign: 'center' }}>En manos</th>
-                <th style={{ ...thBase }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {[...rows].reverse().map(row => {
-                const isOpen = !!openRows[row.key]
-                const cfg = row.cfg
-                return (
-                  <React.Fragment key={row.key}>
-                    <tr onClick={() => row.items.length > 0 && toggleRow(row.key)}
-                      style={{ borderLeft: `4px solid ${cfg.border}`, background: isOpen ? cfg.bg : 'transparent',
-                        cursor: row.items.length > 0 ? 'pointer' : 'default', borderBottom: '1px solid #e0e0d8' }}>
-                      <td style={{ padding: '5px 8px', whiteSpace: 'nowrap', color: '#222', fontSize: 12 }}>{fmtF(row.fecha)}</td>
-                      <td style={{ padding: '5px 8px', whiteSpace: 'nowrap' }}>
-                        <span style={{ fontWeight: 700, fontSize: 12, color: cfg.border }}>{cfg.label}</span>
-                        {row.fallas.length > 0 && <span style={{ marginLeft: 4, fontSize: 11, color: '#b03030' }}>⚠</span>}
-                        {row.monto != null && <span style={{ marginLeft: 6, fontWeight: 700, color: '#1a4a1a', fontSize: 12 }}>{fmtMoneda(row.monto)}</span>}
-                      </td>
-                      <td style={{ padding: '5px 8px', color: '#111' }}>
-                        {row.prodNombre
-                          ? <span>{row.prodNombre}{row.prodCodigo && <span style={{ marginLeft: 6, fontSize: 11, color: '#555', fontFamily: 'monospace', background: '#d8d8d0', padding: '1px 4px', borderRadius: 2 }}>{row.prodCodigo}</span>}</span>
-                          : <span style={{ color: '#666', fontSize: 11 }}>{row.nota || '—'}</span>}
-                      </td>
-                      <td style={{ padding: '5px 8px', textAlign: 'center', fontWeight: 700, color: '#111' }}>
-                        {row.total != null ? `${row.total}u` : '—'}
-                      </td>
-                      <td style={{ padding: '5px 8px', textAlign: 'center', fontWeight: 700, color: row.enManos > 0 ? '#7a4a00' : '#1e6a1e' }}>
-                        {row.enManos != null ? `${row.enManos}u` : '—'}
-                      </td>
-                      <td style={{ padding: '5px 8px', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
-                        <AccionesFila row={row} />
-                      </td>
-                    </tr>
-                    {isOpen && row.items.length > 0 && (
-                      <tr style={{ background: cfg.bg }}>
-                        <td colSpan={6} style={{ borderBottom: '1px solid #ddd' }}>
-                          <TalleDetalle row={row} />
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
-                )
-              })}
-            </tbody>
-          </table>
         </div>
       )}
     </div>
@@ -2689,7 +2709,7 @@ export default function Talleres({ onMenuClick }) {
     if (!isRefresh) setLoading(true)
     const [{ data: movs }, { data: ctrl }, { data: entregas }] = await Promise.all([
       supabase.from('taller_movimientos')
-        .select(`id, tipo, fecha, nota, monto, created_at,
+        .select(`id, tipo, fecha, nota, monto, lote_id, created_at,
           contactos(id, nombre),
           taller_movimientos_items(id, producto_id, talle, cantidad, observacion,
             productos(id, nombre, codigo, tabla, tela1_id, telas:tela1_id(tipo, color))))`)
