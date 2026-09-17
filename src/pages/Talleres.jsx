@@ -2340,11 +2340,9 @@ function StockEnMiTaller({ movimientos, controlMap, onEntregar, onEnviarFallaSto
 // ── Bloque por taller ────────────────────────────────────────────────────────
 
 function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, onCalidad, onRecibir, onEnviarFalla, onRepetir }) {
-  const [open, setOpen] = useState(false)
-  const [cuentaOpen, setCuentaOpen] = useState(false)
-  const [openBlocks, setOpenBlocks] = useState({})
-  const [filtroEstado, setFiltroEstado] = useState('')
-  function toggleBlock(id) { setOpenBlocks(o => ({ ...o, [id]: !o[id] })) }
+  const [open, setOpen] = useState(true)
+  const [openRows, setOpenRows] = useState({})
+  function toggleRow(id) { setOpenRows(o => ({ ...o, [id]: !o[id] })) }
 
   // Saldo
   let debe = 0, haber = 0
@@ -2355,385 +2353,181 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
   const saldo = debe - haber
   const tieneSaldo = debe > 0 || haber > 0
 
-  // Construir bloques anclados en envío con capacidad por producto/talle (FIFO)
+  // Construir filas cronológicas con saldo acumulado por producto
   const sortedAsc = [...movs].sort((a, b) => {
     const d = a.fecha.localeCompare(b.fecha)
     return d !== 0 ? d : (a.created_at || '').localeCompare(b.created_at || '')
   })
 
-  const cuentaCorriente = []
-  const enviosAsc = sortedAsc.filter(m => m.tipo === 'envio')
+  const balance = {} // producto_id → qty en manos del taller
+  const rows = []
 
-  // Capacidad restante por envío: { envioId: { `${pid}__${talle}`: qty } }
-  const envioCapacity = {}
-  for (const e of enviosAsc) {
-    envioCapacity[e.id] = {}
-    for (const it of (e.taller_movimientos_items || [])) {
-      const k = `${it.producto_id}__${it.talle}`
-      envioCapacity[e.id][k] = (envioCapacity[e.id][k] || 0) + (it.cantidad || 0)
-    }
-  }
-
-  const blockMap = {}
-  for (const e of enviosAsc) blockMap[e.id] = { envio: e, movements: [] }
-  const loose = { envio: null, movements: [] }
-
-  function assignBlock(mov) {
-    const movItems = mov.taller_movimientos_items || []
-
-    // Devolución (falla que vuelve al taller): envío más reciente con ese producto antes de esta fecha
-    if (mov.tipo === 'devolucion') {
-      const movPids = new Set(movItems.map(it => it.producto_id))
-      const candidatos = enviosAsc.filter(e => {
-        if (e.fecha > mov.fecha) return false
-        return (e.taller_movimientos_items || []).some(it => movPids.has(it.producto_id))
-      })
-      if (candidatos.length) return candidatos[candidatos.length - 1].id
-      const ant = enviosAsc.filter(e => e.fecha <= mov.fecha)
-      return ant.length ? ant[ant.length - 1].id : null
-    }
-
-    // Recepción / entrega: oldest envío con capacidad restante para ese producto/talle
-    if (!movItems.length) {
-      const ant = enviosAsc.filter(e => e.fecha <= mov.fecha)
-      return ant.length ? ant[ant.length - 1].id : null
-    }
-
-    // Nivel 1: envío con MEJOR match por producto+talle (más ítems coincidentes), FIFO en empate
-    let bestId = null, bestScore = 0
-    for (const e of enviosAsc) {
-      if (e.fecha > mov.fecha) continue
-      const cap = envioCapacity[e.id]
-      const score = movItems.filter(it => (cap[`${it.producto_id}__${it.talle}`] || 0) > 0).length
-      if (score > bestScore) { bestScore = score; bestId = e.id }
-    }
-    if (bestId && bestScore > 0) {
-      if (mov.tipo === 'recepcion') {
-        const cap = envioCapacity[bestId]
-        for (const it of movItems) {
-          const k = `${it.producto_id}__${it.talle}`
-          if (cap[k]) cap[k] = Math.max(0, cap[k] - (it.cantidad || 0))
-        }
-      }
-      return bestId
-    }
-
-    // Nivel 2: oldest envío que directamente contiene el mismo producto (sin importar talle ni capacidad)
-    const movPids = new Set(movItems.map(it => it.producto_id))
-    for (const e of enviosAsc) {
-      if (e.fecha > mov.fecha) continue
-      const tieneProducto = (e.taller_movimientos_items || []).some(it => movPids.has(it.producto_id))
-      if (tieneProducto) return e.id
-    }
-
-    // Nivel 3: fallback al envío más reciente antes de esta fecha
-    const ant = enviosAsc.filter(e => e.fecha <= mov.fecha)
-    return ant.length ? ant[ant.length - 1].id : null
+  const TIPO_CFG = {
+    envio:     { label: 'ENVIADO',        border: '#4a6a9a', bg: '#f0f4fa', sign: +1 },
+    recepcion: { label: 'RECIBIDO',       border: '#4a8a4a', bg: '#f4faf4', sign: -1 },
+    devolucion:{ label: 'ENVIADO-FALLA',  border: '#c08020', bg: '#fff8e8', sign: +1 },
+    pago:      { label: 'PAGO',           border: '#6a4a8a', bg: '#f8f4fc', sign:  0 },
+    concepto:  { label: 'CONCEPTO',       border: '#888888', bg: '#fafaf8', sign:  0 },
   }
 
   for (const m of sortedAsc) {
-    if (m.tipo === 'pago' || m.tipo === 'concepto') { cuentaCorriente.push(m); continue }
-    if (m.tipo === 'envio') continue
-    const bid = assignBlock(m)
-    if (bid && blockMap[bid]) blockMap[bid].movements.push(m)
-    else loose.movements.push(m)
-  }
+    const cfg = TIPO_CFG[m.tipo] || { label: m.tipo?.toUpperCase(), border: '#aaa', bg: '#fafaf8', sign: 0 }
+    const mItems = m.taller_movimientos_items || []
+    const mFallas = (controlMap[m.id] || []).filter(c => (c.cant_falla || 0) > 0 && !c.devuelto_taller)
+    const hasFalla = mFallas.length > 0
 
-  const allBlocks = [
-    ...enviosAsc.map(e => blockMap[e.id]),
-    ...(loose.movements.length ? [loose] : []),
-  ]
-
-  // Separar en pendientes (sin recepción) y cerrados (con recepción)
-  const pendientesAll = allBlocks.filter(b => b.envio && !b.movements.some(m => m.tipo === 'recepcion')).reverse()
-  const cerradosAll   = allBlocks.filter(b => !b.envio || b.movements.some(m => m.tipo === 'recepcion')).reverse()
-
-  function blockStatus(b) {
-    const items = b.envio?.taller_movimientos_items || []
-    const envTotal = items.reduce((s, it) => s + (it.cantidad || 0), 0)
-    const recTotal = b.movements.filter(m => m.tipo === 'recepcion').reduce((s, m) => s + (m.taller_movimientos_items || []).reduce((ss, it) => ss + (it.cantidad || 0), 0), 0)
-    const fallas   = b.movements.some(m => (controlMap[m.id] || []).some(c => (c.cant_falla || 0) > 0 && !c.devuelto_taller))
-    const hasRec   = b.movements.some(m => m.tipo === 'recepcion')
-    return !hasRec ? 'en taller' : fallas ? 'con fallas' : recTotal < envTotal ? 'incompleto' : 'completo'
-  }
-
-  const pendientes = filtroEstado === 'en taller' ? pendientesAll : filtroEstado ? [] : pendientesAll
-  const cerrados   = filtroEstado && filtroEstado !== 'en taller'
-    ? cerradosAll.filter(b => blockStatus(b) === filtroEstado)
-    : filtroEstado === 'en taller' ? [] : cerradosAll
-
-  const totalPrendasEnTaller = pendientesAll.reduce((s, b) =>
-    s + (b.envio?.taller_movimientos_items || []).reduce((ss, it) => ss + (it.cantidad || 0), 0), 0)
-
-  function renderBlock(block, i) {
-    const blockId    = block.envio?.id || `suelto-${i}`
-    const isOpen     = !!openBlocks[blockId]
-    const envioItems = block.envio?.taller_movimientos_items || []
-
-    // Resumen por producto para el header
-    const byProd = {}
-    for (const it of envioItems) {
-      const nm = it.productos?.nombre || '?'
-      if (!byProd[nm]) byProd[nm] = { total: 0, talles: {} }
-      byProd[nm].total += it.cantidad || 0
-      byProd[nm].talles[it.talle] = (byProd[nm].talles[it.talle] || 0) + (it.cantidad || 0)
+    if (mItems.length > 0) {
+      // Agrupar por producto
+      const byProd = {}
+      for (const it of mItems) {
+        const pid = it.producto_id
+        if (!byProd[pid]) byProd[pid] = { nombre: it.productos?.nombre || '?', items: [], total: 0 }
+        byProd[pid].items.push(it)
+        byProd[pid].total += it.cantidad || 0
+      }
+      for (const [pid, pd] of Object.entries(byProd)) {
+        balance[pid] = (balance[pid] || 0) + cfg.sign * pd.total
+        const prodFallas = mFallas.filter(f => f.producto_id === Number(pid))
+        rows.push({
+          key: `${m.id}-${pid}`, movId: m.id, mov: m, pid: Number(pid),
+          fecha: m.fecha, cfg: hasFalla && m.tipo === 'recepcion'
+            ? { ...cfg, label: 'RECIBIDO-FALLA', border: '#c04040', bg: '#fff4f4' }
+            : cfg,
+          prodNombre: pd.nombre, items: pd.items, total: pd.total,
+          enManos: Math.max(0, balance[pid] || 0),
+          fallas: prodFallas, monto: null, nota: m.nota,
+        })
+      }
+    } else {
+      // PAGO, CONCEPTO, o recepcion sin items
+      rows.push({
+        key: m.id, movId: m.id, mov: m, pid: null,
+        fecha: m.fecha, cfg,
+        prodNombre: m.nota || null, items: [], total: null,
+        enManos: null, fallas: [], monto: m.monto, nota: m.nota,
+      })
     }
-    const totalEnviado  = envioItems.reduce((s, it) => s + (it.cantidad || 0), 0)
-    const totalRecibido = block.movements
-      .filter(m => m.tipo === 'recepcion')
-      .reduce((s, m) => s + (m.taller_movimientos_items || []).reduce((ss, it) => ss + (it.cantidad || 0), 0), 0)
-    const hasFallas = block.movements.some(m =>
-      (controlMap[m.id] || []).some(c => (c.cant_falla || 0) > 0 && !c.devuelto_taller))
-
-    // Última fecha de actividad
-    const allDates = [block.envio?.fecha, ...block.movements.map(m => m.fecha)].filter(Boolean).sort()
-    const lastDate  = allDates[allDates.length - 1]
-    const enviDate  = block.envio?.fecha
-
-    // Estado (solo texto, sin fondos de colores)
-    const hasRec = block.movements.some(m => m.tipo === 'recepcion')
-    const status = !hasRec ? 'en taller' : hasFallas ? 'con fallas' : totalRecibido < totalEnviado ? 'incompleto' : 'completo'
-    const blkBorder = !hasRec ? '#c08020' : hasFallas ? '#c04040' : totalRecibido < totalEnviado ? '#d07030' : '#4a8a4a'
-    const montoRecibido = block.movements
-      .filter(m => m.tipo === 'recepcion' && m.monto != null)
-      .reduce((s, m) => s + m.monto, 0)
-
-    // Movimientos en bloque ordenados: más reciente arriba, envío al final
-    const movsDesc = [...block.movements].sort((a, b) => b.fecha.localeCompare(a.fecha))
-
-    const labelFor = tipo => {
-      if (tipo === 'recepcion') return 'RECIBIDO'
-      if (tipo === 'pago')      return 'PAGO'
-      if (tipo === 'envio')     return 'ENVIADO'
-      if (tipo === 'concepto')  return 'CONCEPTO'
-      return tipo?.toUpperCase() || '?'
-    }
-
-    return (
-      <div key={blockId} style={{ borderTop: '1px solid #c8c4bc', borderRight: '1px solid #c8c4bc', borderBottom: '1px solid #c8c4bc', borderLeft: `4px solid ${blkBorder}`, marginBottom: 6, borderRadius: 2, background: '#fafaf8' }}>
-
-        {/* ── Header colapsable ── */}
-        <div onClick={() => toggleBlock(blockId)}
-          style={{ padding: '8px 10px', cursor: 'pointer', userSelect: 'none', display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-          <span style={{ fontSize: 11, color: '#999', marginTop: 3, flexShrink: 0 }}>{isOpen ? '▼' : '▶'}</span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            {/* Línea principal: última fecha + estado */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 14, fontWeight: 700, color: '#222' }}>{fmtF(lastDate)}</span>
-              <span style={{ fontSize: 12, color: '#666' }}>{status}</span>
-              {montoRecibido > 0 && <span style={{ fontSize: 13, fontWeight: 700, color: '#1a5a1a' }}>{fmtMoneda(montoRecibido)}</span>}
-              {lastDate !== enviDate && (
-                <span style={{ fontSize: 11, color: '#bbb' }}>enviado {fmtF(enviDate)}</span>
-              )}
-            </div>
-            {/* Productos con talles y totales */}
-            {Object.entries(byProd).map(([nm, d]) => (
-              <div key={nm} style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap', marginBottom: 2 }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: '#333' }}>{nm}</span>
-                {Object.entries(d.talles).sort(([a],[b]) => cmpTalle(a,b)).map(([t, c]) => (
-                  <span key={t} style={{ fontSize: 12, color: '#555' }}>{t}×{c}</span>
-                ))}
-                <span style={{ fontSize: 11, color: '#999' }}>({d.total}u)</span>
-              </div>
-            ))}
-            {block.envio?.nota && (
-              <div style={{ fontSize: 11, color: '#888', fontStyle: 'italic', marginTop: 2 }}>📝 {block.envio.nota}</div>
-            )}
-          </div>
-          {/* Acciones rápidas */}
-          <div onClick={e => e.stopPropagation()} style={{ display: 'flex', gap: 3, flexShrink: 0, alignItems: 'center' }}>
-            {!hasRec && block.envio && (
-              <button style={{ ...S.btn, fontSize: 11, padding: '2px 8px' }} onClick={() => onRecibir(block.envio)}>Recibir</button>
-            )}
-            {block.envio && onRepetir && (
-              <button style={{ ...S.btn, fontSize: 11, padding: '2px 6px' }} title="Repetir este envío" onClick={() => onRepetir(block.envio)}>🔁</button>
-            )}
-            {block.envio && <button style={{ ...S.btn, fontSize: 11, padding: '2px 6px' }} onClick={() => onEdit(block.envio)}>✏️</button>}
-            {block.envio && <button style={S.btnD} onClick={() => onDelete(block.envio.id)}>✕</button>}
-          </div>
-        </div>
-
-        {/* ── Detalle expandido ── */}
-        {isOpen && (
-          <div style={{ borderTop: '1px solid #ddd' }}>
-            {/* Movimientos recientes primero (PAGO, RECIBIDO…) */}
-            {movsDesc.map(m => {
-              const mItems  = m.taller_movimientos_items || []
-              const mTotal  = mItems.reduce((s, it) => s + (it.cantidad || 0), 0)
-              const mFallas = (controlMap[m.id] || []).filter(c => (c.cant_falla || 0) > 0 && !c.devuelto_taller)
-              const accentL = m.tipo === 'recepcion' ? '#4a8a4a' : m.tipo === 'pago' ? '#6a4a8a' : '#888'
-              const bgL     = m.tipo === 'recepcion' ? '#f4faf4' : m.tipo === 'pago' ? '#f8f4fc' : '#fafaf8'
-              return (
-                <div key={m.id} style={{ borderBottom: '1px solid #e8e8e0', borderLeft: `4px solid ${accentL}`, background: bgL }}>
-                  {/* Sub-header */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px' }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: '#333' }}>{labelFor(m.tipo)}</span>
-                    <span style={{ fontSize: 13, color: '#555' }}>{fmtF(m.fecha)}</span>
-                    {mTotal > 0 && <span style={{ fontSize: 11, color: '#999' }}>{mTotal}u</span>}
-                    {mFallas.length > 0 && <span style={{ fontSize: 11, color: '#c04040', fontWeight: 700 }}>⚠ fallas</span>}
-                    {m.monto != null && <span style={{ fontSize: 13, color: '#333', fontWeight: 700 }}>{fmtMoneda(m.monto)}</span>}
-                    <div style={{ marginLeft: 'auto', display: 'flex', gap: 3 }}>
-                      {m.tipo === 'recepcion' && <button style={{ ...S.btn, fontSize: 11, padding: '2px 6px' }} onClick={() => onCalidad(m)}>Calidad</button>}
-                      <button style={{ ...S.btn, fontSize: 11, padding: '2px 6px' }} onClick={() => onEdit(m)}>✏️</button>
-                      <button style={S.btnD} onClick={() => onDelete(m.id)}>✕</button>
-                    </div>
-                  </div>
-                  {/* Tabla Producto | Talle | Cant. */}
-                  {mItems.length > 0 && (
-                    <div style={{ padding: '0 10px 8px' }}>
-                      {m.nota && <div style={{ fontSize: 11, color: '#666', fontStyle: 'italic', marginBottom: 4 }}>📝 {m.nota}</div>}
-                      <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
-                        <thead>
-                          <tr>
-                            <th style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#e8e8e0', fontWeight: 700, textAlign: 'left' }}>Producto</th>
-                            <th style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#e8e8e0', fontWeight: 700, textAlign: 'center' }}>Talle</th>
-                            <th style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#e8e8e0', fontWeight: 700, textAlign: 'center' }}>Cant.</th>
-                            {mFallas.length > 0 && <th style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#f8e8e8', fontWeight: 700, textAlign: 'center' }}>⚠ Falla</th>}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {[...mItems].sort((a,b) => {
-                            const nm = (a.productos?.nombre||'').localeCompare(b.productos?.nombre||'')
-                            return nm !== 0 ? nm : cmpTalle(a.talle, b.talle)
-                          }).map(it => {
-                            const falla = mFallas.find(f => f.producto_id === it.producto_id && f.talle === it.talle)
-                            return (
-                              <tr key={it.id} style={{ background: falla ? '#fff4f4' : 'transparent' }}>
-                                <td style={{ border: '1px solid #d8d8d0', padding: '3px 8px', textAlign: 'left' }}>{it.productos?.nombre || '?'}</td>
-                                <td style={{ border: '1px solid #d8d8d0', padding: '3px 8px', textAlign: 'center', fontWeight: 700 }}>{it.talle}</td>
-                                <td style={{ border: '1px solid #d8d8d0', padding: '3px 8px', textAlign: 'center' }}>{it.cantidad}</td>
-                                {mFallas.length > 0 && <td style={{ border: '1px solid #d8d8d0', padding: '3px 8px', textAlign: 'center', color: '#c04040', fontWeight: 700 }}>{falla ? falla.cant_falla : '—'}</td>}
-                              </tr>
-                            )
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-            {/* Envío al final */}
-            {block.envio && (
-              <div style={{ borderLeft: '4px solid #4a6a9a', background: '#f0f4fa' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px' }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: '#333' }}>ENVIADO</span>
-                  <span style={{ fontSize: 13, color: '#555' }}>{fmtF(block.envio.fecha)}</span>
-                  <span style={{ fontSize: 11, color: '#999' }}>{totalEnviado}u</span>
-                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 3 }}>
-                    {!hasRec && <button style={{ ...S.btn, fontSize: 11, padding: '2px 8px' }} onClick={() => onRecibir(block.envio)}>Recibir</button>}
-                    <button style={{ ...S.btn, fontSize: 11, padding: '2px 6px' }} onClick={() => onEdit(block.envio)}>✏️</button>
-                    <button style={S.btnD} onClick={() => onDelete(block.envio.id)}>✕</button>
-                  </div>
-                </div>
-                {envioItems.length > 0 && (
-                  <div style={{ padding: '0 10px 8px' }}>
-                    {block.envio.nota && <div style={{ fontSize: 11, color: '#666', fontStyle: 'italic', marginBottom: 4 }}>📝 {block.envio.nota}</div>}
-                    <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
-                      <thead>
-                        <tr>
-                          <th style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#e8e8e0', fontWeight: 700, textAlign: 'left' }}>Producto</th>
-                          <th style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#e8e8e0', fontWeight: 700, textAlign: 'center' }}>Talle</th>
-                          <th style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#e8e8e0', fontWeight: 700, textAlign: 'center' }}>Cant.</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {[...envioItems].sort((a,b) => {
-                          const nm = (a.productos?.nombre||'').localeCompare(b.productos?.nombre||'')
-                          return nm !== 0 ? nm : cmpTalle(a.talle, b.talle)
-                        }).map(it => (
-                          <tr key={it.id}>
-                            <td style={{ border: '1px solid #d8d8d0', padding: '3px 8px', textAlign: 'left' }}>{it.productos?.nombre || '?'}</td>
-                            <td style={{ border: '1px solid #d8d8d0', padding: '3px 8px', textAlign: 'center', fontWeight: 700 }}>{it.talle}</td>
-                            <td style={{ border: '1px solid #d8d8d0', padding: '3px 8px', textAlign: 'center' }}>{it.cantidad}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    )
   }
+
+  const rowsDesc = [...rows].reverse()
+  const totalEnManos = Object.values(balance).reduce((s, v) => s + Math.max(0, v), 0)
+
+  const enviosPendientes = sortedAsc.filter(m =>
+    m.tipo === 'envio' && !sortedAsc.some(r =>
+      r.tipo === 'recepcion' && r.fecha >= m.fecha &&
+      (r.taller_movimientos_items || []).some(it =>
+        (m.taller_movimientos_items || []).some(ei => ei.producto_id === it.producto_id))))
 
   return (
-    <div style={{ border: '2px solid #7a8898', background: '#f4f4f0', marginBottom: 12 }}>
-      <div style={{ background: 'linear-gradient(to bottom,#4a5a6a,#2a3a4a)', color: '#fff', padding: '6px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
-        onClick={() => setOpen(o => !o)}>
-        <span style={{ fontWeight: 700, fontSize: 12 }}>{open ? '▼' : '▶'} 📋 Historial de movimientos</span>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          {totalPrendasEnTaller > 0 && <span style={{ fontSize: 10, color: '#ffd080' }}>📤 {totalPrendasEnTaller} en taller</span>}
-          {tieneSaldo && <span style={{ fontSize: 11, fontWeight: 700, color: saldo > 0 ? '#ffb0a0' : saldo < 0 ? '#a0ffb0' : '#ccc' }}>
-            {saldo > 0 ? `Adeudado: ${fmtMoneda(saldo)}` : saldo < 0 ? `A tu favor: ${fmtMoneda(-saldo)}` : '✓ Al día'}
+    <div style={{ background: '#fafaf8', marginBottom: 12 }}>
+      {/* Header */}
+      <div style={{ background: 'linear-gradient(to bottom,#4a5a6a,#2a3a4a)', color: '#fff', padding: '6px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontWeight: 700, fontSize: 12 }}>📋 Movimientos</span>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          {totalEnManos > 0 && <span style={{ fontSize: 10, color: '#ffd080' }}>📤 {totalEnManos} en taller</span>}
+          {tieneSaldo && <span style={{ fontSize: 11, fontWeight: 700, color: saldo > 0 ? '#ffb0a0' : '#a0ffb0' }}>
+            {saldo > 0 ? `Adeudado: ${fmtMoneda(saldo)}` : `A tu favor: ${fmtMoneda(-saldo)}`}
           </span>}
-          <span style={{ fontSize: 10, color: '#ccc' }}>{movs.length} mov</span>
         </div>
       </div>
 
-      {open && (
-        <div style={{ padding: '6px 8px' }}>
-          {/* Filtro por estado */}
-          <div style={{ display: 'flex', gap: 4, marginBottom: 6, flexWrap: 'wrap' }}>
-            {['', 'en taller', 'completo', 'incompleto', 'con fallas'].map(est => (
-              <button key={est} onClick={() => setFiltroEstado(est)}
-                style={{ fontFamily: F, fontSize: 10, padding: '2px 8px', cursor: 'pointer', border: '1px solid #b0b8c8',
-                  background: filtroEstado === est ? '#2a3a4a' : '#e8eaf0',
-                  color: filtroEstado === est ? '#fff' : '#333', borderRadius: 2 }}>
-                {est || 'Todos'}
-              </button>
-            ))}
-          </div>
-          {/* Lotes pendientes de recepción */}
-          {pendientes.length > 0 && (
-            <div style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: '#8a5a00', background: '#fff3cc', border: '1px solid #e0c060', padding: '3px 8px', marginBottom: 6 }}>
-                📤 PENDIENTE DE RECEPCIÓN ({pendientes.length})
-              </div>
-              {pendientes.map((b, i) => renderBlock(b, i))}
-            </div>
-          )}
-
-          {/* Lotes cerrados */}
-          {cerrados.length > 0 && (
-            <div>
-              {pendientes.length > 0 && (
-                <div style={{ fontSize: 10, fontWeight: 700, color: '#2a5a2a', background: '#e8f4e8', border: '1px solid #80b880', padding: '3px 8px', marginBottom: 6 }}>
-                  📥 RECIBIDOS
-                </div>
-              )}
-              {cerrados.map((b, i) => renderBlock(b, i))}
-            </div>
-          )}
-
-          {/* Popup hilo de envío */}
-
-          {/* Cuenta corriente (pagos y conceptos) — colapsada por defecto */}
-          {cuentaCorriente.length > 0 && (
-            <div style={{ borderTop: '1px solid #c0c8d0', marginTop: 4, paddingTop: 4 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: cuentaOpen ? 4 : 0 }}
-                onClick={() => setCuentaOpen(o => !o)}>
-                <span style={{ fontSize: 11, color: '#4a5a6a', fontWeight: 700 }}>
-                  {cuentaOpen ? '▼' : '▶'} 💰 Cuenta corriente
-                </span>
-                <span style={{ fontSize: 10, color: '#888' }}>
-                  {cuentaCorriente.length} movimiento{cuentaCorriente.length !== 1 ? 's' : ''}
-                  {tieneSaldo ? ` · ${saldo > 0 ? `debe ${fmtMoneda(saldo)}` : saldo < 0 ? `a favor ${fmtMoneda(-saldo)}` : 'al día'}` : ''}
-                </span>
-              </div>
-              {cuentaOpen && [...cuentaCorriente].reverse().map(m => (
-                <MovCard key={m.id} mov={m} onDelete={onDelete} onEdit={onEdit}
-                  onCalidad={onCalidad} onRecibir={onRecibir}
-                  controlItems={controlMap[m.id]} onEnviarFalla={onEnviarFalla}
-                  entregasVinculadas={entregasMap[m.id]} />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      {/* Tabla cronológica */}
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
+          <thead>
+            <tr style={{ background: '#e8e8e0', fontSize: 11 }}>
+              <th style={{ padding: '4px 8px', textAlign: 'left', fontWeight: 700, borderBottom: '2px solid #c8c8c0', whiteSpace: 'nowrap' }}>Fecha</th>
+              <th style={{ padding: '4px 8px', textAlign: 'left', fontWeight: 700, borderBottom: '2px solid #c8c8c0', whiteSpace: 'nowrap' }}>Movimiento</th>
+              <th style={{ padding: '4px 8px', textAlign: 'left', fontWeight: 700, borderBottom: '2px solid #c8c8c0' }}>Producto</th>
+              <th style={{ padding: '4px 8px', textAlign: 'center', fontWeight: 700, borderBottom: '2px solid #c8c8c0', whiteSpace: 'nowrap' }}>Cant.</th>
+              <th style={{ padding: '4px 8px', textAlign: 'center', fontWeight: 700, borderBottom: '2px solid #c8c8c0', whiteSpace: 'nowrap' }}>En manos</th>
+              <th style={{ padding: '4px 8px', borderBottom: '2px solid #c8c8c0' }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rowsDesc.map(row => {
+              const isOpen = !!openRows[row.key]
+              const cfg = row.cfg
+              return (
+                <React.Fragment key={row.key}>
+                  <tr
+                    onClick={() => row.items.length > 0 && toggleRow(row.key)}
+                    style={{ borderLeft: `4px solid ${cfg.border}`, background: isOpen ? cfg.bg : 'transparent',
+                      cursor: row.items.length > 0 ? 'pointer' : 'default',
+                      borderBottom: '1px solid #e8e8e0' }}>
+                    <td style={{ padding: '5px 8px', whiteSpace: 'nowrap', color: '#555', fontSize: 12 }}>{fmtF(row.fecha)}</td>
+                    <td style={{ padding: '5px 8px', whiteSpace: 'nowrap' }}>
+                      <span style={{ fontWeight: 700, fontSize: 12, color: cfg.border }}>{cfg.label}</span>
+                      {row.fallas.length > 0 && <span style={{ marginLeft: 4, fontSize: 11, color: '#c04040' }}>⚠</span>}
+                      {row.monto != null && <span style={{ marginLeft: 6, fontWeight: 700, color: '#1a5a1a', fontSize: 12 }}>{fmtMoneda(row.monto)}</span>}
+                    </td>
+                    <td style={{ padding: '5px 8px', color: '#333' }}>
+                      {row.prodNombre || <span style={{ color: '#aaa', fontSize: 11 }}>—</span>}
+                      {row.nota && !row.prodNombre && <span style={{ fontSize: 11, color: '#888', fontStyle: 'italic' }}> {row.nota}</span>}
+                    </td>
+                    <td style={{ padding: '5px 8px', textAlign: 'center', fontWeight: 700 }}>
+                      {row.total != null ? `${row.total}u` : '—'}
+                    </td>
+                    <td style={{ padding: '5px 8px', textAlign: 'center', fontWeight: 700, color: row.enManos > 0 ? '#8a5a00' : '#4a8a4a' }}>
+                      {row.enManos != null ? `${row.enManos}u` : '—'}
+                    </td>
+                    <td style={{ padding: '5px 8px', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+                      <div style={{ display: 'flex', gap: 3, justifyContent: 'flex-end' }}>
+                        {row.mov.tipo === 'envio' && !sortedAsc.some(r => r.tipo === 'recepcion' && r.fecha >= row.mov.fecha) && (
+                          <button style={{ ...S.btn, fontSize: 10, padding: '1px 6px' }} onClick={() => onRecibir(row.mov)}>Recibir</button>
+                        )}
+                        {row.mov.tipo === 'envio' && onRepetir && (
+                          <button style={{ ...S.btn, fontSize: 10, padding: '1px 6px' }} title="Repetir" onClick={() => onRepetir(row.mov)}>🔁</button>
+                        )}
+                        {row.mov.tipo === 'recepcion' && (
+                          <button style={{ ...S.btn, fontSize: 10, padding: '1px 6px' }} onClick={() => onCalidad(row.mov)}>Calidad</button>
+                        )}
+                        <button style={{ ...S.btn, fontSize: 10, padding: '1px 6px' }} onClick={() => onEdit(row.mov)}>✏️</button>
+                        <button style={S.btnD} onClick={() => onDelete(row.mov.id)}>✕</button>
+                      </div>
+                    </td>
+                  </tr>
+                  {isOpen && row.items.length > 0 && (
+                    <tr style={{ background: cfg.bg }}>
+                      <td colSpan={6} style={{ padding: '0 16px 10px 24px', borderBottom: '1px solid #ddd' }}>
+                        {row.nota && <div style={{ fontSize: 11, color: '#666', fontStyle: 'italic', padding: '4px 0' }}>📝 {row.nota}</div>}
+                        <table style={{ borderCollapse: 'collapse', fontSize: 13, marginTop: 4 }}>
+                          <thead>
+                            <tr>
+                              <th style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#e8e8e0', fontWeight: 700, textAlign: 'center' }}>Talle</th>
+                              <th style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#e8e8e0', fontWeight: 700, textAlign: 'center' }}>Cant.</th>
+                              {row.fallas.length > 0 && <th style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#f8e8e8', fontWeight: 700, textAlign: 'center' }}>⚠ Falla</th>}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {[...row.items].sort((a, b) => cmpTalle(a.talle, b.talle)).map(it => {
+                              const falla = row.fallas.find(f => f.talle === it.talle)
+                              return (
+                                <tr key={it.id} style={{ background: falla ? '#fff4f4' : 'transparent' }}>
+                                  <td style={{ border: '1px solid #d8d8d0', padding: '3px 8px', textAlign: 'center', fontWeight: 700 }}>{it.talle}</td>
+                                  <td style={{ border: '1px solid #d8d8d0', padding: '3px 8px', textAlign: 'center' }}>{it.cantidad}</td>
+                                  {row.fallas.length > 0 && <td style={{ border: '1px solid #d8d8d0', padding: '3px 8px', textAlign: 'center', color: '#c04040', fontWeight: 700 }}>{falla ? falla.cant_falla : '—'}</td>}
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                          <tfoot>
+                            <tr>
+                              <td style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#e8e8e0', fontWeight: 700, textAlign: 'right', fontSize: 12 }}>Total</td>
+                              <td style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#e8e8e0', fontWeight: 700, textAlign: 'center', fontSize: 12 }}>{row.total}</td>
+                              {row.fallas.length > 0 && <td style={{ border: '1px solid #c8c8c0', padding: '3px 8px', background: '#f8e8e8', fontWeight: 700, textAlign: 'center', fontSize: 12, color: '#c04040' }}>{row.fallas.reduce((s, f) => s + (f.cant_falla || 0), 0)}</td>}
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
