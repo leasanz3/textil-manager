@@ -2344,7 +2344,8 @@ function StockEnMiTaller({ movimientos, controlMap, onEntregar, onEnviarFallaSto
 
 function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, onCalidad, onRecibir, onEnviarFalla, onRepetir }) {
   const [openRows, setOpenRows] = useState({})
-  const [sortMode, setSortMode] = useState('producto') // 'producto' | 'fecha'
+  const [sortMode, setSortMode] = useState('fecha') // 'fecha' | 'producto'
+  const [selectedLote, setSelectedLote] = useState(null) // lote_id en detalle
   function toggleRow(id) { setOpenRows(o => ({ ...o, [id]: !o[id] })) }
 
   // Saldo
@@ -2482,6 +2483,98 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
   // Última fecha de movimiento para mostrar en header
   const ultimaFecha = rows.length > 0 ? rows[rows.length - 1].fecha : null
 
+  // ── Detalle de lote ─────────────────────────────────────────────────────────
+  if (selectedLote) {
+    const loteRows = rows.filter(r => r.loteId === selectedLote)
+    // Entregas vinculadas a recepciones de este lote
+    const recIds = loteRows.filter(r => r.mov.tipo === 'recepcion').map(r => r.mov.id)
+    const entregasLote = recIds.flatMap(rid => entregasMap[rid] || [])
+    const loteName = loteRows.find(r => r.prodNombre)?.prodNombre || selectedLote
+    const loteShort = selectedLote.slice(-6)
+    const loteBg = loteColorMap[selectedLote] || '#e8e8e0'
+
+    return (
+      <div style={{ background: '#f8f8f4', marginBottom: 12, border: '1px solid #c8c8c0' }}>
+        {/* Header detalle */}
+        <div style={{ background: 'linear-gradient(to bottom,#3a4a5a,#1e2e3e)', color: '#fff', padding: '7px 10px', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button onClick={() => setSelectedLote(null)}
+            style={{ fontFamily: F, fontSize: 11, padding: '2px 8px', cursor: 'pointer', border: '1px solid #7a9aba', background: 'rgba(255,255,255,0.1)', color: '#fff', borderRadius: 2 }}>
+            ← Volver
+          </button>
+          <span style={{ fontWeight: 700, fontSize: 13 }}>Lote</span>
+          <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 700, background: loteBg, color: '#222', padding: '2px 7px', borderRadius: 3 }}>{loteShort}</span>
+          <span style={{ fontSize: 12, color: '#ccc' }}>{loteName}</span>
+        </div>
+
+        {/* Timeline del lote — uno por movimiento, expandido por defecto */}
+        <div>
+          {loteRows.map(row => {
+            const cfg = row.cfg
+            const isOpen = openRows[row.key] !== false // default abierto
+            return (
+              <div key={row.key} style={{ borderLeft: `5px solid ${cfg.border}`, background: cfg.bg, borderBottom: '2px solid #d8d8d0' }}>
+                {/* Header del movimiento */}
+                <div onClick={() => row.items.length > 0 && setOpenRows(o => ({ ...o, [row.key]: !isOpen }))}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', cursor: row.items.length > 0 ? 'pointer' : 'default', userSelect: 'none' }}>
+                  <span style={{ fontWeight: 700, fontSize: 13, color: cfg.border }}>{cfg.label}</span>
+                  <span style={{ fontSize: 12, color: '#333' }}>{fmtF(row.fecha)}</span>
+                  {row.total != null && <span style={{ fontSize: 12, fontWeight: 700, color: '#111' }}>{row.total}u</span>}
+                  {row.monto != null && <span style={{ fontSize: 13, fontWeight: 700, color: '#1a4a1a' }}>{fmtMoneda(row.monto)}</span>}
+                  {row.fallas.length > 0 && <span style={{ fontSize: 11, color: '#b03030', fontWeight: 700 }}>⚠ {row.fallas.reduce((s,f) => s + (f.cant_falla||0), 0)} fallas</span>}
+                  {row.prodNombre && <span style={{ fontSize: 12, color: '#555', marginLeft: 4 }}>{row.prodNombre}</span>}
+                  {row.nota && <span style={{ fontSize: 11, color: '#666', fontStyle: 'italic' }}>📝 {row.nota}</span>}
+                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 3 }} onClick={e => e.stopPropagation()}>
+                    <AccionesFila row={row} />
+                  </div>
+                </div>
+                {/* Detalle de talles (abierto por default) */}
+                {isOpen && row.items.length > 0 && (
+                  <div style={{ padding: '0 16px 10px 20px' }}>
+                    <TalleDetalle row={row} />
+                  </div>
+                )}
+              </div>
+            )
+          })}
+
+          {/* Entregas al cliente vinculadas a este lote */}
+          {entregasLote.length > 0 && (
+            <div style={{ borderLeft: '5px solid #1a6a1a', background: '#e8f4e8', borderBottom: '2px solid #d8d8d0' }}>
+              <div style={{ padding: '8px 12px' }}>
+                <span style={{ fontWeight: 700, fontSize: 13, color: '#1a6a1a' }}>ENTREGADO</span>
+                <span style={{ fontSize: 12, color: '#333', marginLeft: 10 }}>al cliente</span>
+              </div>
+              {entregasLote.map(e => (
+                <div key={e.id} style={{ padding: '4px 16px 8px 20px' }}>
+                  <div style={{ fontSize: 12, color: '#222', marginBottom: 4 }}>
+                    <strong>{e.contactos?.nombre || '?'}</strong> — {fmtF(e.fecha)}
+                  </div>
+                  {(e.taller_movimientos_items || []).length > 0 && (
+                    <table style={{ borderCollapse: 'collapse', fontSize: 13 }}>
+                      <tbody>
+                        {[...e.taller_movimientos_items].sort((a,b) => cmpTalle(a.talle,b.talle)).map(it => (
+                          <tr key={it.id}>
+                            <td style={{ border: '1px solid #c8d8c8', padding: '2px 8px', fontWeight: 700 }}>{it.talle}</td>
+                            <td style={{ border: '1px solid #c8d8c8', padding: '2px 8px' }}>{it.cantidad}u</td>
+                            <td style={{ border: '1px solid #c8d8c8', padding: '2px 8px', color: '#444' }}>{it.productos?.nombre}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {loteRows.length === 0 && (
+            <div style={{ padding: 16, color: '#888', fontSize: 13 }}>Sin movimientos en este lote.</div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   // Color de badge por lote (paleta pastel para distinguir lotes)
   const LOTE_COLORS = ['#d0e8ff','#d0f0d8','#fff0c8','#f0d8ff','#ffd8d0','#d8f0f0','#f8e0b8','#e0d8f8']
   const loteColorMap = {}
@@ -2536,9 +2629,9 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
                 const cfg = row.cfg
                 return (
                   <React.Fragment key={row.key}>
-                    <tr onClick={() => row.items.length > 0 && toggleRow(row.key)}
+                    <tr onClick={() => row.loteId ? setSelectedLote(row.loteId) : row.items.length > 0 && toggleRow(row.key)}
                       style={{ borderLeft: `4px solid ${cfg.border}`, background: isOpen ? cfg.bg : 'transparent',
-                        cursor: row.items.length > 0 ? 'pointer' : 'default', borderBottom: '1px solid #e0e0d8' }}>
+                        cursor: row.loteId || row.items.length > 0 ? 'pointer' : 'default', borderBottom: '1px solid #e0e0d8' }}>
                       <td style={{ padding: '5px 8px', whiteSpace: 'nowrap', color: '#222', fontSize: 12 }}>{fmtF(row.fecha)}</td>
                       <td style={{ padding: '5px 8px', whiteSpace: 'nowrap' }}>
                         <span style={{ fontWeight: 700, fontSize: 12, color: cfg.border }}>{cfg.label}</span>
