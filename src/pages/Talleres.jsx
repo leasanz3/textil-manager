@@ -2483,6 +2483,27 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
   // Última fecha de movimiento para mostrar en header
   const ultimaFecha = rows.length > 0 ? rows[rows.length - 1].fecha : null
 
+  // Color de badge por lote (paleta pastel para distinguir lotes) — DEBE estar antes del early return
+  const LOTE_COLORS = ['#d0e8ff','#d0f0d8','#fff0c8','#f0d8ff','#ffd8d0','#d8f0f0','#f8e0b8','#e0d8f8']
+  const loteColorMap = {}
+  let loteIdx = 0
+  for (const r of rows) {
+    if (r.loteId && !loteColorMap[r.loteId]) loteColorMap[r.loteId] = LOTE_COLORS[loteIdx++ % LOTE_COLORS.length]
+  }
+  function LoteBadge({ loteId, clickable }) {
+    if (!loteId) return null
+    const bg = loteColorMap[loteId] || '#e8e8e0'
+    const short = loteId.slice(-6)
+    return (
+      <span
+        onClick={clickable ? (e) => { e.stopPropagation(); setSelectedLote(loteId) } : undefined}
+        style={{ marginLeft: 5, fontSize: 10, fontFamily: 'monospace', fontWeight: 700, background: bg, color: '#222', padding: '1px 6px', borderRadius: 3, border: '1px solid #aaa', whiteSpace: 'nowrap', cursor: clickable ? 'pointer' : 'default' }}
+        title={clickable ? 'Ver seguimiento de este lote' : loteId}>
+        {short}
+      </span>
+    )
+  }
+
   // ── Detalle de lote ─────────────────────────────────────────────────────────
   if (selectedLote) {
     const loteRows = rows.filter(r => r.loteId === selectedLote)
@@ -2575,20 +2596,6 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
     )
   }
 
-  // Color de badge por lote (paleta pastel para distinguir lotes)
-  const LOTE_COLORS = ['#d0e8ff','#d0f0d8','#fff0c8','#f0d8ff','#ffd8d0','#d8f0f0','#f8e0b8','#e0d8f8']
-  const loteColorMap = {}
-  let loteIdx = 0
-  for (const r of rows) {
-    if (r.loteId && !loteColorMap[r.loteId]) loteColorMap[r.loteId] = LOTE_COLORS[loteIdx++ % LOTE_COLORS.length]
-  }
-  function LoteBadge({ loteId }) {
-    if (!loteId) return null
-    const bg = loteColorMap[loteId] || '#e8e8e0'
-    const short = loteId.slice(-6) // mostrar solo últimos 6 chars
-    return <span style={{ marginLeft: 5, fontSize: 10, fontFamily: 'monospace', fontWeight: 700, background: bg, color: '#333', padding: '1px 5px', borderRadius: 3, border: '1px solid #bbb', whiteSpace: 'nowrap' }} title={loteId}>{short}</span>
-  }
-
   return (
     <div style={{ background: '#f8f8f4', marginBottom: 12, border: '1px solid #c8c8c0' }}>
       {/* Header */}
@@ -2617,6 +2624,7 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
               <tr>
                 <th style={{ ...thBase, textAlign: 'left' }}>Fecha</th>
                 <th style={{ ...thBase, textAlign: 'left' }}>Movimiento</th>
+                <th style={{ ...thBase, textAlign: 'left' }}>Lote</th>
                 <th style={{ ...thBase, textAlign: 'left' }}>Producto</th>
                 <th style={{ ...thBase, textAlign: 'center' }}>Cant.</th>
                 <th style={{ ...thBase, textAlign: 'center' }}>En manos</th>
@@ -2629,15 +2637,17 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
                 const cfg = row.cfg
                 return (
                   <React.Fragment key={row.key}>
-                    <tr onClick={() => row.loteId ? setSelectedLote(row.loteId) : row.items.length > 0 && toggleRow(row.key)}
+                    <tr onClick={() => row.items.length > 0 && toggleRow(row.key)}
                       style={{ borderLeft: `4px solid ${cfg.border}`, background: isOpen ? cfg.bg : 'transparent',
-                        cursor: row.loteId || row.items.length > 0 ? 'pointer' : 'default', borderBottom: '1px solid #e0e0d8' }}>
+                        cursor: row.items.length > 0 ? 'pointer' : 'default', borderBottom: '1px solid #e0e0d8' }}>
                       <td style={{ padding: '5px 8px', whiteSpace: 'nowrap', color: '#222', fontSize: 12 }}>{fmtF(row.fecha)}</td>
                       <td style={{ padding: '5px 8px', whiteSpace: 'nowrap' }}>
                         <span style={{ fontWeight: 700, fontSize: 12, color: cfg.border }}>{cfg.label}</span>
                         {row.fallas.length > 0 && <span style={{ marginLeft: 4, fontSize: 11, color: '#b03030' }}>⚠</span>}
                         {row.monto != null && <span style={{ marginLeft: 6, fontWeight: 700, color: '#1a4a1a', fontSize: 12 }}>{fmtMoneda(row.monto)}</span>}
-                        <LoteBadge loteId={row.loteId} />
+                      </td>
+                      <td style={{ padding: '5px 8px' }} onClick={e => e.stopPropagation()}>
+                        <LoteBadge loteId={row.loteId} clickable={true} />
                       </td>
                       <td style={{ padding: '5px 8px', color: '#111' }}>
                         {row.prodNombre
@@ -2656,7 +2666,7 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
                     </tr>
                     {isOpen && row.items.length > 0 && (
                       <tr style={{ background: cfg.bg }}>
-                        <td colSpan={6} style={{ borderBottom: '1px solid #ddd' }}>
+                        <td colSpan={7} style={{ borderBottom: '1px solid #ddd' }}>
                           <TalleDetalle row={row} />
                         </td>
                       </tr>
