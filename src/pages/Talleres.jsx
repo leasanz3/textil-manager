@@ -2540,7 +2540,6 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
           {ultimoMovLote && <span style={{ fontSize: 11, color: '#bbb' }}>último mov. {fmtF(ultimoMovLote)}</span>}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
             {enviado > 0 && <span style={{ fontSize: 11, color: '#ccc' }}>Enviado <strong style={{ color: '#fff' }}>{enviado}u</strong></span>}
-            {recibido > 0 && <span style={{ fontSize: 11, color: '#ccc' }}>Recibido <strong style={{ color: '#fff' }}>{recibido}u</strong></span>}
             {hayFallas && <span style={{ fontSize: 11, color: '#ffb0a0', fontWeight: 700 }}>⚠ con fallas</span>}
             {entregasLote.length > 0 && <span style={{ fontSize: 11, color: '#90f090', fontWeight: 700 }}>✓ entregado al cliente</span>}
             <span style={{ fontSize: 12, fontWeight: 700, color: enManosFinal > 0 ? '#ffd080' : '#90f090' }}>
