@@ -578,7 +578,19 @@ function CuentaCorrienteSection({ clienteId, refreshKey }) {
   }
 
   const isDebe = r => r.tipo === 'debe' || r.tipo === 'factura'
-  const concepto = r => isDebe(r) ? (r.observacion || 'Entrega') : (r.observacion || 'Cobro')
+
+  const TIPO_META = {
+    debe:    { label: 'ENTREGA',  color: '#8a2020', bg: '#f8eded' },
+    factura: { label: 'FACTURA',  color: '#1a3a6b', bg: '#edf0f8' },
+    haber:   { label: 'COBRO',    color: '#1a5a1a', bg: '#edf8ed' },
+    recibo:  { label: 'COBRO',    color: '#1a5a1a', bg: '#edf8ed' },
+  }
+  const meta = r => TIPO_META[r.tipo] || { label: r.tipo.toUpperCase(), color: '#888', bg: '#f4f4f0' }
+  const concepto = r => {
+    if (r.tipo === 'factura') return r.observacion || 'Factura DGI'
+    if (r.tipo === 'debe')    return r.observacion || 'Entrega de mercadería'
+    return r.observacion || 'Cobro'
+  }
 
   // Saldo acumulado de más viejo a más nuevo
   let running = 0
@@ -588,9 +600,10 @@ function CuentaCorrienteSection({ clienteId, refreshKey }) {
   })
   const displayRows = [...rowsWithSaldo].reverse() // más nuevo arriba
 
-  const totalDebe  = rows.filter(isDebe).reduce((s, r) => s + Number(r.monto || 0), 0)
-  const totalHaber = rows.filter(r => !isDebe(r)).reduce((s, r) => s + Number(r.monto || 0), 0)
-  const saldo      = totalDebe - totalHaber
+  const totalEntregas = rows.filter(r => r.tipo === 'debe').reduce((s, r) => s + Number(r.monto || 0), 0)
+  const totalFacturas = rows.filter(r => r.tipo === 'factura').reduce((s, r) => s + Number(r.monto || 0), 0)
+  const totalHaber    = rows.filter(r => !isDebe(r)).reduce((s, r) => s + Number(r.monto || 0), 0)
+  const saldo         = totalEntregas + totalFacturas - totalHaber
 
   const netSaldo = list => list.reduce((s, r) => isDebe(r) ? s + Number(r.monto||0) : s - Number(r.monto||0), 0)
   const sFact    = netSaldo(rows.filter(r => r.facturado === true))
@@ -606,10 +619,11 @@ function CuentaCorrienteSection({ clienteId, refreshKey }) {
 
   return (
     <div style={{ border: '2px solid #a0a8b8', background: '#f4f4f0', marginBottom: 12, boxShadow: '1px 1px 0 #b8b8b8' }}>
-      <div style={{ background: 'linear-gradient(to bottom,#e0e8f4,#d0ddf0)', padding: '6px 10px', borderBottom: '1px solid #a0a8b8', display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+      <div style={{ background: 'linear-gradient(to bottom,#e0e8f4,#d0ddf0)', padding: '6px 10px', borderBottom: '1px solid #a0a8b8', display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
         <span style={{ fontWeight: 700, fontSize: 11, color: '#1a3a6b' }}>📊 Cuenta corriente</span>
-        <span style={{ fontSize: 11 }}>DEBE: <strong style={{ color: '#8a2020' }}>{fmtMoneda(totalDebe)}</strong></span>
-        <span style={{ fontSize: 11 }}>HABER: <strong style={{ color: '#1a5a1a' }}>{fmtMoneda(totalHaber)}</strong></span>
+        {totalEntregas > 0 && <span style={{ fontSize: 11 }}>Mercadería: <strong style={{ color: '#8a2020' }}>{fmtMoneda(totalEntregas)}</strong></span>}
+        {totalFacturas > 0 && <span style={{ fontSize: 11 }}>Facturado: <strong style={{ color: '#1a3a6b' }}>{fmtMoneda(totalFacturas)}</strong></span>}
+        <span style={{ fontSize: 11 }}>Cobros: <strong style={{ color: '#1a5a1a' }}>{fmtMoneda(totalHaber)}</strong></span>
         <span style={{ fontSize: 11, fontWeight: 700 }}>Saldo: <strong style={{ color: colS(saldo) }}>{fmtS(saldo)}</strong></span>
         <span style={{ fontSize: 10, color: '#888', marginLeft: 'auto', display: 'flex', gap: 8 }}>
           {sFact !== 0 && <span>Fact: <strong style={{ color: colS(sFact) }}>{fmtS(sFact)}</strong></span>}
@@ -621,6 +635,7 @@ function CuentaCorrienteSection({ clienteId, refreshKey }) {
         <thead>
           <tr>
             <th style={{ ...S.th, textAlign: 'left' }}>Fecha</th>
+            <th style={S.th}>Tipo</th>
             <th style={{ ...S.th, textAlign: 'left' }}>Concepto</th>
             <th style={{ ...S.th, textAlign: 'right' }}>DEBE</th>
             <th style={{ ...S.th, textAlign: 'right' }}>HABER</th>
@@ -631,11 +646,15 @@ function CuentaCorrienteSection({ clienteId, refreshKey }) {
         <tbody>
           {displayRows.map(r => {
             const debe = isDebe(r)
+            const m = meta(r)
             return (
               <tr key={r.id}>
                 <td style={{ ...S.td, textAlign: 'left', whiteSpace: 'nowrap' }}>{fmtF(r.fecha)}</td>
-                <td style={{ ...S.td, textAlign: 'left', color: '#555', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{concepto(r)}</td>
-                <td style={{ ...S.td, textAlign: 'right', color: debe ? '#8a2020' : '#ccc', fontWeight: debe ? 700 : 400 }}>{debe ? fmtMoneda(r.monto) : ''}</td>
+                <td style={{ ...S.td, whiteSpace: 'nowrap' }}>
+                  <span style={{ fontFamily: F, fontSize: 9, fontWeight: 700, padding: '1px 5px', border: `1px solid ${m.color}`, color: m.color, background: m.bg, borderRadius: 2 }}>{m.label}</span>
+                </td>
+                <td style={{ ...S.td, textAlign: 'left', color: '#555', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{concepto(r)}</td>
+                <td style={{ ...S.td, textAlign: 'right', color: debe ? m.color : '#ccc', fontWeight: debe ? 700 : 400 }}>{debe ? fmtMoneda(r.monto) : ''}</td>
                 <td style={{ ...S.td, textAlign: 'right', color: !debe ? '#1a5a1a' : '#ccc', fontWeight: !debe ? 700 : 400 }}>{!debe ? fmtMoneda(r.monto) : ''}</td>
                 <td style={{ ...S.td, textAlign: 'right', fontWeight: 700, color: colS(r.saldo) }}>{fmtS(r.saldo)}</td>
                 <td style={{ ...S.td, whiteSpace: 'nowrap' }}>
