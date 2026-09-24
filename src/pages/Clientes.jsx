@@ -468,6 +468,24 @@ function MovCardCliente({ mov, onDelete, onRefresh }) {
   const montoMostrar = itemsConPrecio.reduce((s, it) => s + (it.cantidad || 0) * Number(it.precio_unit), 0)
   const tieneSinPrecio = itemsSinPrecio.length > 0
 
+  // Inferir con/sin IVA: comparar precio_unit con precio_venta del producto
+  const ivaLabel = (() => {
+    if (itemsConPrecio.length === 0) return null
+    const modos = itemsConPrecio.map(it => {
+      const pv = it.productos?.precio_venta
+      if (pv == null) return null
+      const pu = Number(it.precio_unit)
+      const conIVA = Math.round(Number(pv))
+      const sinIVA = Math.round(Number(pv) / 1.22)
+      if (pu === conIVA) return 'conIVA'
+      if (pu === sinIVA) return 'sinIVA'
+      return null
+    })
+    const unique = [...new Set(modos.filter(Boolean))]
+    if (unique.length === 1) return unique[0]
+    return null
+  })()
+
   return (
     <div style={{ ...S.card, borderColor: tipo.color }}>
       <div style={{ ...S.cardHead, background: `linear-gradient(to bottom, ${tipo.color}22, ${tipo.color}11)` }}>
@@ -478,7 +496,7 @@ function MovCardCliente({ mov, onDelete, onRefresh }) {
           <span style={{ fontSize: 10, color: '#888' }}>{total} prenda{total !== 1 ? 's' : ''}</span>
           {mov.tipo === 'entrega' && (montoMostrar > 0 || tieneSinPrecio) && (
             <span style={{ fontSize: 11, fontWeight: 700, color: '#c06060', marginLeft: 4 }}>
-              {montoMostrar > 0 ? fmtMoneda(montoMostrar) : ''}
+              {montoMostrar > 0 && <>{fmtMoneda(montoMostrar)}{ivaLabel && <span style={{ fontWeight: 400, color: '#888', marginLeft: 3 }}>{ivaLabel === 'conIVA' ? 'c/IVA' : 's/IVA'}</span>}</>}
               {tieneSinPrecio && <span style={{ color: '#b06000', marginLeft: montoMostrar > 0 ? 4 : 0 }}>⚠ precio sin cargar</span>}
             </span>
           )}
