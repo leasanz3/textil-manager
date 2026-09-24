@@ -525,12 +525,20 @@ function MovCardCliente({ mov, onDelete, onRefresh }) {
               {items.map(it => {
                 const pu = it.precio_unit != null ? Number(it.precio_unit) : null
                 const subtotal = pu != null ? (it.cantidad || 0) * pu : null
+                const pv = it.productos?.precio_venta != null ? Number(it.productos.precio_venta) : null
+                const puIva = pu != null && pv != null
+                  ? (pu === Math.round(pv) ? 'c/IVA' : pu === Math.round(pv / 1.22) ? 's/IVA' : null)
+                  : null
                 return (
                   <tr key={it.id}>
                     <td style={{ ...S.td, textAlign: 'left' }}>{it.productos?.nombre || '?'}</td>
                     <td style={S.td}>{it.talle}</td>
                     <td style={S.td}>{it.cantidad}</td>
-                    {mov.tipo === 'entrega' && <td style={{ ...S.td, color: '#555' }}>{pu != null ? fmtMoneda(pu) : '—'}</td>}
+                    {mov.tipo === 'entrega' && (
+                      <td style={{ ...S.td, color: '#555', whiteSpace: 'nowrap' }}>
+                        {pu != null ? <>{fmtMoneda(pu)}{puIva && <span style={{ fontSize: 9, color: '#999', marginLeft: 3 }}>{puIva}</span>}</> : '—'}
+                      </td>
+                    )}
                     {mov.tipo === 'entrega' && <td style={{ ...S.td, fontWeight: 700, color: '#1a5a1a' }}>{subtotal != null ? fmtMoneda(subtotal) : '—'}</td>}
                   </tr>
                 )
