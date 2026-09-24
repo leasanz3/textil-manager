@@ -291,7 +291,20 @@ function ModalEntregaCliente({ clienteId, clienteNombre, onClose, onSave }) {
     }, 250)
   }
 
-  function updateItem(i, val) { setItems(prev => prev.map((it, j) => j === i ? val : it)) }
+  function updateItem(i, val) {
+    setItems(prev => {
+      const next = prev.map((it, j) => j === i ? val : it)
+      // Auto-set esFact desde precioMode cuando todavía no fue elegido por el usuario
+      setEsFact(cur => {
+        if (cur !== null) return cur
+        const modes = next.map(it => it.precioMode).filter(Boolean)
+        const unique = [...new Set(modes)]
+        if (unique.length === 1) return unique[0] === 'conIVA' ? true : false
+        return cur
+      })
+      return next
+    })
+  }
   function removeItem(i)      { setItems(prev => prev.filter((_, j) => j !== i)) }
 
   async function save() {
@@ -913,7 +926,7 @@ export default function Clientes({ onMenuClick }) {
             </div>
           ) : (
             <>
-              <CuentaCorrienteSection clienteId={selCid} refreshKey={ccRefresh} />
+              <CuentaCorrienteSection key={selCid} clienteId={selCid} refreshKey={ccRefresh} />
               <ClienteBlock
                 nombre={selGrupo.nombre}
                 movs={selGrupo.movs}
