@@ -554,7 +554,7 @@ function MovCardCliente({ mov, onDelete, onRefresh }) {
   )
 }
 
-function CuentaCorrienteSection({ clienteId }) {
+function CuentaCorrienteSection({ clienteId, refreshKey }) {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(false)
 
@@ -570,7 +570,7 @@ function CuentaCorrienteSection({ clienteId }) {
     if (!clienteId) return
     setLoading(true)
     fetchRows().finally(() => setLoading(false))
-  }, [clienteId])
+  }, [clienteId, refreshKey])
 
   async function setFact(id, val) {
     await supabase.from('cuenta_corriente').update({ facturado: val }).eq('id', id)
@@ -741,6 +741,7 @@ export default function Clientes({ onMenuClick }) {
   const [devolviendo,  setDevolviendo]  = useState(false)
   const [entregando,   setEntregando]   = useState(false)
   const [facturando,   setFacturando]   = useState(false)
+  const [ccRefresh,    setCcRefresh]    = useState(0)
   const initialLoad = useRef(true)
 
   useEffect(() => { fetchAll() }, [])
@@ -863,7 +864,7 @@ export default function Clientes({ onMenuClick }) {
             </div>
           ) : (
             <>
-              <CuentaCorrienteSection clienteId={selCid} />
+              <CuentaCorrienteSection clienteId={selCid} refreshKey={ccRefresh} />
               <ClienteBlock
                 nombre={selGrupo.nombre}
                 movs={selGrupo.movs}
@@ -882,7 +883,7 @@ export default function Clientes({ onMenuClick }) {
           clienteId={selGrupo?.cid}
           clienteNombre={selGrupo?.nombre}
           onClose={() => setEntregando(false)}
-          onSave={() => { setEntregando(false); fetchAll() }}
+          onSave={() => { setEntregando(false); fetchAll(); setCcRefresh(n => n + 1) }}
         />
       )}
       {facturando && selGrupo && (
@@ -890,7 +891,7 @@ export default function Clientes({ onMenuClick }) {
           clienteId={selGrupo.cid}
           clienteNombre={selGrupo.nombre}
           onClose={() => setFacturando(false)}
-          onSave={() => { setFacturando(false); fetchAll() }}
+          onSave={() => { setFacturando(false); fetchAll(); setCcRefresh(n => n + 1) }}
         />
       )}
       {devolviendo && selGrupo && (
@@ -898,7 +899,7 @@ export default function Clientes({ onMenuClick }) {
           clienteId={selGrupo.cid}
           clienteNombre={selGrupo.nombre}
           onClose={() => setDevolviendo(false)}
-          onSave={() => { setDevolviendo(false); fetchAll() }}
+          onSave={() => { setDevolviendo(false); fetchAll(); setCcRefresh(n => n + 1) }}
         />
       )}
     </div>
