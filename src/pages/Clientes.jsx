@@ -138,12 +138,12 @@ function ModalDevolucionCliente({ clienteId, clienteNombre, onClose, onSave }) {
 }
 
 function newEntregaItem() {
-  return { producto_id: null, prodQ: '', prodRes: [], tabla: 'adulto', talles: TALLES_ADULTO, conNino: false, cantidades: {}, precio_unitario: '' }
+  return { producto_id: null, prodQ: '', prodRes: [], tabla: 'adulto', talles: TALLES_ADULTO, conNino: false, cantidades: {}, precio_unitario: '', precioConIVA: null, precioSinIVA: null, precioMode: null }
 }
 
 const fmtMoneda = v => v == null ? '—' : `$${Number(v).toLocaleString('es-UY', { minimumFractionDigits: 0 })}`
 
-function EntregaItemProd({ item, index, onChange, onRemove, timers }) {
+function EntregaItemProd({ item, index, onChange, onRemove, timers, clienteId }) {
   const ref = useRef(null)
 
   function onProdInput(val) {
@@ -156,9 +156,30 @@ function EntregaItemProd({ item, index, onChange, onRemove, timers }) {
     }, 250)
   }
 
-  function pickProd(p) {
+  async function pickProd(p) {
     const talles = TABLAS_TALLES[p.tabla] || TALLES_ADULTO
-    onChange(index, { ...item, producto_id: p.id, prodQ: p.nombre, prodRes: [], tabla: p.tabla, talles, conNino: false, cantidades: {}, precio_unitario: p.precio_venta != null ? String(p.precio_venta) : '' })
+    const precioConIVA = p.precio_venta != null ? Math.round(Number(p.precio_venta)) : null
+    const precioSinIVA = p.precio_venta != null ? Math.round(Number(p.precio_venta) / 1.22) : null
+    // Buscar último precio usado para este cliente + producto
+    let precioMode = null
+    let precio_unitario = ''
+    if (clienteId && p.id) {
+      const { data: hist } = await supabase
+        .from('taller_movimientos_items')
+        .select('precio_unit, taller_movimientos!inner(contacto_id)')
+        .eq('producto_id', p.id)
+        .eq('taller_movimientos.contacto_id', clienteId)
+        .not('precio_unit', 'is', null)
+        .order('taller_movimientos.fecha', { ascending: false })
+        .limit(1)
+      if (hist?.length > 0) {
+        const lastPu = Math.round(Number(hist[0].precio_unit))
+        if (precioConIVA != null && lastPu === precioConIVA) { precioMode = 'conIVA'; precio_unitario = String(precioConIVA) }
+        else if (precioSinIVA != null && lastPu === precioSinIVA) { precioMode = 'sinIVA'; precio_unitario = String(precioSinIVA) }
+        else { precio_unitario = String(hist[0].precio_unit) }
+      }
+    }
+    onChange(index, { ...item, producto_id: p.id, prodQ: p.nombre, prodRes: [], tabla: p.tabla, talles, conNino: false, cantidades: {}, precioConIVA, precioSinIVA, precioMode, precio_unitario })
   }
 
   function toggleNino() {
@@ -214,15 +235,29 @@ function EntregaItemProd({ item, index, onChange, onRemove, timers }) {
               </tr></tbody>
             </table>
           </div>
-          <div style={{ display:'flex', gap:10, alignItems:'center', marginTop:4, background:'#eaf4ea', border:'1px solid #b0d0b0', padding:'4px 8px' }}>
-            <span style={{ fontSize:11, color:'#555' }}>Precio/u:</span>
+          <div style={{ display:'flex', gap:6, alignItems:'center', marginTop:4, background:'#eaf4ea', border:'1px solid #b0d0b0', padding:'4px 8px', flexWrap:'wrap' }}>
+            <span style={{ fontSize:11, color:'#555' }}>P/u:</span>
             <span style={{ fontWeight:700 }}>$</span>
-            <input style={{ ...S.inp, width:80, fontSize:12, fontWeight:700 }} type="number" min="0" step="0.01"
-              value={item.precio_unitario} onChange={e => onChange(index, { ...item, precio_unitario: e.target.value })}
-              placeholder="0.00" />
+            <input style={{ ...S.inp, width:70, fontSize:12, fontWeight:700 }} type="number" min="0" step="1"
+              value={item.precio_unitario} onChange={e => onChange(index, { ...item, precio_unitario: e.target.value, precioMode: null })}
+              placeholder="0" />
+            {item.precioConIVA != null && (
+              <button
+                onClick={() => onChange(index, { ...item, precio_unitario: String(item.precioConIVA), precioMode: 'conIVA' })}
+                style={{ fontFamily: F, fontSize: 10, padding: '1px 6px', cursor: 'pointer', border: `1px solid ${item.precioMode === 'conIVA' ? '#1a5a1a' : '#aaa'}`, background: item.precioMode === 'conIVA' ? '#1a5a1a' : '#f0f0e8', color: item.precioMode === 'conIVA' ? '#fff' : '#333', borderRadius: 2 }}>
+                Con IVA ${item.precioConIVA}
+              </button>
+            )}
+            {item.precioSinIVA != null && item.precioSinIVA !== item.precioConIVA && (
+              <button
+                onClick={() => onChange(index, { ...item, precio_unitario: String(item.precioSinIVA), precioMode: 'sinIVA' })}
+                style={{ fontFamily: F, fontSize: 10, padding: '1px 6px', cursor: 'pointer', border: `1px solid ${item.precioMode === 'sinIVA' ? '#7a3a00' : '#aaa'}`, background: item.precioMode === 'sinIVA' ? '#7a3a00' : '#f0f0e8', color: item.precioMode === 'sinIVA' ? '#fff' : '#333', borderRadius: 2 }}>
+                Sin IVA ${item.precioSinIVA}
+              </button>
+            )}
             {qty > 0 && precio > 0 && (
               <span style={{ fontSize:12, color:'#1a5a1a', fontWeight:700, marginLeft:4 }}>
-                × {qty} u. = {fmtMoneda(subtotal)}
+                × {qty}u = {fmtMoneda(subtotal)}
               </span>
             )}
             {qty > 0 && precio === 0 && (
@@ -275,7 +310,7 @@ function ModalEntregaCliente({ clienteId, clienteNombre, onClose, onSave }) {
       .insert({ tipo: 'entrega', fecha, contacto_id: cliId, nota: nota.trim() || null, user_id: user?.id })
       .select().single()
     if (error) { alert('Error: ' + error.message); setSaving(false); return }
-    await supabase.from('taller_movimientos_items').insert(rows.map(r => ({ movimiento_id: mov.id, producto_id: r.producto_id, talle: r.talle, cantidad: r.cantidad })))
+    await supabase.from('taller_movimientos_items').insert(rows.map(r => ({ movimiento_id: mov.id, producto_id: r.producto_id, talle: r.talle, cantidad: r.cantidad, precio_unit: r.precio_unitario > 0 ? r.precio_unitario : null })))
     // Crear deuda automática en cuenta corriente
     const total = rows.reduce((s, r) => s + r.cantidad * r.precio_unitario, 0)
     if (total > 0) {
@@ -319,7 +354,7 @@ function ModalEntregaCliente({ clienteId, clienteNombre, onClose, onSave }) {
           </div>
           <span style={lbl}>Productos</span>
           {items.map((it, i) => (
-            <EntregaItemProd key={i} item={it} index={i} onChange={updateItem} onRemove={removeItem} timers={timers} />
+            <EntregaItemProd key={i} item={it} index={i} onChange={updateItem} onRemove={removeItem} timers={timers} clienteId={cliId} />
           ))}
           <button style={{ ...S.btn, fontSize:10, marginBottom:10 }} onClick={() => setItems(prev => [...prev, newEntregaItem()])}>+ producto</button>
           <div>
@@ -413,21 +448,15 @@ function ModalEditarMonto({ mov, onClose, onSave }) {
 function MovCardCliente({ mov, onDelete, onRefresh }) {
   const [collapsed,  setCollapsed]  = useState(false)
   const [editando,   setEditando]   = useState(false)
-  const [ccMonto,    setCcMonto]    = useState(null)
   const tipo   = TIPOS_CLIENTE.find(t => t.id === mov.tipo) || { label: mov.tipo, icon: '📋', color: '#666' }
   const items  = mov.taller_movimientos_items || []
   const total  = items.reduce((s, it) => s + (it.cantidad || 0), 0)
-  const montoCalc = mov.tipo === 'entrega'
-    ? items.reduce((s, it) => s + (it.cantidad || 0) * (it.productos?.precio_venta || 0), 0)
-    : 0
 
-  useEffect(() => {
-    if (mov.tipo !== 'entrega') return
-    supabase.from('cuenta_corriente').select('monto').eq('movimiento_id', mov.id).single()
-      .then(({ data }) => { if (data) setCcMonto(data.monto) })
-  }, [mov.id, mov.tipo])
-
-  const montoMostrar = ccMonto != null ? ccMonto : montoCalc
+  // Total = suma de subtotales de ítems con precio_unit cargado
+  const itemsConPrecio = mov.tipo === 'entrega' ? items.filter(it => it.precio_unit != null) : []
+  const itemsSinPrecio = mov.tipo === 'entrega' ? items.filter(it => it.precio_unit == null) : []
+  const montoMostrar = itemsConPrecio.reduce((s, it) => s + (it.cantidad || 0) * Number(it.precio_unit), 0)
+  const tieneSinPrecio = itemsSinPrecio.length > 0
 
   return (
     <div style={{ ...S.card, borderColor: tipo.color }}>
@@ -437,8 +466,11 @@ function MovCardCliente({ mov, onDelete, onRefresh }) {
           <span style={S.tag(tipo.color)}>{tipo.icon} {tipo.label}</span>
           <span style={{ fontWeight: 700, fontSize: 12 }}>{fmtF(mov.fecha)}</span>
           <span style={{ fontSize: 10, color: '#888' }}>{total} prenda{total !== 1 ? 's' : ''}</span>
-          {montoMostrar > 0 && (
-            <span style={{ fontSize: 11, fontWeight: 700, color: '#c06060', marginLeft: 4 }}>{fmtMoneda(montoMostrar)}</span>
+          {mov.tipo === 'entrega' && (montoMostrar > 0 || tieneSinPrecio) && (
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#c06060', marginLeft: 4 }}>
+              {montoMostrar > 0 ? fmtMoneda(montoMostrar) : ''}
+              {tieneSinPrecio && <span style={{ color: '#b06000', marginLeft: montoMostrar > 0 ? 4 : 0 }}>⚠ precio sin cargar</span>}
+            </span>
           )}
         </div>
         <div style={{ display: 'flex', gap: 4 }}>
@@ -457,16 +489,24 @@ function MovCardCliente({ mov, onDelete, onRefresh }) {
                 <th style={{ ...S.th, textAlign: 'left' }}>Producto</th>
                 <th style={S.th}>Talle</th>
                 <th style={S.th}>Cant.</th>
+                {mov.tipo === 'entrega' && <th style={S.th}>P/U</th>}
+                {mov.tipo === 'entrega' && <th style={S.th}>Subtotal</th>}
               </tr>
             </thead>
             <tbody>
-              {items.map(it => (
-                <tr key={it.id}>
-                  <td style={{ ...S.td, textAlign: 'left' }}>{it.productos?.nombre || '?'}</td>
-                  <td style={S.td}>{it.talle}</td>
-                  <td style={S.td}>{it.cantidad}</td>
-                </tr>
-              ))}
+              {items.map(it => {
+                const pu = it.precio_unit != null ? Number(it.precio_unit) : null
+                const subtotal = pu != null ? (it.cantidad || 0) * pu : null
+                return (
+                  <tr key={it.id}>
+                    <td style={{ ...S.td, textAlign: 'left' }}>{it.productos?.nombre || '?'}</td>
+                    <td style={S.td}>{it.talle}</td>
+                    <td style={S.td}>{it.cantidad}</td>
+                    {mov.tipo === 'entrega' && <td style={{ ...S.td, color: '#555' }}>{pu != null ? fmtMoneda(pu) : '—'}</td>}
+                    {mov.tipo === 'entrega' && <td style={{ ...S.td, fontWeight: 700, color: '#1a5a1a' }}>{subtotal != null ? fmtMoneda(subtotal) : '—'}</td>}
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -522,7 +562,7 @@ export default function Clientes({ onMenuClick }) {
       .from('taller_movimientos')
       .select(`id, tipo, fecha, nota, created_at,
         contactos(id, nombre),
-        taller_movimientos_items(id, producto_id, talle, cantidad,
+        taller_movimientos_items(id, producto_id, talle, cantidad, precio_unit,
           productos(id, nombre, precio_venta))`)
       .in('tipo', ['entrega', 'devolucion_cliente'])
       .order('fecha', { ascending: false })
