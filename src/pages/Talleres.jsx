@@ -12,8 +12,8 @@ function cmpTalle(a, b) {
   if (ai !== -1 && bi !== -1) return ai - bi
   const an = parseInt(a), bn = parseInt(b)
   if (!isNaN(an) && !isNaN(bn)) return an - bn
-  if (!isNaN(an)) return -1   // numérico antes que letra
-  if (!isNaN(bn)) return 1
+  if (!isNaN(an)) return 1    // numérico después que letra
+  if (!isNaN(bn)) return -1
   return String(a).localeCompare(String(b))
 }
 
@@ -27,6 +27,13 @@ const TIPOS = [
 ]
 const fmtMoneda = (m) => m != null ? '$ ' + Number(m).toLocaleString('es-AR', { minimumFractionDigits: 0 }) : '—'
 const TIPO_BY_ID = Object.fromEntries(TIPOS.map(t => [t.id, t]))
+const LOTE_COLORS = ['#d0e8ff','#d0f0d8','#fff0c8','#f0d8ff','#ffd8d0','#d8f0f0','#f8e0b8','#e0d8f8']
+function loteColor(loteId) {
+  if (!loteId) return '#e8e8e0'
+  let h = 0
+  for (let i = 0; i < loteId.length; i++) h = (h * 31 + loteId.charCodeAt(i)) >>> 0
+  return LOTE_COLORS[h % LOTE_COLORS.length]
+}
 
 const S = {
   wrap:     { display: 'flex', flexDirection: 'column', height: '100vh', fontFamily: F, fontSize: 11, color: '#000', background: '#d4d0c8' },
@@ -369,12 +376,19 @@ function ModalNuevo({ onClose, onSave, tipoInicial, tallerInicial, itemsInicial 
           return sum + qty * (parseFloat(it.precio_confeccion) || 0)
         }, 0) || null)
       : (monto && parseFloat(monto) > 0 ? parseFloat(monto) : null)
-    // Un lote por producto (no por movimiento)
+    // Un lote por producto — formato: {CODIGO_PROD}-{seq:003}
     const lotesPorProd = {}
     if (tipo === 'envio') {
       for (const r of rows) {
-        if (!lotesPorProd[r.producto_id])
-          lotesPorProd[r.producto_id] = 'LOT-' + fecha.replace(/-/g, '') + '-' + Math.random().toString(36).slice(2, 8).toUpperCase()
+        if (!lotesPorProd[r.producto_id]) {
+          const { data: prod } = await supabase.from('productos').select('codigo').eq('id', r.producto_id).single()
+          const codigo = prod?.codigo || 'PROD'
+          const { data: existing } = await supabase.from('taller_movimientos_items')
+            .select('lote_id').eq('producto_id', r.producto_id).not('lote_id', 'is', null)
+          const uniqueLotes = new Set((existing || []).map(x => x.lote_id))
+          const seq = (uniqueLotes.size + 1).toString().padStart(3, '0')
+          lotesPorProd[r.producto_id] = `${codigo}-L${seq}`
+        }
       }
     }
     const { data: mov, error } = await supabase.from('taller_movimientos')
@@ -412,7 +426,7 @@ function ModalNuevo({ onClose, onSave, tipoInicial, tallerInicial, itemsInicial 
 
 // ── Modal: Editar movimiento ──────────────────────────────────────────────────
 
-function ModalEditar({ mov, onClose, onSave }) {
+function ModalEditar({ mov, onClose, onSave, onDelete }) {
   const [tipo,      setTipo]      = useState(mov.tipo)
   const [fecha,     setFecha]     = useState(mov.fecha)
   const [tallerQ,   setTallerQ]   = useState(mov.contactos?.nombre || '')
@@ -429,7 +443,7 @@ function ModalEditar({ mov, onClose, onSave }) {
       if (!byProd[pid]) {
         const tabla  = it.productos?.tabla || 'adulto'
         const talles = TABLAS_TALLES[tabla] || TALLES_ADULTO
-        byProd[pid] = { producto_id: pid, prodQ: it.productos?.nombre || '', prodRes: [], tabla, talles, conNino: false, cantidades: {}, observacion: it.observacion || '', precio_confeccion: it.productos?.costo_confeccion ?? null }
+        byProd[pid] = { producto_id: pid, prodQ: it.productos?.nombre || '', prodRes: [], tabla, talles, conNino: false, cantidades: {}, observacion: it.observacion || '', precio_confeccion: it.precio_unit ?? it.productos?.costo_confeccion ?? null }
       }
       byProd[pid].cantidades[it.talle] = String(it.cantidad)
       if (TALLES_NINO.includes(it.talle)) {
@@ -439,22 +453,23 @@ function ModalEditar({ mov, onClose, onSave }) {
     }
     return Object.values(byProd).length ? Object.values(byProd) : [newItem()]
   })
-  const [saving, setSaving] = useState(false)
+  const [ctrl,        setCtrl]        = useState({}) // `${pid}__${talle}` → { cant_ok, cant_falla }
+  const [saving,      setSaving]      = useState(false)
+  const [confirmDel,  setConfirmDel]  = useState(false)
   const timers = useRef({})
 
   useEffect(() => {
     if (mov.tipo !== 'recepcion') return
-    const ids = [...new Set((mov.taller_movimientos_items || []).map(it => it.producto_id).filter(Boolean))]
-    if (!ids.length) return
-    supabase.from('productos').select('id, costo_confeccion').in('id', ids).then(({ data }) => {
-      if (!data) return
+    supabase.from('taller_control_items').select('*').eq('movimiento_id', mov.id).then(({ data }) => {
       const map = {}
-      data.forEach(p => { map[p.id] = p.costo_confeccion })
-      setItems(prev => prev.map(it => it.producto_id && map[it.producto_id] != null
-        ? { ...it, precio_confeccion: map[it.producto_id] }
-        : it))
+      for (const c of (data || [])) map[`${c.producto_id}__${c.talle}`] = { cant_ok: String(c.cant_ok ?? ''), cant_falla: String(c.cant_falla ?? '') }
+      setCtrl(map)
     })
   }, [])
+
+  function setCtrlField(key, field, val) {
+    setCtrl(prev => ({ ...prev, [key]: { ...(prev[key] || {}), [field]: val } }))
+  }
 
   async function save() {
     if (!tallerId) { alert('Seleccioná un taller'); return }
@@ -474,18 +489,48 @@ function ModalEditar({ mov, onClose, onSave }) {
         }, 0) || null)
       : (monto && parseFloat(monto) > 0 ? parseFloat(monto) : null)
     await supabase.from('taller_movimientos').update({ tipo, fecha, contacto_id: tallerId, nota: nota.trim() || null, monto: montoVal }).eq('id', mov.id)
-    // Preservar lote_id por producto antes de borrar
     const { data: existingItems } = await supabase.from('taller_movimientos_items').select('producto_id, lote_id').eq('movimiento_id', mov.id)
     const lotesPorProd = {}
-    for (const it of (existingItems || [])) if (it.lote_id) lotesPorProd[it.producto_id] = it.lote_id
+    for (const it of (existingItems || [])) { if (it.lote_id) lotesPorProd[it.producto_id] = it.lote_id }
     await supabase.from('taller_movimientos_items').delete().eq('movimiento_id', mov.id)
     for (const r of rows) await supabase.from('taller_movimientos_items').insert({ movimiento_id: mov.id, ...r, lote_id: lotesPorProd[r.producto_id] || null })
+    if (tipo === 'recepcion') {
+      await supabase.from('taller_control_items').delete().eq('movimiento_id', mov.id)
+      for (const [key, val] of Object.entries(ctrl)) {
+        const [pidStr, talle] = key.split('__')
+        const cant_ok = parseInt(val.cant_ok) || 0
+        const cant_falla = parseInt(val.cant_falla) || 0
+        if (cant_ok + cant_falla > 0) {
+          await supabase.from('taller_control_items').insert({ movimiento_id: mov.id, producto_id: parseInt(pidStr), talle, cant_ok, cant_falla })
+        }
+      }
+    }
     setSaving(false); onSave()
+  }
+
+  async function handleDelete() {
+    setSaving(true)
+    await onDelete(mov.id)
+    setSaving(false)
+  }
+
+  // Build calidad rows from current items (for recepcion)
+  const calidadRows = []
+  if (tipo === 'recepcion') {
+    for (const it of items) {
+      if (!it.producto_id) continue
+      for (const [talle, cantStr] of Object.entries(it.cantidades || {})) {
+        const cantidad = parseInt(cantStr) || 0
+        if (cantidad <= 0) continue
+        const key = `${it.producto_id}__${talle}`
+        calidadRows.push({ key, prodNombre: it.prodQ, talle, cantidad, pid: it.producto_id })
+      }
+    }
   }
 
   return (
     <div style={S.overlay} onClick={onClose}>
-      <div style={S.modal} onClick={e => e.stopPropagation()}>
+      <div style={{ ...S.modal, width: 680 }} onClick={e => e.stopPropagation()}>
         <div style={S.modalH}>
           <span>Editar movimiento</span>
           <button style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: F }} onClick={onClose}>✕</button>
@@ -498,10 +543,69 @@ function ModalEditar({ mov, onClose, onSave }) {
             tabItems={tabItems} setTabItems={setTabItems}
             fallasSel={fallasSel} setFallasSel={setFallasSel}
             timers={timers} modoEditar />
+
+          {/* Control de calidad integrado */}
+          {tipo === 'recepcion' && calidadRows.length > 0 && (
+            <div style={{ marginTop: 12, border: '1px solid #b0c8b0', background: '#f4faf4' }}>
+              <div style={{ padding: '5px 10px', background: '#d0e8d0', borderBottom: '1px solid #b0c8b0', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontWeight: 700, fontSize: 12 }}>Control de calidad</span>
+                <button style={{ ...S.btn, fontSize: 10, padding: '1px 8px', marginLeft: 'auto', color: '#2a6a10', fontWeight: 700, border: '1px solid #5a9a30' }}
+                  onClick={() => {
+                    const next = {}
+                    for (const r of calidadRows) next[r.key] = { cant_ok: String(r.cantidad), cant_falla: '0' }
+                    setCtrl(next)
+                  }}>✅ Todo OK</button>
+              </div>
+              <table style={{ ...S.tbl, fontSize: 12 }}>
+                <thead><tr>
+                  <th style={S.thL}>Producto</th>
+                  <th style={S.th}>Talle</th>
+                  <th style={S.th}>Cant.</th>
+                  <th style={S.th}>✅ OK</th>
+                  <th style={S.th}>⚠ Falla</th>
+                </tr></thead>
+                <tbody>
+                  {calidadRows.map(r => {
+                    const v = ctrl[r.key] || {}
+                    const hasFalla = parseInt(v.cant_falla) > 0
+                    return (
+                      <tr key={r.key} style={{ background: hasFalla ? '#fff0ee' : 'transparent' }}>
+                        <td style={S.tdL}>{r.prodNombre}</td>
+                        <td style={{ ...S.td, fontWeight: 700 }}>{r.talle}</td>
+                        <td style={S.td}>{r.cantidad}</td>
+                        <td style={S.td}>
+                          <input style={{ ...S.inpC, width: 44, background: parseInt(v.cant_ok) > 0 ? '#e8f8e8' : undefined }}
+                            type="number" min="0" max={r.cantidad}
+                            value={v.cant_ok ?? ''} onChange={e => setCtrlField(r.key, 'cant_ok', e.target.value)} />
+                        </td>
+                        <td style={S.td}>
+                          <input style={{ ...S.inpC, width: 44, background: hasFalla ? '#ffe8e0' : undefined }}
+                            type="number" min="0" max={r.cantidad}
+                            value={v.cant_falla ?? ''} onChange={e => setCtrlField(r.key, 'cant_falla', e.target.value)} />
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
-        <div style={{ padding: '8px 12px', borderTop: '1px solid #c0c0b0', display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
-          <button style={S.btn} onClick={onClose}>Cancelar</button>
-          <button style={S.btnP} onClick={save} disabled={saving}>{saving ? 'Guardando...' : 'Guardar'}</button>
+
+        <div style={{ padding: '8px 12px', borderTop: '1px solid #c0c0b0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+          {/* Delete con confirmación */}
+          {!confirmDel
+            ? <button style={{ ...S.btn, color: '#8a0000', border: '1px solid #c08080', fontSize: 11 }} onClick={() => setConfirmDel(true)}>Eliminar movimiento</button>
+            : <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <span style={{ fontSize: 11, color: '#8a0000', fontWeight: 700 }}>¿Confirmar eliminación?</span>
+                <button style={{ ...S.btn, color: '#fff', background: '#a03030', border: '1px solid #801010', fontWeight: 700 }} onClick={handleDelete} disabled={saving}>Sí, eliminar</button>
+                <button style={S.btn} onClick={() => setConfirmDel(false)}>Cancelar</button>
+              </div>
+          }
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button style={S.btn} onClick={onClose}>Cancelar</button>
+            <button style={S.btnP} onClick={save} disabled={saving}>{saving ? 'Guardando...' : 'Guardar'}</button>
+          </div>
         </div>
       </div>
     </div>
@@ -520,7 +624,8 @@ function buildRows(tipo, tabItems, items, fallasSel) {
       if (!it.producto_id) continue
       for (const [talle, cant] of Object.entries(it.cantidades || {})) {
         const cantidad = parseInt(cant) || 0
-        if (cantidad > 0) rows.push({ producto_id: it.producto_id, talle, cantidad, observacion: it.observacion?.trim() || null })
+        const precioUnit = parseFloat(it.precio_confeccion) || null
+        if (cantidad > 0) rows.push({ producto_id: it.producto_id, talle, cantidad, observacion: it.observacion?.trim() || null, precio_unit: precioUnit })
       }
     }
   }
@@ -528,6 +633,125 @@ function buildRows(tipo, tabItems, items, fallasSel) {
 }
 
 // ── Modal: Control de calidad ─────────────────────────────────────────────────
+
+// ── Modal: Control de calidad (paso separado del RECIBIDO) ───────────────────
+
+function ModalControl({ movId, items, tallerNombre, onClose, onSave }) {
+  const [entries, setEntries] = useState([])
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    supabase.from('taller_control_items').select('*').eq('movimiento_id', movId).then(({ data }) => {
+      const map = {}
+      for (const c of (data || [])) map[`${c.producto_id}__${c.talle}`] = c
+      setEntries(items.map(it => {
+        const ex = map[`${it.producto_id}__${it.talle}`]
+        return {
+          producto_id: it.producto_id,
+          prodNombre: it.productos?.nombre || '?',
+          talle: it.talle,
+          cantidad: it.cantidad,
+          cant_ok: ex ? String(ex.cant_ok ?? '') : '',
+          cant_falla: ex ? String(ex.cant_falla ?? '') : '',
+          observacion: ex?.observacion || '',
+        }
+      }))
+    })
+  }, [movId])
+
+  function setField(i, field, val) {
+    setEntries(prev => prev.map((e, j) => j === i ? { ...e, [field]: val } : e))
+  }
+
+  function todoOk() {
+    setEntries(prev => prev.map(e => ({ ...e, cant_ok: String(e.cantidad), cant_falla: '0' })))
+  }
+
+  async function save() {
+    setSaving(true)
+    await supabase.from('taller_control_items').delete().eq('movimiento_id', movId)
+    for (const e of entries) {
+      const ok = parseInt(e.cant_ok) || 0
+      const falla = parseInt(e.cant_falla) || 0
+      if (ok + falla > 0) {
+        await supabase.from('taller_control_items').insert({
+          movimiento_id: movId, producto_id: e.producto_id,
+          talle: e.talle, cant_ok: ok, cant_falla: falla,
+          observacion: e.observacion?.trim() || null,
+        })
+      }
+    }
+    setSaving(false); onSave()
+  }
+
+  const totalFalla = entries.reduce((s, e) => s + (parseInt(e.cant_falla) || 0), 0)
+
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={{ ...S.modal, width: 580 }} onClick={e => e.stopPropagation()}>
+        <div style={{ ...S.modalH, background: 'linear-gradient(to bottom,#4a6a3a,#2a4a1a)' }}>
+          <span>🔍 Control de calidad — {tallerNombre}</span>
+          <button style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: F }} onClick={onClose}>✕</button>
+        </div>
+        <div style={S.modalB}>
+          <div style={{ fontSize: 11, color: '#555', marginBottom: 8 }}>
+            Revisá cada talle e ingresá cuántas quedaron OK y cuántas tienen falla.
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
+            <button style={{ ...S.btn, fontSize: 10, padding: '2px 10px', color: '#2a6a10', fontWeight: 700, border: '1px solid #5a9a30' }} onClick={todoOk}>✅ Todo OK</button>
+          </div>
+          <table style={S.tbl}>
+            <thead><tr>
+              <th style={S.thL}>Producto</th>
+              <th style={S.th}>Talle</th>
+              <th style={S.th}>Recibido</th>
+              <th style={S.th}>✅ OK</th>
+              <th style={S.th}>⚠ Falla</th>
+              <th style={S.thL}>Observación</th>
+            </tr></thead>
+            <tbody>
+              {entries.map((e, i) => {
+                const hasFalla = parseInt(e.cant_falla) > 0
+                return (
+                  <tr key={i} style={{ background: hasFalla ? '#fff0ee' : 'transparent' }}>
+                    <td style={S.tdL}>{e.prodNombre}</td>
+                    <td style={{ ...S.td, fontWeight: 700 }}>{e.talle}</td>
+                    <td style={{ ...S.td, color: '#666' }}>{e.cantidad}</td>
+                    <td style={S.td}>
+                      <input style={{ ...S.inpC, width: 44, background: parseInt(e.cant_ok) > 0 ? '#e8f8e8' : undefined }}
+                        type="number" min="0" max={e.cantidad}
+                        value={e.cant_ok} onChange={ev => setField(i, 'cant_ok', ev.target.value)} />
+                    </td>
+                    <td style={S.td}>
+                      <input style={{ ...S.inpC, width: 44, background: hasFalla ? '#ffe8e0' : undefined }}
+                        type="number" min="0" max={e.cantidad}
+                        value={e.cant_falla} onChange={ev => setField(i, 'cant_falla', ev.target.value)} />
+                    </td>
+                    <td style={S.tdL}>
+                      <input style={{ ...S.inp, width: '100%', fontSize: 10 }} value={e.observacion}
+                        onChange={ev => setField(i, 'observacion', ev.target.value)}
+                        placeholder={hasFalla ? 'Ej: costura suelta' : ''} />
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+          {totalFalla > 0 && (
+            <div style={{ marginTop: 8, background: '#fff0ee', border: '1px solid #e0b0b0', padding: '5px 10px', fontSize: 11, color: '#8a2a00', fontWeight: 700 }}>
+              ⚠ {totalFalla} prendas con falla — quedarán pendientes para enviar de vuelta al taller.
+            </div>
+          )}
+        </div>
+        <div style={{ padding: '8px 12px', borderTop: '1px solid #c0c0b0', display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+          <button style={S.btn} onClick={onClose}>Cancelar</button>
+          <button style={{ ...S.btnP, background: 'linear-gradient(to bottom,#4a6a3a,#2a4a1a)', border: '1px solid #2a4a1a' }}
+            onClick={save} disabled={saving}>{saving ? 'Guardando...' : 'Guardar control'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 function ModalCalidad({ mov, entregasVinculadas, controlItems, onClose, onSave }) {
   const [entries, setEntries] = useState(() => {
@@ -588,7 +812,13 @@ function ModalCalidad({ mov, entregasVinculadas, controlItems, onClose, onSave }
           <button style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: F }} onClick={onClose}>✕</button>
         </div>
         <div style={S.modalB}>
-          <div style={{ fontSize: 10, color: '#555', marginBottom: 8 }}>Por cada talle, ingresá cuántas quedaron OK y cuántas tienen falla.</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 10, color: '#555' }}>Por cada talle, ingresá cuántas quedaron OK y cuántas tienen falla.</span>
+            <button style={{ ...S.btn, fontSize: 10, padding: '2px 10px', color: '#2a6a10', fontWeight: 700, border: '1px solid #5a9a30', marginLeft: 'auto' }}
+              onClick={() => setEntries(prev => prev.map(e => ({ ...e, cant_ok: String(e.disponible), cant_falla: '0' })))}>
+              ✅ Todo OK
+            </button>
+          </div>
           <table style={S.tbl}>
             <thead><tr>
               <th style={S.thL}>Producto</th>
@@ -640,6 +870,14 @@ function ModalRecibir({ envio, onClose, onSave }) {
   const [nota,    setNota]    = useState('')
   const [saving,  setSaving]  = useState(false)
   // una fila por ítem del envío, cantidad editable
+  // Precio por producto_id (un precio para todos los talles del mismo producto)
+  const preciosPorProd = {}
+  for (const it of (envio.taller_movimientos_items || [])) {
+    if (!(it.producto_id in preciosPorProd))
+      preciosPorProd[it.producto_id] = it.precio_unit ?? it.productos?.costo_confeccion ?? null
+  }
+  const [precios, setPrecios] = useState(() => ({ ...preciosPorProd }))
+
   const [filas, setFilas] = useState(() =>
     (envio.taller_movimientos_items || []).map(it => ({
       producto_id: it.producto_id,
@@ -655,20 +893,29 @@ function ModalRecibir({ envio, onClose, onSave }) {
     setFilas(prev => prev.map((f, j) => j === i ? { ...f, cantidad: val } : f))
   }
 
+  // Monto total = suma(cant × precio) por producto
+  const montoTotal = filas.reduce((sum, f) => {
+    const cant = parseInt(f.cantidad) || 0
+    const precio = parseFloat(precios[f.producto_id]) || 0
+    return sum + cant * precio
+  }, 0)
+
   async function save() {
     const rows = filas.filter(f => parseInt(f.cantidad) > 0)
     if (!rows.length) { alert('Ingresá al menos una cantidad'); return }
     setSaving(true)
     const { data: { user } } = await supabase.auth.getUser()
     const { data: mov, error } = await supabase.from('taller_movimientos')
-      .insert({ tipo: 'recepcion', fecha, contacto_id: envio.contactos?.id || null, nota: nota.trim() || null, user_id: user?.id })
+      .insert({ tipo: 'recepcion', fecha, contacto_id: envio.contactos?.id || null, nota: nota.trim() || null, monto: montoTotal > 0 ? montoTotal : null, user_id: user?.id })
       .select().single()
     if (error) { alert('Error: ' + error.message); setSaving(false); return }
     for (const r of rows) {
+      const precioU = parseFloat(precios[r.producto_id]) || null
       await supabase.from('taller_movimientos_items').insert({
         movimiento_id: mov.id, producto_id: r.producto_id,
         talle: r.talle, cantidad: parseInt(r.cantidad) || 0,
         lote_id: r.lote_id || null,
+        precio_unit: precioU,
       })
     }
     setSaving(false); onSave()
@@ -695,21 +942,38 @@ function ModalRecibir({ envio, onClose, onSave }) {
               <th style={S.th}>Talle</th>
               <th style={S.th}>Enviado</th>
               <th style={S.th}>Recibido</th>
+              <th style={S.th}>$ / u</th>
             </tr></thead>
             <tbody>
-              {filas.map((f, i) => (
-                <tr key={i}>
-                  <td style={S.tdL}>{f.prodNombre}</td>
-                  <td style={{ ...S.td, fontWeight: 700 }}>{f.talle}</td>
-                  <td style={{ ...S.td, color: '#888' }}>{f.enviado}</td>
-                  <td style={S.td}>
-                    <input style={{ ...S.inpC, width: 44 }} type="number" min="0" max={f.enviado}
-                      value={f.cantidad} onChange={e => setCant(i, e.target.value)} />
-                  </td>
-                </tr>
-              ))}
+              {filas.map((f, i) => {
+                const esPrimeroDeProd = i === 0 || filas[i-1].producto_id !== f.producto_id
+                return (
+                  <tr key={i}>
+                    <td style={S.tdL}>{f.prodNombre}</td>
+                    <td style={{ ...S.td, fontWeight: 700 }}>{f.talle}</td>
+                    <td style={{ ...S.td, color: '#888' }}>{f.enviado}</td>
+                    <td style={S.td}>
+                      <input style={{ ...S.inpC, width: 44 }} type="number" min="0" max={f.enviado}
+                        value={f.cantidad} onChange={e => setCant(i, e.target.value)} />
+                    </td>
+                    <td style={S.td}>
+                      {esPrimeroDeProd && (
+                        <input style={{ ...S.inpC, width: 60 }} type="number" min="0" step="0.01"
+                          value={precios[f.producto_id] ?? ''}
+                          onChange={e => setPrecios(p => ({ ...p, [f.producto_id]: e.target.value === '' ? null : e.target.value }))}
+                          placeholder="0.00" />
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
+          {montoTotal > 0 && (
+            <div style={{ textAlign: 'right', fontWeight: 700, fontSize: 13, color: '#8a3a3a', marginTop: 6 }}>
+              Total a pagar: ${montoTotal.toLocaleString('es-AR')}
+            </div>
+          )}
           <div style={{ marginTop: 10 }}>
             <span style={S.lbl}>Nota</span>
             <input style={{ ...S.inp, width: '100%' }} value={nota} onChange={e => setNota(e.target.value)} placeholder="opcional" />
@@ -1532,9 +1796,12 @@ function ModalRecibirStock({ taller, stockItems, fallaControlItems, onClose, onS
       .select().single()
     if (error) { alert('Error: ' + error.message); setSaving(false); return }
     for (const r of rows) {
+      const precioU = parseFloat(precios[r.producto_id]) || null
       await supabase.from('taller_movimientos_items').insert({
         movimiento_id: mov.id, producto_id: r.producto_id,
         talle: r.talle, cantidad: parseInt(r.cantidad) || 0,
+        precio_unit: precioU,
+        lote_id: r.lote_id || null,
       })
     }
     if (esFalla && mov) {
@@ -1690,21 +1957,23 @@ function StockEnTalleres({ movimientos, controlMap, onRecibirStock, filterCid })
     }
   }
 
-  // Envíos por taller con capacidad restante (FIFO descontando recepciones)
-  const enviosPorTaller = {} // cid -> [{ envio, cap: { pid__talle: qty } }]
+  // Envíos por taller con capacidad restante (descontando recepciones por lote, luego FIFO)
+  const enviosPorTaller = {} // cid -> [{ envio, cap: { pid__talle: qty }, lotes: Set<lote_id> }]
   for (const mov of movsAsc) {
-    if (mov.tipo !== 'envio') continue
+    if (mov.tipo !== 'envio' && mov.tipo !== 'devolucion') continue
     const cid = mov.contactos?.id
     if (!cid) continue
     const cap = {}
+    const lotes = new Set()
     for (const it of (mov.taller_movimientos_items || [])) {
       const k = `${it.producto_id}__${it.talle}`
       cap[k] = (cap[k] || 0) + (it.cantidad || 0)
+      if (it.lote_id) lotes.add(it.lote_id)
     }
     if (!enviosPorTaller[cid]) enviosPorTaller[cid] = []
-    enviosPorTaller[cid].push({ envio: mov, cap })
+    enviosPorTaller[cid].push({ envio: mov, cap, lotes })
   }
-  // Descontar recepciones: asignar al envío más reciente anterior a la fecha de recepción
+  // Descontar recepciones: si el item tiene lote_id, buscar el envío de ese lote primero; si no, FIFO más reciente
   for (const mov of movsAsc) {
     if (mov.tipo !== 'recepcion') continue
     const cid = mov.contactos?.id
@@ -1712,11 +1981,14 @@ function StockEnTalleres({ movimientos, controlMap, onRecibirStock, filterCid })
     for (const it of (mov.taller_movimientos_items || [])) {
       const k = `${it.producto_id}__${it.talle}`
       let rem = it.cantidad || 0
-      // más reciente primero, solo envíos anteriores a esta recepción
       const elegibles = [...enviosPorTaller[cid]]
         .filter(b => b.envio.fecha <= mov.fecha)
         .reverse()
-      for (const bloque of elegibles) {
+      // Si tiene lote_id, priorizar el bloque que lo contiene
+      const ordenados = it.lote_id
+        ? [...elegibles].sort((a, b) => (b.lotes.has(it.lote_id) ? 1 : 0) - (a.lotes.has(it.lote_id) ? 1 : 0))
+        : elegibles
+      for (const bloque of ordenados) {
         if (!bloque.cap[k] || bloque.cap[k] <= 0) continue
         const desc = Math.min(bloque.cap[k], rem)
         bloque.cap[k] -= desc
@@ -1767,55 +2039,64 @@ function StockEnTalleres({ movimientos, controlMap, onRecibirStock, filterCid })
                   📥 Recibir
                 </button>
               </div>
-              {/* Envíos pendientes agrupados por fecha */}
-              {[...t.envios].reverse().map(({ envio, cap }) => {
-                const porProd = {}
-                for (const it of (envio.taller_movimientos_items || [])) {
-                  const k = `${it.producto_id}__${it.talle}`
-                  const restante = cap[k] || 0
-                  if (restante <= 0) continue
-                  const pid = it.producto_id
-                  const nombre = it.productos?.nombre || `#${pid}`
-                  if (!porProd[pid]) porProd[pid] = { nombre, pid, filas: [] }
-                  porProd[pid].filas.push({ talle: it.talle, cant: restante })
+              {/* Envíos pendientes agrupados por producto → lote */}
+              {(() => {
+                const byProd = {}
+                for (const { envio, cap } of t.envios) {
+                  for (const it of (envio.taller_movimientos_items || [])) {
+                    const k = `${it.producto_id}__${it.talle}`
+                    const restante = cap[k] || 0
+                    if (restante <= 0) continue
+                    const pid = it.producto_id
+                    const loteId = it.lote_id || null
+                    const nombre = it.productos?.nombre || `#${pid}`
+                    if (!byProd[pid]) byProd[pid] = { nombre, pid, lotes: [] }
+                    let lote = byProd[pid].lotes.find(l => l.loteId === loteId)
+                    if (!lote) { lote = { loteId, fecha: envio.fecha, envio, filas: [] }; byProd[pid].lotes.push(lote) }
+                    lote.filas.push({ talle: it.talle, cant: restante })
+                  }
                 }
-                const prods = Object.values(porProd)
-                if (!prods.length) return null
-                const allCtrl = Object.values(controlMap).flat()
-                // armar stockItems de este envío para el modal de recibir
-                const envioStockItems = prods.flatMap(p =>
-                  p.filas.map(f => ({
-                    producto_id: p.pid, prodNombre: p.nombre,
-                    talle: f.talle, normal: f.cant, falla: 0, n: f.cant,
-                  }))
-                )
-                return (
-                  <div key={envio.id} style={{ marginBottom: 8, paddingBottom: 6, borderBottom: '1px dashed #d0d8e8' }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: '#4a5a7a', marginBottom: 4 }}>
-                      <button onClick={() => onRecibirStock({ id: t.cid, nombre: t.nombre }, envioStockItems, [])}
-                        style={{ fontFamily: F, fontSize: 10, fontWeight: 700, background: 'none', border: 'none', cursor: 'pointer', color: '#1a3a6b', textDecoration: 'underline dotted', padding: 0 }}>
-                        📦 {fmtF(envio.fecha)}
-                      </button>
-                      {envio.nota ? <span style={{ fontWeight: 400, color: '#888', marginLeft: 4 }}>· {envio.nota}</span> : ''}
-                    </div>
-                    {prods.map(p => {
-                      const total = p.filas.reduce((s, f) => s + f.cant, 0)
-                      return (
-                        <div key={p.pid} style={{ marginBottom: 3 }}>
-                          <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 2, color: '#333' }}>
-                            {p.nombre} <span style={{ fontWeight: 400, color: '#555' }}>· {total} u.</span>
-                          </div>
-                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                            {[...p.filas].sort((a,b) => cmpTalle(a.talle, b.talle)).map((f, i) => (
-                              <span key={i} style={{ background: '#e0e8f4', padding: '1px 6px', border: '1px solid #a0b0c8', fontSize: 11 }}>{f.talle} × {f.cant}</span>
+                return Object.values(byProd).map(prod => {
+                  const totalProd = prod.lotes.reduce((s, l) => s + l.filas.reduce((ss, f) => ss + f.cant, 0), 0)
+                  return (
+                    <div key={prod.pid} style={{ marginBottom: 8, paddingBottom: 6, borderBottom: '1px dashed #d0d8e8' }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: '#333', marginBottom: 4 }}>
+                        {prod.nombre} <span style={{ fontWeight: 400, color: '#666', fontSize: 10 }}>· {totalProd} u.</span>
+                      </div>
+                      {[...prod.lotes].sort((a, b) => b.fecha < a.fecha ? -1 : 1).map(lote => {
+                        const bg = loteColor(lote.loteId)
+                        const short = lote.loteId ? (lote.loteId.startsWith('LOT-') ? lote.loteId.slice(-6) : lote.loteId) : null
+                        const totalLote = lote.filas.reduce((s, f) => s + f.cant, 0)
+                        const loteStockItems = lote.filas.map(f => ({
+                          producto_id: prod.pid, prodNombre: prod.nombre,
+                          talle: f.talle, normal: f.cant, falla: 0, n: f.cant,
+                          lote_id: lote.loteId || null,
+                        }))
+                        return (
+                          <div key={lote.loteId || lote.fecha} style={{ display: 'flex', gap: 5, alignItems: 'center', flexWrap: 'wrap', marginBottom: 4 }}>
+                            {short && (
+                              <span style={{ fontSize: 10, fontFamily: "'Courier New', monospace", fontWeight: 700, background: bg, color: '#1a1a1a', padding: '1px 5px', borderRadius: 3, border: '1px solid rgba(0,0,0,0.15)', whiteSpace: 'nowrap' }}>
+                                {short}
+                              </span>
+                            )}
+                            <span style={{ fontSize: 10, color: '#4a5a7a', fontWeight: 700, whiteSpace: 'nowrap' }}>{fmtF(lote.fecha)}</span>
+                            <span style={{ fontSize: 10, color: '#999' }}>·</span>
+                            {[...lote.filas].sort((a, b) => cmpTalle(a.talle, b.talle)).map((f, i) => (
+                              <span key={i} style={{ background: '#e0e8f4', padding: '1px 5px', border: '1px solid #a0b0c8', fontSize: 10, whiteSpace: 'nowrap' }}>
+                                {f.talle}×{f.cant}
+                              </span>
                             ))}
+                            <button onClick={() => onRecibirStock({ id: t.cid, nombre: t.nombre }, loteStockItems, [])}
+                              style={{ fontFamily: F, fontSize: 10, background: 'linear-gradient(to bottom,#e0f0e8,#c8e0d0)', border: '1px solid #80a890', padding: '0px 5px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                              📥 Recibir
+                            </button>
                           </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )
-              })}
+                        )
+                      })}
+                    </div>
+                  )
+                })
+              })()}
               {/* Fallas pendientes — sección separada al final */}
               {t.stockItems.some(s => s.falla > 0) && (() => {
                 const allCtrl = Object.values(controlMap).flat()
@@ -2353,18 +2634,194 @@ function StockEnMiTaller({ movimientos, controlMap, onEntregar, onEnviarFallaSto
 
 // ── Bloque por taller ────────────────────────────────────────────────────────
 
+function ModalEntregarDesdeLote({ allEvents, entregasLote, prodNombreLote, onClose, onSave }) {
+  const [fecha,      setFecha]      = useState(today())
+  const [clienteQ,   setClienteQ]   = useState('')
+  const [clienteId,  setClienteId]  = useState(null)
+  const [clienteRes, setClienteRes] = useState([])
+  const [nota,       setNota]       = useState('')
+  const [saving,     setSaving]     = useState(false)
+  const timers = useRef({})
+  const clienteInputRef = useRef(null)
+
+  // Stock disponible por talle: RECIBIDO + − CONTROL fallas − ENTREGAS
+  const stockPorTalle = {}
+  const prodIdPorTalle = {}
+  const recepcionesPorTalle = {} // talle → array de {mov, fecha} desc
+  for (const ev of allEvents) {
+    if (ev.kind === 'control') {
+      for (const c of ev.ctrl) {
+        stockPorTalle[c.talle] = (stockPorTalle[c.talle] || 0) - (c.cant_falla || 0)
+      }
+      continue
+    }
+    if (ev.isEntrega) {
+      for (const it of ev.items) {
+        stockPorTalle[it.talle] = (stockPorTalle[it.talle] || 0) - (it.cantidad || 0)
+      }
+      continue
+    }
+    if (ev.m.tipo === 'recepcion') {
+      for (const it of ev.items) {
+        stockPorTalle[it.talle] = (stockPorTalle[it.talle] || 0) + (it.cantidad || 0)
+        if (!prodIdPorTalle[it.talle]) prodIdPorTalle[it.talle] = it.producto_id
+        if (!recepcionesPorTalle[it.talle]) recepcionesPorTalle[it.talle] = []
+        recepcionesPorTalle[it.talle].push({ mov: ev.m })
+      }
+    }
+  }
+
+  const filas = Object.entries(stockPorTalle)
+    .filter(([, disp]) => disp > 0)
+    .sort(([a], [b]) => cmpTalle(a, b))
+    .map(([talle, disponible]) => ({ talle, disponible, producto_id: prodIdPorTalle[talle] }))
+
+  const [vals, setVals] = useState(() => filas.map(() => ''))
+  function setVal(i, v) { setVals(prev => prev.map((x, j) => j === i ? v : x)) }
+
+  function onClienteInput(val) {
+    setClienteQ(val); setClienteId(null)
+    clearTimeout(timers.current.cli)
+    if (!val.trim()) { setClienteRes([]); return }
+    timers.current.cli = setTimeout(async () => {
+      const { data } = await supabase.from('contactos').select('id, nombre').ilike('nombre', `%${val.trim()}%`).limit(8)
+      setClienteRes(data || [])
+    }, 250)
+  }
+
+  async function save() {
+    if (!clienteId) { alert('Seleccioná un cliente'); return }
+    const rows = filas.map((f, i) => ({ ...f, cantidad: parseInt(vals[i]) || 0 })).filter(f => f.cantidad > 0)
+    if (!rows.length) { alert('Ingresá al menos una cantidad'); return }
+    for (const r of rows) {
+      if (r.cantidad > r.disponible) { alert(`Cantidad mayor al disponible para talle ${r.talle}`); return }
+    }
+    // Origen: recepción más reciente que tenga algún talle entregado
+    const tallesEntregados = new Set(rows.map(r => r.talle))
+    const recsCandidatas = allEvents
+      .filter(ev => ev.kind === 'mov' && !ev.isEntrega && ev.m.tipo === 'recepcion' && ev.items.some(it => tallesEntregados.has(it.talle)))
+      .map(ev => ev.m)
+      .sort((a, b) => b.fecha < a.fecha ? -1 : b.fecha > a.fecha ? 1 : 0)
+    const origenId = recsCandidatas[0]?.id || null
+    setSaving(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data: mov, error } = await supabase.from('taller_movimientos')
+      .insert({ tipo: 'entrega', fecha, contacto_id: clienteId, nota: nota.trim() || null, user_id: user?.id, origen_movimiento_id: origenId })
+      .select().single()
+    if (error) { alert('Error: ' + error.message); setSaving(false); return }
+    for (const r of rows) {
+      await supabase.from('taller_movimientos_items').insert({ movimiento_id: mov.id, producto_id: r.producto_id, talle: r.talle, cantidad: r.cantidad })
+    }
+    setSaving(false); onSave()
+  }
+
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={{ ...S.modal, width: 520 }} onClick={e => e.stopPropagation()}>
+        <div style={{ ...S.modalH, background: 'linear-gradient(to bottom,#7a3a00,#5a2000)' }}>
+          <span>🛍️ Entregar a cliente — {prodNombreLote || 'Lote'}</span>
+          <button style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: F }} onClick={onClose}>✕</button>
+        </div>
+        <div style={S.modalB}>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
+            <div>
+              <span style={S.lbl}>Fecha</span>
+              <input style={S.inp} type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
+            </div>
+            <div style={{ flex: 1, position: 'relative' }}>
+              <span style={S.lbl}>Cliente</span>
+              <input ref={clienteInputRef} style={{ ...S.inp, width: '100%' }} value={clienteQ} onChange={e => onClienteInput(e.target.value)} placeholder="Buscar en Contactos..." />
+              {clienteId && <span style={{ fontSize: 10, color: '#2a6a2a' }}>✓ {clienteQ}</span>}
+              <AcList items={clienteRes} onPick={r => { setClienteId(r.id); setClienteQ(r.nombre); setClienteRes([]) }} label={r => r.nombre} anchorRef={clienteInputRef} />
+            </div>
+          </div>
+          {filas.length === 0
+            ? <div style={{ color: '#888', fontSize: 13, padding: '8px 0' }}>Sin stock disponible en este lote.</div>
+            : <table style={S.tbl}>
+                <thead><tr>
+                  <th style={S.th}>Talle</th>
+                  <th style={S.th}>Disponible</th>
+                  <th style={S.th}>A entregar</th>
+                </tr></thead>
+                <tbody>
+                  {filas.map((f, i) => (
+                    <tr key={f.talle} style={{ background: parseInt(vals[i]) > 0 ? '#fef8f0' : 'transparent' }}>
+                      <td style={{ ...S.td, fontWeight: 700 }}>{f.talle}</td>
+                      <td style={{ ...S.td, fontWeight: 700, color: '#1a5a1a' }}>{f.disponible}</td>
+                      <td style={S.td}>
+                        <input style={{ ...S.inpC, width: 44, background: parseInt(vals[i]) > 0 ? '#fff8e8' : '#fff' }}
+                          type="number" min="0" max={f.disponible}
+                          value={vals[i]} onChange={e => setVal(i, e.target.value)} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+          }
+          <div style={{ marginTop: 10 }}>
+            <span style={S.lbl}>Nota</span>
+            <input style={{ ...S.inp, width: '100%' }} value={nota} onChange={e => setNota(e.target.value)} placeholder="opcional" />
+          </div>
+        </div>
+        <div style={{ padding: '8px 12px', borderTop: '1px solid #c0c0b0', display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+          <button style={S.btn} onClick={onClose}>Cancelar</button>
+          <button style={{ ...S.btnP, background: 'linear-gradient(to bottom,#7a3a00,#5a2000)', border: '1px solid #5a2000' }}
+            onClick={save} disabled={saving}>{saving ? 'Guardando...' : '🛍️ Registrar entrega'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, onCalidad, onRecibir, onEnviarFalla, onRepetir }) {
   const [openRows, setOpenRows] = useState({})
-  const [sortMode, setSortMode] = useState('fecha') // 'fecha' | 'producto'
+  const [sortMode, setSortMode] = useState('lote') // 'lote' | 'fecha' | 'producto' | 'conta'
   const [selectedLote, setSelectedLote] = useState(null) // lote_id en detalle
+  const [editPrecio, setEditPrecio] = useState(null) // { movId, value }
+  const [controlando, setControlando] = useState(null) // { movId, items, tallerNombre }
+  const [entregandoLote, setEntregandoLote] = useState(false)
   function toggleRow(id) { setOpenRows(o => ({ ...o, [id]: !o[id] })) }
 
-  // Saldo
+  // Resumen por lote y saldo calculados desde items
+  const loteResumen = {}
+  const pagosRows = []
   let debe = 0, haber = 0
   for (const m of movs) {
-    if ((m.tipo === 'recepcion' || m.tipo === 'concepto') && m.monto != null) debe += m.monto
-    if (m.tipo === 'pago' && m.monto != null) haber += m.monto
+    const mItems = m.taller_movimientos_items || []
+    const ctrl = controlMap[m.id] || []
+    if (m.tipo === 'envio' || m.tipo === 'devolucion') {
+      for (const it of mItems) {
+        const lid = it.lote_id; if (!lid) continue
+        if (!loteResumen[lid]) loteResumen[lid] = { loteId: lid, prodNombre: null, prodCodigo: null, fechaEnvio: null, enviado: 0, reenviado: 0, recibido: 0, debe: 0, haber: 0 }
+        const l = loteResumen[lid]
+        if (!l.prodNombre && it.productos?.nombre) { l.prodNombre = it.productos.nombre; l.prodCodigo = it.productos.codigo || null }
+        if (m.tipo === 'envio') { l.enviado += it.cantidad || 0; if (!l.fechaEnvio || m.fecha < l.fechaEnvio) l.fechaEnvio = m.fecha }
+        else l.reenviado += it.cantidad || 0
+      }
+    } else if (m.tipo === 'recepcion') {
+      for (const it of mItems) {
+        const lid = it.lote_id; if (!lid) continue
+        if (!loteResumen[lid]) loteResumen[lid] = { loteId: lid, prodNombre: null, prodCodigo: null, fechaEnvio: null, enviado: 0, reenviado: 0, recibido: 0, debe: 0, haber: 0 }
+        const l = loteResumen[lid]
+        if (!l.prodNombre && it.productos?.nombre) { l.prodNombre = it.productos.nombre; l.prodCodigo = it.productos.codigo || null }
+        const qty = it.cantidad || 0
+        const pu = it.precio_unit != null ? it.precio_unit : (it.productos?.costo_confeccion != null ? Number(it.productos.costo_confeccion) : null)
+        l.recibido += qty
+        if (pu != null) {
+          l.debe += qty * pu                                         // todo lo recibido
+          const c = ctrl.find(ci => ci.talle === it.talle)
+          const fallaQty = c ? (c.cant_falla || 0) : 0
+          l.haber += fallaQty * pu                                   // crédito por fallas (queda adentro del lote)
+        }
+      }
+    } else if (m.tipo === 'pago') {
+      pagosRows.push(m)
+      haber += m.monto || 0
+    } else if (m.tipo === 'concepto' && m.monto != null) {
+      debe += m.monto
+    }
   }
+  for (const l of Object.values(loteResumen)) { debe += l.debe - l.haber } // créditos de falla quedan adentro del lote
   const saldo = debe - haber
   const tieneSaldo = debe > 0 || haber > 0
 
@@ -2394,23 +2851,59 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
       const byProd = {}
       for (const it of mItems) {
         const pid = it.producto_id
-        if (!byProd[pid]) byProd[pid] = { nombre: it.productos?.nombre || '?', codigo: it.productos?.codigo || null, items: [], total: 0, loteId: it.lote_id || null }
+        if (!byProd[pid]) byProd[pid] = { nombre: it.productos?.nombre || '?', codigo: it.productos?.codigo || null, items: [], total: 0, loteId: it.lote_id || null, precioUnit: it.precio_unit ?? it.productos?.costo_confeccion ?? null }
         byProd[pid].items.push(it)
         byProd[pid].total += it.cantidad || 0
       }
       for (const [pid, pd] of Object.entries(byProd)) {
         balance[pid] = (balance[pid] || 0) + cfg.sign * pd.total
         const prodFallas = mFallas.filter(f => f.producto_id === Number(pid))
-        const effectiveCfg = hasFalla && m.tipo === 'recepcion'
-          ? { ...cfg, label: 'RECIBIDO-FALLA', border: '#b03030', bg: '#fdeaea' }
-          : cfg
-        rows.push({
-          key: `${m.id}-${pid}`, movId: m.id, mov: m, pid: Number(pid),
-          fecha: m.fecha, cfg: effectiveCfg,
-          prodNombre: pd.nombre, prodCodigo: pd.codigo, items: pd.items, total: pd.total,
-          enManos: Math.max(0, balance[pid] || 0),
-          fallas: prodFallas, monto: null, nota: m.nota, loteId: pd.loteId,
-        })
+
+        if (m.tipo === 'recepcion' && prodFallas.length > 0) {
+          // Split: fila RECIBIDO (ok) + fila FALLA
+          const fallaTotal = prodFallas.reduce((s, f) => s + (f.cant_falla || 0), 0)
+          const okTotal = pd.total - fallaTotal
+          const okItems = [], fallaItemsDisplay = []
+          for (const it of pd.items) {
+            const ctrl = prodFallas.find(f => f.talle === it.talle)
+            const okQty = ctrl ? (ctrl.cant_ok || 0) : it.cantidad
+            const fallaQty = ctrl ? (ctrl.cant_falla || 0) : 0
+            if (okQty > 0) okItems.push({ ...it, cantidad: okQty })
+            if (fallaQty > 0) fallaItemsDisplay.push({ ...it, cantidad: fallaQty, id: `falla-${it.id}` })
+          }
+          if (okTotal > 0) {
+            rows.push({
+              key: `${m.id}-${pid}-ok`, movId: m.id, mov: m, pid: Number(pid),
+              fecha: m.fecha, cfg,
+              prodNombre: pd.nombre, prodCodigo: pd.codigo, items: okItems, total: okTotal,
+              enManos: Math.max(0, balance[pid] || 0),
+              fallas: [], monto: null, nota: m.nota, loteId: pd.loteId,
+              precioUnit: pd.precioUnit ?? null,
+              subtotal: pd.precioUnit != null ? okTotal * pd.precioUnit : null,
+            })
+          }
+          if (fallaTotal > 0) {
+            const cfgFalla = { label: 'FALLA', border: '#b03030', bg: '#fff0ee', sign: 0 }
+            rows.push({
+              key: `${m.id}-${pid}-falla`, movId: m.id, mov: m, pid: Number(pid),
+              fecha: m.fecha, cfg: cfgFalla,
+              prodNombre: pd.nombre, prodCodigo: pd.codigo, items: fallaItemsDisplay, total: fallaTotal,
+              enManos: null,
+              fallas: prodFallas, monto: null, nota: m.nota, loteId: pd.loteId,
+              precioUnit: null, subtotal: null,
+            })
+          }
+        } else {
+          rows.push({
+            key: `${m.id}-${pid}`, movId: m.id, mov: m, pid: Number(pid),
+            fecha: m.fecha, cfg,
+            prodNombre: pd.nombre, prodCodigo: pd.codigo, items: pd.items, total: pd.total,
+            enManos: Math.max(0, balance[pid] || 0),
+            fallas: prodFallas, monto: null, nota: m.nota, loteId: pd.loteId,
+            precioUnit: pd.precioUnit ?? null,
+            subtotal: pd.precioUnit != null ? pd.total * pd.precioUnit : null,
+          })
+        }
       }
     } else {
       rows.push({
@@ -2461,7 +2954,7 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
           </tbody>
           <tfoot>
             <tr>
-              <td style={{ border: '1px solid #b8b8b0', padding: '3px 10px', background: '#dcdcd4', fontWeight: 700, textAlign: 'right', color: '#111' }}>Total</td>
+              <td style={{ border: '1px solid #b8b8b0', padding: '3px 10px', background: '#dcdcd4', fontWeight: 700, textAlign: 'right', color: '#111' }}>Subtotal</td>
               <td style={{ border: '1px solid #b8b8b0', padding: '3px 10px', background: '#dcdcd4', fontWeight: 700, textAlign: 'center', color: '#111' }}>{row.total}</td>
               {row.fallas.length > 0 && <td style={{ border: '1px solid #b8b8b0', padding: '3px 10px', background: '#f0d8d8', fontWeight: 700, textAlign: 'center', color: '#b03030' }}>{row.fallas.reduce((s, f) => s + (f.cant_falla || 0), 0)}</td>}
             </tr>
@@ -2480,36 +2973,34 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
         {row.mov.tipo === 'envio' && onRepetir && (
           <button style={{ ...S.btn, fontSize: 10, padding: '1px 6px' }} title="Repetir" onClick={() => onRepetir(row.mov)}>🔁</button>
         )}
-        {row.mov.tipo === 'recepcion' && (
-          <button style={{ ...S.btn, fontSize: 10, padding: '1px 6px' }} onClick={() => onCalidad(row.mov)}>Calidad</button>
-        )}
         <button style={{ ...S.btn, fontSize: 10, padding: '1px 6px' }} onClick={() => onEdit(row.mov)}>✏️</button>
-        <button style={S.btnD} onClick={() => onDelete(row.mov.id)}>✕</button>
       </div>
     )
   }
 
   const thBase = { padding: '5px 8px', fontWeight: 700, borderBottom: '2px solid #a8a8a0', color: '#111', fontSize: 12, background: '#dcdcd4', userSelect: 'none' }
 
+  // Saldo acumulado por fila (de más viejo a más nuevo)
+  let _saldoAcum = 0
+  const saldoMap = {}
+  for (const row of rows) {
+    if (row.mov.tipo === 'recepcion' && row.subtotal != null) _saldoAcum += row.subtotal
+    else if (row.mov.tipo === 'pago' && row.mov.monto != null) _saldoAcum -= row.mov.monto
+    saldoMap[row.key] = _saldoAcum
+  }
+
   // Última fecha de movimiento para mostrar en header
   const ultimaFecha = rows.length > 0 ? rows[rows.length - 1].fecha : null
 
-  // Color de badge por lote (paleta pastel para distinguir lotes) — DEBE estar antes del early return
-  const LOTE_COLORS = ['#d0e8ff','#d0f0d8','#fff0c8','#f0d8ff','#ffd8d0','#d8f0f0','#f8e0b8','#e0d8f8']
-  const loteColorMap = {}
-  let loteIdx = 0
-  for (const r of rows) {
-    if (r.loteId && !loteColorMap[r.loteId]) loteColorMap[r.loteId] = LOTE_COLORS[loteIdx++ % LOTE_COLORS.length]
-  }
   function LoteBadge({ loteId, clickable }) {
     if (!loteId) return null
-    const bg = loteColorMap[loteId] || '#e8e8e0'
-    const short = loteId.slice(-6)
+    const bg = loteColor(loteId)
+    const short = loteId.startsWith('LOT-') ? loteId.slice(-6) : loteId
     return (
       <span
         onClick={clickable ? (e) => { e.stopPropagation(); setSelectedLote(loteId) } : undefined}
-        style={{ marginLeft: 5, fontSize: 10, fontFamily: 'monospace', fontWeight: 700, background: bg, color: '#222', padding: '1px 6px', borderRadius: 3, border: '1px solid #aaa', whiteSpace: 'nowrap', cursor: clickable ? 'pointer' : 'default' }}
-        title={clickable ? 'Ver seguimiento de este lote' : loteId}>
+        style={{ display: 'inline-block', marginLeft: 4, fontSize: 11, fontFamily: "'Courier New', Courier, monospace", letterSpacing: '0.04em', fontWeight: 700, background: bg, color: '#1a1a1a', padding: '2px 7px', borderRadius: 4, border: `1px solid rgba(0,0,0,0.18)`, whiteSpace: 'nowrap', cursor: clickable ? 'pointer' : 'default', lineHeight: '1.4', verticalAlign: 'middle' }}
+        title={clickable ? `Lote ${loteId}` : loteId}>
         {short}
       </span>
     )
@@ -2517,127 +3008,498 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
 
   // ── Detalle de lote ─────────────────────────────────────────────────────────
   if (selectedLote) {
-    const loteRows = rows.filter(r => r.loteId === selectedLote)
-    const recIds = loteRows.filter(r => r.mov.tipo === 'recepcion').map(r => r.mov.id)
-    const entregasLote = recIds.flatMap(rid => entregasMap[rid] || [])
     const loteShort = selectedLote.slice(-6)
-    const loteBg = loteColorMap[selectedLote] || '#e8e8e0'
+    const loteBg = loteColor(selectedLote)
 
-    // Agrupar por producto para mostrar header por producto
-    const loteByProd = {}
-    for (const r of loteRows) {
-      const k = r.pid ?? 'pago'
-      if (!loteByProd[k]) loteByProd[k] = { nombre: r.prodNombre, rows: [] }
-      loteByProd[k].rows.push(r)
+    // Nombre del producto del lote
+    let prodNombreLote = null
+    for (const m of movs) {
+      const it = (m.taller_movimientos_items || []).find(i => i.lote_id === selectedLote)
+      if (it?.productos?.nombre) { prodNombreLote = it.productos.nombre; break }
     }
-    // Más reciente primero dentro de cada grupo
-    for (const g of Object.values(loteByProd)) g.rows.reverse()
-    const loteProdGroups = Object.values(loteByProd)
 
-    // Resumen general del lote
-    const enviado = loteRows.filter(r => r.mov.tipo === 'envio').reduce((s,r) => s + (r.total||0), 0)
-    const recibido = loteRows.filter(r => r.mov.tipo === 'recepcion').reduce((s,r) => s + (r.total||0), 0)
-    const enManosFinal = Math.max(0, enviado - recibido)
-    const ultimoMovLote = loteRows.length > 0 ? loteRows[loteRows.length-1].fecha : null
-    const hayFallas = loteRows.some(r => r.fallas.length > 0)
+    // Movimientos con items de este lote
+    const loteMov = movs.filter(m =>
+      (m.taller_movimientos_items || []).some(it => it.lote_id === selectedLote)
+    )
+    const recIds = loteMov.filter(m => m.tipo === 'recepcion').map(m => m.id)
+    const entregasLote = recIds.flatMap(rid => entregasMap[rid] || [])
+
+    // Construir eventos (movimientos + entregas + controles sintéticos)
+    const allEvents = []
+    for (const m of loteMov) {
+      const items = (m.taller_movimientos_items || []).filter(it => it.lote_id === selectedLote)
+      const total = items.reduce((s, it) => s + (it.cantidad || 0), 0)
+      const ctrlAll = controlMap[m.id] || []
+      const loteItemTalles = new Set(items.map(it => it.talle))
+      const ctrlFalla = ctrlAll.filter(c => c.cant_falla > 0 && loteItemTalles.has(c.talle))
+      const fallaCount = ctrlFalla.reduce((s, c) => s + (c.cant_falla || 0), 0)
+      const okCount = total - fallaCount
+      const precioUnit = items[0]?.precio_unit != null ? items[0].precio_unit
+        : items[0]?.productos?.costo_confeccion != null ? Number(items[0].productos.costo_confeccion) : null
+      allEvents.push({ kind: 'mov', m, items, total, ctrl: ctrlFalla, fallaCount, okCount, precioUnit, isEntrega: false, debe: null, haber: null })
+      // fila CONTROL sintética para recepciones con fallas ya controladas
+      if (m.tipo === 'recepcion' && fallaCount > 0 && precioUnit != null) {
+        allEvents.push({ kind: 'control', m, items, total: fallaCount, ctrl: ctrlFalla, fallaCount, okCount, precioUnit, isEntrega: false, debe: null, haber: null })
+      }
+    }
+    for (const e of entregasLote) {
+      const items = e.taller_movimientos_items || []
+      const total = items.reduce((s, it) => s + (it.cantidad || 0), 0)
+      allEvents.push({ kind: 'mov', m: e, items, total, ctrl: [], fallaCount: 0, okCount: total, precioUnit: null, isEntrega: true, debe: null, haber: null })
+    }
+
+    // Ordenar más viejo primero; CONTROL siempre después de su RECIBIDO del mismo día
+    allEvents.sort((a, b) => {
+      const dd = a.m.fecha < b.m.fecha ? -1 : a.m.fecha > b.m.fecha ? 1 : 0
+      if (dd !== 0) return dd
+      return (a.kind === 'control' ? 1 : 0) - (b.kind === 'control' ? 1 : 0)
+    })
+    // enviado por talle (para sub-rows)
+    const envioEv = allEvents.find(ev => !ev.isEntrega && ev.m.tipo === 'envio')
+    const talleEnviado = {}
+    for (const it of (envioEv?.items || [])) {
+      talleEnviado[it.talle] = (talleEnviado[it.talle] || 0) + it.cantidad
+    }
+    const totalEnviado = Object.values(talleEnviado).reduce((s, v) => s + v, 0)
+
+    let stStock = 0, stTaller = 0, stFalla = 0, stCliente = 0, stSaldo = 0
+    for (const ev of allEvents) {
+      ev.dStock = 0; ev.dTaller = 0; ev.dFalla = 0; ev.dCliente = 0
+      if (ev.kind === 'control') {
+        // solo monetario; las unidades se mueven: fallas salen de stock, van a falla
+        ev.haber = ev.fallaCount * ev.precioUnit
+        stSaldo -= ev.haber
+        ev.dStock = -ev.fallaCount; ev.dFalla = ev.fallaCount
+        stStock += ev.dStock; stFalla += ev.dFalla
+      } else if (ev.isEntrega) {
+        ev.dStock = -ev.total; ev.dCliente = ev.total
+        stStock += ev.dStock; stCliente += ev.dCliente
+      } else if (ev.m.tipo === 'envio') {
+        ev.dTaller = ev.total
+        stTaller += ev.dTaller
+      } else if (ev.m.tipo === 'recepcion') {
+        // RECIBIDO: todo va a stock, taller baja; fallas se separan recién en CONTROL
+        ev.dTaller = -ev.total; ev.dStock = ev.total
+        stTaller += ev.dTaller; stStock += ev.dStock
+        ev.debe = ev.precioUnit != null ? ev.total * ev.precioUnit : null
+        if (ev.debe != null) stSaldo += ev.debe
+      } else if (ev.m.tipo === 'devolucion') {
+        ev.dTaller = ev.total; ev.dFalla = -ev.total
+        stTaller += ev.dTaller; stFalla += ev.dFalla
+      } else if (ev.m.tipo === 'pago') {
+        ev.haber = ev.m.monto
+        if (ev.m.monto != null) stSaldo -= ev.m.monto
+      }
+      ev.stock = stStock; ev.taller = stTaller; ev.falla = stFalla; ev.cliente = stCliente; ev.saldo = stSaldo
+    }
+    const thL2 = { ...thBase, textAlign: 'left', whiteSpace: 'nowrap' }
+    const thR2 = { ...thBase, textAlign: 'right', whiteSpace: 'nowrap' }
+    const thC2 = { ...thBase, textAlign: 'center', whiteSpace: 'nowrap' }
+    const LCFG = {
+      envio:     { label: 'ENVIADO',       border: '#4a6a9a' },
+      recepcion: { label: 'RECIBIDO',      border: '#2d7a3a' },
+      devolucion:{ label: 'REENVIADO',     border: '#b06010' },
+      pago:      { label: 'PAGO',          border: '#5a3a8a' },
+    }
 
     return (
+      <>
       <div style={{ background: '#f8f8f4', marginBottom: 12, border: '1px solid #c8c8c0' }}>
-        {/* ── Barra superior ── */}
-        <div style={{ background: 'linear-gradient(to bottom,#3a4a5a,#1e2e3e)', color: '#fff', padding: '7px 10px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        {/* Header */}
+        <div style={{ background: 'linear-gradient(to bottom,#3a4a5a,#1e2e3e)', color: '#fff', padding: '7px 10px', display: 'flex', alignItems: 'center', gap: 10 }}>
           <button onClick={() => setSelectedLote(null)}
             style={{ fontFamily: F, fontSize: 11, padding: '2px 8px', cursor: 'pointer', border: '1px solid #7a9aba', background: 'rgba(255,255,255,0.1)', color: '#fff', borderRadius: 2 }}>
             ← Volver
           </button>
           <span style={{ fontSize: 11, fontFamily: 'monospace', fontWeight: 700, background: loteBg, color: '#222', padding: '2px 7px', borderRadius: 3 }}>{loteShort}</span>
-          {ultimoMovLote && <span style={{ fontSize: 11, color: '#bbb' }}>último mov. {fmtF(ultimoMovLote)}</span>}
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-            {enviado > 0 && <span style={{ fontSize: 11, color: '#ccc' }}>Enviado <strong style={{ color: '#fff' }}>{enviado}u</strong></span>}
-            {hayFallas && <span style={{ fontSize: 11, color: '#ffb0a0', fontWeight: 700 }}>⚠ con fallas</span>}
-            {entregasLote.length > 0 && <span style={{ fontSize: 11, color: '#90f090', fontWeight: 700 }}>✓ entregado al cliente</span>}
-            <span style={{ fontSize: 12, fontWeight: 700, color: enManosFinal > 0 ? '#ffd080' : '#90f090' }}>
-              {enManosFinal > 0 ? `📤 ${enManosFinal}u en taller` : '✓ todo recibido'}
-            </span>
-          </div>
+          {prodNombreLote && <span style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{prodNombreLote}</span>}
+          <button onClick={() => setEntregandoLote(true)}
+            style={{ fontFamily: F, fontSize: 11, padding: '2px 8px', cursor: 'pointer', border: '1px solid #7a5a00', background: 'rgba(122,58,0,0.55)', color: '#ffd080', borderRadius: 2, marginLeft: 'auto' }}>
+            🛍️ Entregar
+          </button>
         </div>
 
-        {/* ── Grupos por producto ── */}
-        {loteProdGroups.map((g, gi) => (
-          <div key={gi}>
-            {/* Header de producto */}
-            {g.nombre && (
-              <div style={{ padding: '8px 12px', background: '#eeeee8', borderBottom: '1px solid #d8d8d0', borderTop: gi > 0 ? '2px solid #c0c0b8' : undefined }}>
-                <span style={{ fontWeight: 700, fontSize: 14, color: '#111' }}>{g.nombre}</span>
+        {/* Resumen */}
+        {(() => {
+          const lastEv = allEvents.length > 0 ? allEvents[allEvents.length - 1] : null
+          const fStock = lastEv?.stock ?? 0
+          const fFalla = lastEv?.falla ?? 0
+          const fTaller = lastEv?.taller ?? totalEnviado
+          const fCliente = lastEv?.cliente ?? 0
+          const fSaldo = lastEv?.saldo ?? 0
+          return (
+            <div style={{ display: 'flex', borderBottom: '2px solid #c8c8c0' }}>
+              {[
+                { label: 'TOTAL',   val: totalEnviado, color: '#4a6a9a' },
+                { label: 'STOCK',   val: fStock,       color: '#2d7a3a' },
+                { label: 'FALLA',   val: fFalla,       color: '#b03030' },
+                { label: 'TALLER',  val: fTaller,      color: '#1a3a6b' },
+                { label: 'CLIENTE', val: fCliente,     color: '#1a6a1a' },
+              ].map(({ label, val, color }) => (
+                <div key={label} style={{ flex: 1, padding: '8px 10px', borderRight: '1px solid #d8d8d0', textAlign: 'center' }}>
+                  <div style={{ fontSize: 10, color: '#666', fontWeight: 700 }}>{label}</div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color }}>{val}u</div>
+                </div>
+              ))}
+              <div style={{ flex: 1, padding: '8px 10px', textAlign: 'center' }}>
+                <div style={{ fontSize: 10, color: '#666', fontWeight: 700 }}>SALDO $</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: fSaldo > 0 ? '#8a3a3a' : '#1a6a1a' }}>
+                  {fmtMoneda(Math.abs(fSaldo))} {fSaldo > 0 ? 'D' : 'H'}
+                </div>
               </div>
-            )}
-            {/* Movimientos del producto */}
-            {g.rows.map(row => {
-              const cfg = row.cfg
-              const isOpen = openRows[row.key] !== false
-              const esFalla = row.mov.tipo === 'devolucion'
-              const notaRelevante = row.nota && !esFalla ? row.nota : null
-              return (
-                <div key={row.key} style={{ borderLeft: `5px solid ${cfg.border}`, background: cfg.bg, borderBottom: '1px solid #d8d8d0' }}>
-                  <div onClick={() => row.items.length > 0 && setOpenRows(o => ({ ...o, [row.key]: !isOpen }))}
-                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', cursor: row.items.length > 0 ? 'pointer' : 'default', userSelect: 'none' }}>
-                    <span style={{ fontWeight: 700, fontSize: 13, color: cfg.border, minWidth: 130 }}>{cfg.label}</span>
-                    <span style={{ fontSize: 12, color: '#444' }}>{fmtF(row.fecha)}</span>
-                    {row.total != null && <span style={{ fontSize: 13, fontWeight: 700, color: '#111' }}>{row.total}u</span>}
-                    {row.monto != null && <span style={{ fontSize: 13, fontWeight: 700, color: '#1a4a1a' }}>{fmtMoneda(row.monto)}</span>}
-                    {row.fallas.length > 0 && <span style={{ fontSize: 11, color: '#b03030', fontWeight: 700 }}>⚠ {row.fallas.reduce((s,f) => s+(f.cant_falla||0),0)} fallas</span>}
-                    {notaRelevante && <span style={{ fontSize: 11, color: '#666', fontStyle: 'italic' }}>📝 {notaRelevante}</span>}
-                    <div style={{ marginLeft: 'auto', display: 'flex', gap: 3 }} onClick={e => e.stopPropagation()}>
-                      <AccionesFila row={row} />
-                    </div>
-                  </div>
-                  {isOpen && row.items.length > 0 && (
-                    <div style={{ padding: '0 12px 10px 20px' }}>
-                      <TalleDetalle row={row} />
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        ))}
+            </div>
+          )
+        })()}
 
-        {/* ── Entregado al cliente ── */}
-        {entregasLote.length > 0 && (
-          <div style={{ borderLeft: '5px solid #1a6a1a', background: '#eaf4ea', borderTop: '2px solid #c0d8c0' }}>
-            {entregasLote.map(e => (
-              <div key={e.id}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px' }}>
-                  <span style={{ fontWeight: 700, fontSize: 13, color: '#1a6a1a', minWidth: 130 }}>ENTREGADO</span>
-                  <span style={{ fontSize: 12, color: '#444' }}>{fmtF(e.fecha)}</span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: '#111' }}>{e.contactos?.nombre || '?'}</span>
-                </div>
-                {(e.taller_movimientos_items || []).length > 0 && (
-                  <div style={{ padding: '0 12px 10px 20px' }}>
-                    <table style={{ borderCollapse: 'collapse', fontSize: 13 }}>
-                      <tbody>
-                        {[...e.taller_movimientos_items].sort((a,b) => cmpTalle(a.talle,b.talle)).map(it => (
-                          <tr key={it.id}>
-                            <td style={{ border: '1px solid #c8d8c8', padding: '2px 10px', fontWeight: 700 }}>{it.talle}</td>
-                            <td style={{ border: '1px solid #c8d8c8', padding: '2px 10px' }}>{it.cantidad}u</td>
+        {/* Matriz por talle */}
+        {(() => {
+          const mEnv = {}, mRec = {}, mOk = {}, mFalla = {}, mReenv = {}
+          for (const ev of allEvents) {
+            if (ev.kind === 'control') {
+              // fallas contabilizadas desde la fila CONTROL sintética, no desde RECIBIDO
+              for (const c of ev.ctrl) mFalla[c.talle] = (mFalla[c.talle] || 0) + (c.cant_falla || 0)
+              continue
+            }
+            if (ev.m.tipo === 'envio') {
+              for (const it of ev.items) mEnv[it.talle] = (mEnv[it.talle] || 0) + (it.cantidad || 0)
+            } else if (ev.m.tipo === 'recepcion') {
+              for (const it of ev.items) {
+                mRec[it.talle] = (mRec[it.talle] || 0) + (it.cantidad || 0)
+                if (ev.ctrl.length > 0) {
+                  // recepcion controlada: ok = recibido − falla para este talle
+                  const c = ev.ctrl.find(ci => ci.talle === it.talle)
+                  const falla = c ? (c.cant_falla || 0) : 0
+                  mOk[it.talle] = (mOk[it.talle] || 0) + Math.max(0, (it.cantidad || 0) - falla)
+                }
+                // sin control: queda en SIN CONTROLAR = mRec - mOk - mFalla
+              }
+            } else if (ev.m.tipo === 'devolucion') {
+              for (const it of ev.items) mReenv[it.talle] = (mReenv[it.talle] || 0) + (it.cantidad || 0)
+            }
+          }
+          const talles = [...new Set([...Object.keys(mEnv), ...Object.keys(mRec), ...Object.keys(mReenv)])].sort(cmpTalle)
+          if (talles.length === 0) return null
+          const g = (obj, t) => obj[t] || 0
+          const s = (obj) => talles.reduce((a, t) => a + g(obj, t), 0)
+          const hasSC = talles.some(t => g(mRec, t) - g(mOk, t) - g(mFalla, t) > 0)
+          const thM = { ...thBase, textAlign: 'center', whiteSpace: 'nowrap', fontSize: 11 }
+          const tdM = { padding: '3px 8px', borderBottom: '1px solid #ececec', textAlign: 'center', fontSize: 12, fontWeight: 700 }
+          const tdML = { padding: '3px 8px', borderBottom: '1px solid #ececec', textAlign: 'left', fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }
+          const rows = [
+            { key: 'env',  label: 'ENVIADO',       get: t => g(mEnv, t),   total: () => s(mEnv) },
+            { key: 'rec',  label: 'RECIBIDO',       get: t => g(mRec, t),   total: () => s(mRec) },
+            { key: 'ok',   label: 'OK',             get: t => g(mOk, t),    total: () => s(mOk),   indent: true },
+            { key: 'fal',  label: 'FALLA',          get: t => g(mFalla, t), total: () => s(mFalla), indent: true, isFalla: true },
+            ...(hasSC ? [{ key: 'sc', label: 'SIN CONTROLAR', get: t => g(mRec,t)-g(mOk,t)-g(mFalla,t), total: () => s(mRec)-s(mOk)-s(mFalla), indent: true, isSC: true }] : []),
+            { key: 'reenv',label: 'REENVIADO',      get: t => g(mReenv, t), total: () => s(mReenv) },
+            { key: 'tal',  label: 'EN TALLER',      get: t => g(mEnv,t)+g(mReenv,t)-g(mRec,t), total: () => s(mEnv)+s(mReenv)-s(mRec), bold: true },
+          ]
+          const cColor = (row, val) => {
+            if (row.isSC) return '#888'
+            if (row.isFalla && val > 0) return '#b03030'
+            if (val === 0) return '#aaa'
+            return '#333'
+          }
+          return (
+            <div style={{ overflowX: 'auto', borderBottom: '2px solid #c8c8c0' }}>
+              <table style={{ borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr>
+                    <th style={{ ...thM, textAlign: 'left', minWidth: 110 }}></th>
+                    {talles.map(t => <th key={t} style={thM}>{t}</th>)}
+                    <th style={{ ...thM, borderLeft: '1px solid #d8d8d0' }}>TOTAL</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(row => {
+                    const tot = row.total()
+                    return (
+                      <tr key={row.key} style={{ background: row.indent ? '#f4f4f0' : 'transparent' }}>
+                        <td style={{ ...tdML, color: row.isSC ? '#888' : '#333', fontWeight: row.bold ? 700 : 400, paddingLeft: row.indent ? 22 : 8 }}>{row.label}</td>
+                        {talles.map(t => { const v = row.get(t); return <td key={t} style={{ ...tdM, color: cColor(row, v), fontWeight: row.bold ? 700 : 400 }}>{v}</td> })}
+                        <td style={{ ...tdM, color: cColor(row, tot), fontWeight: row.bold ? 700 : 400, borderLeft: '1px solid #e0e0d8' }}>{tot}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )
+        })()}
+
+        {/* Tabla */}
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
+            <thead>
+              <tr>
+                <th style={{ ...thBase, textAlign: 'right', color: '#aaa', width: 24 }}>#</th>
+                <th style={thL2}>Fecha</th>
+                <th style={thL2}>Movimiento</th>
+                <th style={{ ...thC2, color: '#4a6a9a' }}>Total</th>
+                <th style={{ ...thC2, color: '#2d7a3a' }}>Stock</th>
+                <th style={{ ...thC2, color: '#b03030' }}>Falla</th>
+                <th style={{ ...thC2, color: '#1a3a6b' }}>Taller</th>
+                <th style={{ ...thC2, color: '#1a6a1a' }}>Cliente</th>
+                <th style={{ ...thR2, color: '#6a4a00' }}>P/u</th>
+                <th style={{ ...thR2, color: '#8a3a3a' }}>Debe</th>
+                <th style={{ ...thR2, color: '#1a6a1a' }}>Haber</th>
+                <th style={thR2}>Saldo</th>
+                <th style={thBase}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...allEvents].reverse().map((ev, i) => {
+                const tdS = { padding: '3px 6px', borderBottom: '1px solid #ececec', background: '#f4f4f0' }
+                // ── fila CONTROL sintética ──────────────────────────────────
+                if (ev.kind === 'control') {
+                  const ctrlRowKey = `ctrl-${ev.m.id}`
+                  const isCtrlOpen = !!openRows[ctrlRowKey]
+                  const showSaldo = ev.haber != null
+                  return (
+                    <React.Fragment key={ctrlRowKey}>
+                      <tr onClick={() => ev.ctrl.length > 0 && toggleRow(ctrlRowKey)}
+                        style={{ borderLeft: '4px solid #2d7a3a', borderBottom: '1px solid #e0e0d8', cursor: ev.ctrl.length > 0 ? 'pointer' : 'default', background: isCtrlOpen ? '#f0f0e8' : 'transparent' }}>
+                        <td style={{ padding: '4px 6px' }}></td>
+                        <td style={{ padding: '4px 6px', whiteSpace: 'nowrap', color: '#444' }}>{fmtF(ev.m.fecha)}</td>
+                        <td style={{ padding: '4px 6px' }}>
+                          <span style={{ fontWeight: 700, color: '#2d7a3a' }}>CONTROL</span>
+                          <span style={{ marginLeft: 8, color: '#888', fontSize: 11 }}>
+                            {ev.fallaCount}u falla × {fmtMoneda(ev.precioUnit)}
+                          </span>
+                        </td>
+                        <td style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 700, color: '#4a6a9a' }}>{`${ev.fallaCount}u`}</td>
+                        <td style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 700, color: '#2d7a3a' }}>{`−${ev.fallaCount}u`}</td>
+                        <td style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 700, color: '#b03030' }}>{`+${ev.fallaCount}u`}</td>
+                        <td style={{ padding: '4px 6px' }}></td>
+                        <td style={{ padding: '4px 6px' }}></td>
+                        <td style={{ padding: '4px 6px', textAlign: 'right', color: '#9a7a30', fontSize: 10 }}>{fmtMoneda(ev.precioUnit)}</td>
+                        <td style={{ padding: '4px 6px', textAlign: 'right' }}></td>
+                        <td style={{ padding: '4px 6px', textAlign: 'right', fontWeight: 700, color: '#1a6a1a' }}>{fmtMoneda(ev.haber)}</td>
+                        <td style={{ padding: '4px 6px', textAlign: 'right', fontWeight: 700, color: ev.saldo > 0 ? '#8a3a3a' : '#1a6a1a' }}>
+                          {showSaldo ? `${fmtMoneda(Math.abs(ev.saldo))} ${ev.saldo > 0 ? 'D' : 'H'}` : ''}
+                        </td>
+                        <td></td>
+                      </tr>
+                      {isCtrlOpen && [...ev.ctrl].sort((a, b) => cmpTalle(a.talle, b.talle)).map(c => (
+                        <tr key={c.talle} style={{ background: '#f4f4f0' }}>
+                          <td style={tdS} /><td style={tdS} />
+                          <td style={{ ...tdS, fontWeight: 700, color: '#b03030', paddingLeft: 20 }}>{c.talle}</td>
+                          <td style={tdS} />
+                          <td style={tdS} />
+                          <td style={{ ...tdS, textAlign: 'center', fontWeight: 700, color: '#b03030' }}>{c.cant_falla}u</td>
+                          <td style={tdS} /><td style={tdS} /><td style={tdS} /><td style={tdS} /><td style={tdS} /><td style={tdS} /><td style={tdS} />
+                        </tr>
+                      ))}
+                    </React.Fragment>
+                  )
+                }
+                // ── filas normales ──────────────────────────────────────────
+                const tipoCfg = ev.isEntrega
+                  ? { label: 'ENTREGADO', border: '#1a6a1a' }
+                  : (LCFG[ev.m.tipo] || { label: ev.m.tipo?.toUpperCase(), border: '#777' })
+                const rowKey = `lote-${ev.m.id}-${i}`
+                const isOpen = !!openRows[rowKey]
+                const hasTalles = ev.items.length > 0
+                const showSaldo = ev.debe != null || ev.haber != null
+                return (
+                  <React.Fragment key={rowKey}>
+                    <tr onClick={() => hasTalles && toggleRow(rowKey)}
+                      style={{ borderLeft: `4px solid ${tipoCfg.border}`, borderBottom: '1px solid #e0e0d8', cursor: hasTalles ? 'pointer' : 'default', background: isOpen ? '#f0f0e8' : 'transparent' }}>
+                      <td style={{ padding: '4px 6px', textAlign: 'right', color: '#bbb', fontSize: 10, userSelect: 'none' }}>{allEvents.length - i}</td>
+                      <td style={{ padding: '4px 6px', whiteSpace: 'nowrap', color: '#444' }}>{fmtF(ev.m.fecha)}</td>
+                      <td style={{ padding: '4px 6px' }}>
+                        <span style={{ fontWeight: 700, color: tipoCfg.border }}>
+                          {tipoCfg.label}
+                          {ev.isEntrega && ev.m.contactos?.nombre && <span style={{ marginLeft: 6, color: '#555', fontWeight: 400 }}>{ev.m.contactos.nombre}</span>}
+                        </span>
+                      </td>
+                      <td style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 700, color: '#4a6a9a' }}>{`${ev.total}u`}</td>
+                      <td style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 700, color: '#2d7a3a' }}>{ev.dStock !== 0 ? `${ev.dStock > 0 ? '+' : ''}${ev.dStock}u` : ''}</td>
+                      <td style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 700, color: '#b03030' }}>{ev.dFalla !== 0 ? `${ev.dFalla > 0 ? '+' : ''}${ev.dFalla}u` : ''}</td>
+                      <td style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 700, color: '#1a3a6b' }}>{ev.dTaller !== 0 ? `${ev.dTaller > 0 ? '+' : ''}${ev.dTaller}u` : ''}</td>
+                      <td style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 700, color: '#1a6a1a' }}>{ev.dCliente !== 0 ? `${ev.dCliente > 0 ? '+' : ''}${ev.dCliente}u` : ''}</td>
+                      <td style={{ padding: '4px 6px', textAlign: 'right', color: '#9a7a30', fontSize: 10 }}>
+                        {ev.m.tipo === 'recepcion' && ev.precioUnit != null ? fmtMoneda(ev.precioUnit) : ''}
+                      </td>
+                      <td style={{ padding: '4px 6px', textAlign: 'right', fontWeight: 700, color: '#8a3a3a' }}>{ev.debe != null ? fmtMoneda(ev.debe) : ''}</td>
+                      <td style={{ padding: '4px 6px', textAlign: 'right', fontWeight: 700, color: '#1a6a1a' }}>{ev.haber != null ? fmtMoneda(ev.haber) : ''}</td>
+                      <td style={{ padding: '4px 6px', textAlign: 'right', fontWeight: 700, color: ev.saldo > 0 ? '#8a3a3a' : '#1a6a1a' }}>
+                        {showSaldo ? `${fmtMoneda(Math.abs(ev.saldo))} ${ev.saldo > 0 ? 'D' : 'H'}` : ''}
+                      </td>
+                      <td style={{ padding: '4px 6px', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+                        {!ev.isEntrega && <AccionesFila row={{ mov: { ...ev.m, taller_movimientos_items: ev.items }, cfg: tipoCfg, fallas: ev.ctrl, items: ev.items, enManos: 0 }} />}
+                        {ev.m.tipo === 'recepcion' && (() => {
+                          const yaControlado = (controlMap[ev.m.id] || []).length > 0
+                          return yaControlado
+                            ? <span style={{ fontSize: 10, color: '#4a7a3a', marginLeft: 4 }}>✓</span>
+                            : <button onClick={() => setControlando({ movId: ev.m.id, items: ev.items, tallerNombre: nombre })}
+                                style={{ fontFamily: F, fontSize: 10, background: 'linear-gradient(to bottom,#e8f4e0,#d0e8c0)', border: '1px solid #7aaa50', padding: '1px 6px', cursor: 'pointer', marginLeft: 4, whiteSpace: 'nowrap' }}>
+                                🔍 Controlar
+                              </button>
+                        })()}
+                      </td>
+                    </tr>
+                    {isOpen && hasTalles && (() => {
+                      const sortedItems = [...ev.items].sort((a, b) => cmpTalle(a.talle, b.talle))
+                      if (ev.m.tipo === 'recepcion') {
+                        const itemMap = Object.fromEntries(ev.items.map(i => [i.talle, i]))
+                        const allTalles = Object.keys(talleEnviado).sort(cmpTalle)
+                        const totalRecibido = ev.items.reduce((s, i) => s + (i.cantidad || 0), 0)
+                        const totalDebe = ev.items.reduce((s, i) => s + (i.precio_unit != null ? i.cantidad * i.precio_unit : 0), 0)
+                        const itemRows = allTalles.map(talle => {
+                          const it = itemMap[talle]
+                          const recibido = it?.cantidad || 0
+                          const itPrecio = it?.precio_unit ?? null
+                          const itDebe = itPrecio != null && recibido > 0 ? recibido * itPrecio : null
+                          const isEditingItem = it && editPrecio?.itemId === it.id
+                          const saveItemPrecio = async () => {
+                            const val = parseFloat(editPrecio.value)
+                            if (!isNaN(val) && it) {
+                              await supabase.from('taller_movimientos_items').update({ precio_unit: val }).eq('id', it.id)
+                              onEnviarFalla()
+                            }
+                            setEditPrecio(null)
+                          }
+                          return (
+                            <tr key={talle} style={{ background: recibido > 0 ? '#f4f4f0' : '#f9f9f6' }}>
+                              <td style={tdS} /><td style={tdS} />
+                              <td style={{ ...tdS, fontWeight: 700, color: recibido > 0 ? '#333' : '#aaa', paddingLeft: 20 }}>{talle}</td>
+                              <td style={{ ...tdS, textAlign: 'center', color: '#4a6a9a', fontWeight: 700 }}>{recibido > 0 ? recibido : '—'}</td>
+                              <td style={tdS} /><td style={tdS} />
+                              <td style={{ ...tdS, textAlign: 'center', color: '#1a3a6b', fontWeight: 700 }}>{recibido > 0 ? `−${recibido}` : ''}</td>
+                              <td style={tdS} />
+                              <td style={{ ...tdS, textAlign: 'right' }} onClick={e => e.stopPropagation()}>
+                                {it && (isEditingItem ? (
+                                  <span style={{ display: 'inline-flex', gap: 2, alignItems: 'center' }}>
+                                    <span style={{ color: '#6a4a00', fontSize: 10 }}>$</span>
+                                    <input autoFocus type="number" value={editPrecio.value}
+                                      onChange={e => setEditPrecio(p => ({ ...p, value: e.target.value }))}
+                                      onBlur={saveItemPrecio}
+                                      onKeyDown={e => {
+                                        if (e.key === 'Enter') { e.preventDefault(); saveItemPrecio() }
+                                        else if (e.key === 'Escape') { e.preventDefault(); setEditPrecio(null) }
+                                      }}
+                                      style={{ ...S.inpC, width: 50, fontSize: 11 }} />
+                                    <button onMouseDown={e => { e.preventDefault(); saveItemPrecio() }}
+                                      style={{ fontFamily: F, fontSize: 11, background: '#2d7a3a', color: '#fff', border: 'none', borderRadius: 2, padding: '1px 4px', cursor: 'pointer' }}>✓</button>
+                                    <button onMouseDown={e => { e.preventDefault(); setEditPrecio(null) }}
+                                      style={{ fontFamily: F, fontSize: 11, background: '#aaa', color: '#fff', border: 'none', borderRadius: 2, padding: '1px 4px', cursor: 'pointer' }}>✕</button>
+                                  </span>
+                                ) : (
+                                  <span onClick={() => setEditPrecio({ itemId: it.id, value: itPrecio ?? '' })}
+                                    style={{ cursor: 'pointer', color: itPrecio != null ? '#6a4a00' : '#bbb', fontWeight: itPrecio != null ? 700 : 400, borderBottom: '1px dashed #c0a060' }}
+                                    title="Tocar para editar precio/u">
+                                    {itPrecio != null ? fmtMoneda(itPrecio) : '—'}
+                                  </span>
+                                ))}
+                              </td>
+                              <td style={{ ...tdS, textAlign: 'right', color: '#8a3a3a', fontWeight: 700 }}>{itDebe != null ? fmtMoneda(itDebe) : ''}</td>
+                              <td style={tdS} /><td style={tdS} /><td style={tdS} />
+                            </tr>
+                          )
+                        })
+                        return [
+                          ...itemRows,
+                          <tr key={`tot-${ev.m.id}`} style={{ background: '#e8e8e0', borderTop: '2px solid #c8c8b8' }}>
+                            <td style={tdS} /><td style={tdS} />
+                            <td style={{ ...tdS, fontWeight: 700, color: '#555', paddingLeft: 20 }}>Total</td>
+                            <td style={{ ...tdS, textAlign: 'center', color: '#4a6a9a', fontWeight: 700 }}>{totalRecibido}u</td>
+                            <td style={tdS} /><td style={tdS} /><td style={tdS} /><td style={tdS} />
+                            <td style={tdS} />
+                            <td style={{ ...tdS, textAlign: 'right', color: '#8a3a3a', fontWeight: 700 }}>{totalDebe > 0 ? fmtMoneda(totalDebe) : ''}</td>
+                            <td style={tdS} /><td style={tdS} /><td style={tdS} />
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {loteRows.length === 0 && (
-          <div style={{ padding: 16, color: '#888', fontSize: 13 }}>Sin movimientos en este lote.</div>
-        )}
+                        ]
+                      }
+                      return sortedItems.map(it => {
+                        const fallaCtrl = ev.ctrl.find(c => c.talle === it.talle)
+                        const cantFalla = fallaCtrl?.cant_falla || 0
+                        const cantOk = it.cantidad
+                        const cantEnviado = talleEnviado[it.talle] ?? '?'
+                        const itPrecio = it.precio_unit ?? null
+                        const itDebe = itPrecio != null && ev.m.tipo === 'envio' ? cantOk * itPrecio : null
+                        const isEditingItem = editPrecio?.itemId === it.id
+                        const saveItemPrecio = async () => {
+                          const val = parseFloat(editPrecio.value)
+                          if (!isNaN(val)) {
+                            await supabase.from('taller_movimientos_items').update({ precio_unit: val }).eq('id', it.id)
+                            onEnviarFalla()
+                          }
+                          setEditPrecio(null)
+                        }
+                        return (
+                          <tr key={it.id} style={{ background: cantFalla > 0 ? '#fdf4f0' : '#f4f4f0' }}>
+                            <td style={tdS}></td><td style={tdS}></td>
+                            <td style={{ ...tdS, fontWeight: 700, color: '#333', paddingLeft: 20 }}>{it.talle}</td>
+                            <td style={tdS}></td>
+                            <td style={tdS}></td>
+                            <td style={{ ...tdS, textAlign: 'center', color: '#b03030', fontWeight: 700 }}>{cantFalla > 0 ? cantFalla : '—'}</td>
+                            <td style={{ ...tdS, textAlign: 'center', color: '#1a3a6b', fontWeight: 700 }}>{!ev.isEntrega && cantOk > 0 ? cantOk : '—'}</td>
+                            <td style={{ ...tdS, textAlign: 'center', color: '#1a6a1a', fontWeight: 700 }}>{ev.isEntrega && cantOk > 0 ? cantOk : '—'}</td>
+                            <td style={{ ...tdS, textAlign: 'right' }} onClick={e => e.stopPropagation()}>
+                              {ev.m.tipo === 'envio' && (isEditingItem ? (
+                                <span style={{ display: 'inline-flex', gap: 2, alignItems: 'center' }}>
+                                  <span style={{ color: '#6a4a00', fontSize: 10 }}>$</span>
+                                  <input autoFocus type="number" value={editPrecio.value}
+                                    onChange={e => setEditPrecio(p => ({ ...p, value: e.target.value }))}
+                                    onBlur={saveItemPrecio}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') { e.preventDefault(); saveItemPrecio() }
+                                      else if (e.key === 'Escape') { e.preventDefault(); setEditPrecio(null) }
+                                    }}
+                                    style={{ ...S.inpC, width: 50, fontSize: 11 }} />
+                                  <button onMouseDown={e => { e.preventDefault(); saveItemPrecio() }}
+                                    style={{ fontFamily: F, fontSize: 11, background: '#2d7a3a', color: '#fff', border: 'none', borderRadius: 2, padding: '1px 4px', cursor: 'pointer' }}>✓</button>
+                                  <button onMouseDown={e => { e.preventDefault(); setEditPrecio(null) }}
+                                    style={{ fontFamily: F, fontSize: 11, background: '#aaa', color: '#fff', border: 'none', borderRadius: 2, padding: '1px 4px', cursor: 'pointer' }}>✕</button>
+                                </span>
+                              ) : (
+                                <span onClick={() => setEditPrecio({ itemId: it.id, value: itPrecio ?? '' })}
+                                  style={{ cursor: 'pointer', color: itPrecio != null ? '#6a4a00' : '#bbb', fontWeight: itPrecio != null ? 700 : 400, borderBottom: '1px dashed #c0a060' }}
+                                  title="Tocar para editar precio/u">
+                                  {itPrecio != null ? fmtMoneda(itPrecio) : '—'}
+                                </span>
+                              ))}
+                            </td>
+                            <td style={{ ...tdS, textAlign: 'right', color: '#8a3a3a', fontWeight: 700 }}>{itDebe != null ? fmtMoneda(itDebe) : ''}</td>
+                            <td style={tdS}></td><td style={tdS}></td><td style={tdS}></td>
+                          </tr>
+                        )
+                      })
+                    })()}
+                  </React.Fragment>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+        {allEvents.length === 0 && <div style={{ padding: 16, color: '#888', fontSize: 13 }}>Sin movimientos en este lote.</div>}
       </div>
+      {controlando && (
+        <ModalControl
+          movId={controlando.movId}
+          items={controlando.items}
+          tallerNombre={controlando.tallerNombre}
+          onClose={() => setControlando(null)}
+          onSave={() => { setControlando(null); onEnviarFalla() }}
+        />
+      )}
+      {entregandoLote && (
+        <ModalEntregarDesdeLote
+          allEvents={allEvents}
+          entregasLote={entregasLote}
+          prodNombreLote={prodNombreLote}
+          onClose={() => setEntregandoLote(false)}
+          onSave={() => { setEntregandoLote(false); onEnviarFalla() }}
+        />
+      )}
+    </>
     )
   }
 
   return (
+    <>
     <div style={{ background: '#f8f8f4', marginBottom: 12, border: '1px solid #c8c8c0' }}>
       {/* Header */}
       <div style={{ background: 'linear-gradient(to bottom,#3a4a5a,#1e2e3e)', color: '#fff', padding: '7px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -2647,33 +3509,121 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
           {totalEnManos > 0 && <span style={{ fontSize: 11, color: '#ffd080', fontWeight: 700 }}>📤 {totalEnManos} en taller</span>}
+          {debe > 0 && <span style={{ fontSize: 11, color: '#ffb0a0' }}>DEBE {fmtMoneda(debe)}</span>}
+          {haber > 0 && <span style={{ fontSize: 11, color: '#90f090' }}>HABER {fmtMoneda(haber)}</span>}
           {tieneSaldo && <span style={{ fontSize: 12, fontWeight: 700, color: saldo > 0 ? '#ffb0a0' : '#90f090' }}>
             {saldo > 0 ? `Adeudado: ${fmtMoneda(saldo)}` : `A tu favor: ${fmtMoneda(-saldo)}`}
           </span>}
-          <button onClick={() => setSortMode(m => m === 'fecha' ? 'producto' : 'fecha')}
-            style={{ fontFamily: F, fontSize: 10, padding: '2px 7px', cursor: 'pointer', border: '1px solid #7a9aba', background: sortMode === 'producto' ? '#4a7aaa' : 'transparent', color: '#fff', borderRadius: 2 }}>
-            {sortMode === 'fecha' ? '📦 Por producto' : '📅 Por fecha'}
+          <button onClick={() => setSortMode(m => m === 'lote' ? 'fecha' : m === 'fecha' ? 'producto' : m === 'producto' ? 'conta' : 'lote')}
+            style={{ fontFamily: F, fontSize: 10, padding: '2px 7px', cursor: 'pointer', border: '1px solid #7a9aba', background: sortMode !== 'lote' ? '#4a7aaa' : 'transparent', color: '#fff', borderRadius: 2 }}>
+            {sortMode === 'lote' ? '📅 Cronológico' : sortMode === 'fecha' ? '📦 Por producto' : sortMode === 'producto' ? '📒 Contaduría' : '🗂️ Por lote'}
           </button>
         </div>
       </div>
 
+      {/* ── Vista POR LOTE (default) ── */}
+      {sortMode === 'lote' && (() => {
+        // Timeline: lotes + pagos entrelazados por fecha, con saldo acumulado
+        // Orden ascendente para calcular saldo acumulado (viejo→nuevo), luego se invierte para mostrar nuevo arriba
+        const tl = [
+          ...Object.values(loteResumen).map(l => ({ kind: 'lote', date: l.fechaEnvio || '', l })),
+          ...pagosRows.map(m => ({ kind: 'pago', date: m.fecha || '', m }))
+        ].sort((a, b) => a.date.localeCompare(b.date))
+        let rSaldo = 0
+        const tlAsc = tl.map(item => {
+          if (item.kind === 'lote') { rSaldo += item.l.debe - item.l.haber }
+          else                      { rSaldo -= item.m.monto || 0 }
+          return { ...item, rSaldo }
+        })
+        const tlRows = [...tlAsc].reverse() // más nuevo arriba
+        const thS = { padding: '5px 6px', borderBottom: '2px solid #a8a8a0', background: '#dcdcd4', fontFamily: F, fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }
+        return (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
+              <thead>
+                <tr>
+                  <th style={{ ...thS, textAlign: 'right', color: '#aaa', width: 28 }}>#</th>
+                  <th style={{ ...thS, textAlign: 'left' }}>Lote</th>
+                  <th style={{ ...thS, textAlign: 'left' }}>Producto</th>
+                  <th style={{ ...thS, textAlign: 'center' }}>Fecha</th>
+                  <th style={{ ...thS, textAlign: 'center', color: '#1a3a6b' }}>En taller</th>
+                  <th style={{ ...thS, textAlign: 'right', color: '#8a3a3a' }}>Debe</th>
+                  <th style={{ ...thS, textAlign: 'right', color: '#1a6a1a' }}>Haber</th>
+                  <th style={{ ...thS, textAlign: 'right' }}>Saldo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tlRows.map((item, i) => {
+                  const rs = item.rSaldo
+                  const scol = rs > 0 ? '#8a3a3a' : rs < 0 ? '#1a6a1a' : '#888'
+                  const slbl = rs !== 0 ? `${fmtMoneda(Math.abs(rs))} ${rs > 0 ? 'D' : 'H'}` : '—'
+                  if (item.kind === 'lote') {
+                    const l = item.l
+                    const enTaller = l.enviado + l.reenviado - l.recibido
+                    return (
+                      <tr key={l.loteId}
+                        onClick={() => setSelectedLote(l.loteId)}
+                        style={{ cursor: 'pointer', borderLeft: '4px solid #4a6a9a', borderBottom: '1px solid #e0e0d8', background: '#fff' }}
+                        onMouseEnter={e => e.currentTarget.style.background = '#f0f4fa'}
+                        onMouseLeave={e => e.currentTarget.style.background = '#fff'}>
+                        <td style={{ padding: '4px 6px', textAlign: 'right', color: '#bbb', fontSize: 10, userSelect: 'none' }}>{tlRows.length - i}</td>
+                        <td style={{ padding: '4px 6px', whiteSpace: 'nowrap' }}>
+                          <span style={{ fontFamily: 'monospace', fontSize: 11, background: '#d8d8d0', padding: '1px 4px', borderRadius: 2, color: '#222' }}>{l.loteId}</span>
+                        </td>
+                        <td style={{ padding: '4px 6px', color: '#111' }}>
+                          {l.prodNombre || '—'}
+                          {l.prodCodigo && <span style={{ marginLeft: 5, fontSize: 10, color: '#444', fontFamily: 'monospace', background: '#e8e8e0', padding: '1px 3px', borderRadius: 2 }}>{l.prodCodigo}</span>}
+                        </td>
+                        <td style={{ padding: '4px 6px', textAlign: 'center', color: '#666', fontSize: 11, whiteSpace: 'nowrap' }}>{l.fechaEnvio ? fmtF(l.fechaEnvio) : '—'}</td>
+                        <td style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 700, color: enTaller > 0 ? '#1a3a6b' : '#aaa' }}>{enTaller > 0 ? `${enTaller}u` : '—'}</td>
+                        <td style={{ padding: '4px 6px', textAlign: 'right', fontWeight: 700, color: '#8a3a3a' }}>{(l.debe - l.haber) > 0 ? fmtMoneda(l.debe - l.haber) : '—'}</td>
+                        <td style={{ padding: '4px 6px', textAlign: 'right', fontWeight: 700, color: '#1a6a1a' }}>{'—'}</td>
+                        <td style={{ padding: '4px 6px', textAlign: 'right', fontWeight: 700, color: scol }}>{slbl}</td>
+                      </tr>
+                    )
+                  } else {
+                    const m = item.m
+                    return (
+                      <tr key={m.id} style={{ borderLeft: '4px solid #5a3a8a', borderBottom: '1px solid #e0e0d8', background: '#f8f4fc' }}>
+                        <td style={{ padding: '4px 6px', textAlign: 'right', color: '#bbb', fontSize: 10, userSelect: 'none' }}>{tlRows.length - i}</td>
+                        <td style={{ padding: '4px 6px', color: '#5a3a8a', fontWeight: 700, fontSize: 11 }}>—</td>
+                        <td style={{ padding: '4px 6px', color: '#5a3a8a', fontWeight: 700 }}>PAGO{m.descripcion ? ` — ${m.descripcion}` : ''}</td>
+                        <td style={{ padding: '4px 6px', textAlign: 'center', color: '#666', fontSize: 11 }}>{fmtF(m.fecha)}</td>
+                        <td style={{ padding: '4px 6px' }}></td>
+                        <td style={{ padding: '4px 6px' }}></td>
+                        <td style={{ padding: '4px 6px', textAlign: 'right', fontWeight: 700, color: '#1a6a1a' }}>{fmtMoneda(m.monto)}</td>
+                        <td style={{ padding: '4px 6px', textAlign: 'right', fontWeight: 700, color: scol }}>{slbl}</td>
+                      </tr>
+                    )
+                  }
+                })}
+              </tbody>
+            </table>
+          </div>
+        )
+      })()}
+
       {/* ── Vista CRONOLÓGICA (default) ── */}
       {sortMode === 'fecha' && (
         <div style={{ overflowX: 'auto' }}>
-          <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
+          <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
             <thead>
               <tr>
-                <th style={{ ...thBase, textAlign: 'left' }}>Fecha</th>
-                <th style={{ ...thBase, textAlign: 'left' }}>Movimiento</th>
+                <th style={{ ...thBase, textAlign: 'right', color: '#aaa', width: 28 }}>#</th>
+                <th style={{ ...thBase, textAlign: 'left', whiteSpace: 'nowrap' }}>Fecha</th>
+                <th style={{ ...thBase, textAlign: 'left', whiteSpace: 'nowrap' }}>Movimiento</th>
                 <th style={{ ...thBase, textAlign: 'left' }}>Lote</th>
-                <th style={{ ...thBase, textAlign: 'left' }}>Producto</th>
-                <th style={{ ...thBase, textAlign: 'center' }}>Cant.</th>
-                <th style={{ ...thBase, textAlign: 'center' }}>En manos</th>
+                <th style={{ ...thBase, textAlign: 'left', width: '30%' }}>Producto</th>
+                <th style={{ ...thBase, textAlign: 'center', whiteSpace: 'nowrap' }}>Cant.</th>
+                <th style={{ ...thBase, textAlign: 'right', whiteSpace: 'nowrap', color: '#8a3a3a' }}>Debe</th>
+                <th style={{ ...thBase, textAlign: 'right', whiteSpace: 'nowrap', color: '#1a6a1a' }}>Haber</th>
+                <th style={{ ...thBase, textAlign: 'right', whiteSpace: 'nowrap' }}>Saldo</th>
+                <th style={{ ...thBase, textAlign: 'center', whiteSpace: 'nowrap' }}>En manos</th>
                 <th style={{ ...thBase }}></th>
               </tr>
             </thead>
             <tbody>
-              {[...rows].reverse().map(row => {
+              {[...rows].reverse().map((row, rowIdx) => {
                 const isOpen = !!openRows[row.key]
                 const cfg = row.cfg
                 return (
@@ -2681,37 +3631,64 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
                     <tr onClick={() => row.items.length > 0 && toggleRow(row.key)}
                       style={{ borderLeft: `4px solid ${cfg.border}`, background: isOpen ? cfg.bg : 'transparent',
                         cursor: row.items.length > 0 ? 'pointer' : 'default', borderBottom: '1px solid #e0e0d8' }}>
-                      <td style={{ padding: '5px 8px', whiteSpace: 'nowrap', color: '#222', fontSize: 12 }}>{fmtF(row.fecha)}</td>
-                      <td style={{ padding: '5px 8px', whiteSpace: 'nowrap' }}>
-                        <span style={{ fontWeight: 700, fontSize: 12, color: cfg.border }}>{cfg.label}</span>
-                        {row.fallas.length > 0 && <span style={{ marginLeft: 4, fontSize: 11, color: '#b03030' }}>⚠</span>}
-                        {row.monto != null && <span style={{ marginLeft: 6, fontWeight: 700, color: '#1a4a1a', fontSize: 12 }}>{fmtMoneda(row.monto)}</span>}
+                      <td style={{ padding: '4px 6px', textAlign: 'right', color: '#bbb', fontSize: 10, userSelect: 'none' }}>{rows.length - rowIdx}</td>
+                      <td style={{ padding: '4px 6px', whiteSpace: 'nowrap', color: '#222', fontSize: 11 }}>{fmtF(row.fecha)}</td>
+                      <td style={{ padding: '4px 6px', whiteSpace: 'nowrap' }}>
+                        <span style={{ fontWeight: 700, fontSize: 11, color: cfg.border }}>{cfg.label}</span>
+                        {row.fallas.length > 0 && <span style={{ marginLeft: 4, fontSize: 10, color: '#b03030' }}>⚠</span>}
                       </td>
-                      <td style={{ padding: '5px 8px' }} onClick={e => e.stopPropagation()}>
+                      <td style={{ padding: '4px 6px' }} onClick={e => e.stopPropagation()}>
                         <LoteBadge loteId={row.loteId} clickable={true} />
                       </td>
-                      <td style={{ padding: '5px 8px', color: '#111' }}>
+                      <td style={{ padding: '4px 6px', color: '#111', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {row.prodNombre
-                          ? <span>{row.prodNombre}{row.prodCodigo && <span style={{ marginLeft: 6, fontSize: 11, color: '#444', fontFamily: 'monospace', background: '#d8d8d0', padding: '1px 4px', borderRadius: 2 }}>{row.prodCodigo}</span>}</span>
+                          ? <span>{row.prodNombre}{row.prodCodigo && <span style={{ marginLeft: 5, fontSize: 10, color: '#444', fontFamily: 'monospace', background: '#d8d8d0', padding: '1px 3px', borderRadius: 2 }}>{row.prodCodigo}</span>}</span>
                           : <span style={{ color: '#555', fontSize: 11 }}>{row.nota || '—'}</span>}
                       </td>
-                      <td style={{ padding: '5px 8px', textAlign: 'center', fontWeight: 700, color: '#111' }}>
+                      <td style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 700, color: '#111' }}>
                         {row.total != null ? `${row.total}u` : '—'}
                       </td>
-                      <td style={{ padding: '5px 8px', textAlign: 'center', fontWeight: 700, color: row.enManos > 0 ? '#7a4a00' : '#1e6a1e' }}>
+                      <td style={{ padding: '4px 6px', textAlign: 'right', fontWeight: 700, color: '#8a3a3a' }}>
+                        {row.mov.tipo === 'recepcion' && row.subtotal != null ? fmtMoneda(row.subtotal) : ''}
+                      </td>
+                      <td style={{ padding: '4px 6px', textAlign: 'right', fontWeight: 700, color: '#1a6a1a' }}>
+                        {row.mov.tipo === 'pago' && row.mov.monto != null ? fmtMoneda(row.mov.monto) : ''}
+                      </td>
+                      <td style={{ padding: '4px 6px', textAlign: 'right', fontWeight: 700, color: (saldoMap[row.key] || 0) > 0 ? '#8a3a3a' : '#1a6a1a' }}>
+                        {(row.mov.tipo === 'recepcion' && row.subtotal != null) || (row.mov.tipo === 'pago' && row.mov.monto != null)
+                          ? `${fmtMoneda(Math.abs(saldoMap[row.key] || 0))} ${(saldoMap[row.key] || 0) > 0 ? 'D' : 'H'}`
+                          : ''}
+                      </td>
+                      <td style={{ padding: '4px 6px', textAlign: 'center', fontWeight: 700, color: row.enManos > 0 ? '#7a4a00' : '#1e6a1e' }}>
                         {row.enManos != null ? `${row.enManos}u` : '—'}
                       </td>
-                      <td style={{ padding: '5px 8px', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+                      <td style={{ padding: '4px 6px', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
                         <AccionesFila row={row} />
                       </td>
                     </tr>
-                    {isOpen && row.items.length > 0 && (
-                      <tr style={{ background: cfg.bg }}>
-                        <td colSpan={7} style={{ borderBottom: '1px solid #ddd' }}>
-                          <TalleDetalle row={row} />
-                        </td>
-                      </tr>
-                    )}
+                    {isOpen && row.items.length > 0 && [...row.items].sort((a, b) => cmpTalle(a.talle, b.talle)).map(it => {
+                      const falla = row.fallas.find(f => f.talle === it.talle)
+                      const hasPrecio = row.mov.tipo === 'recepcion' && row.precioUnit != null
+                      const tdSub = { padding: '4px 6px', borderBottom: '1px solid #e8e8e0', background: '#f4f4f0' }
+                      return (
+                        <tr key={it.id} style={{ background: falla ? '#fdeaea' : '#f4f4f0' }}>
+                          <td style={tdSub}></td>
+                          <td style={tdSub}></td>
+                          <td style={tdSub}></td>
+                          <td style={{ ...tdSub, paddingLeft: 24, fontWeight: 700, color: falla ? '#8a2a2a' : '#333' }}>
+                            {it.talle}{falla ? <span style={{ marginLeft: 6, color: '#b03030', fontSize: 10 }}>⚠{falla.cant_falla}</span> : null}
+                          </td>
+                          <td style={{ ...tdSub, textAlign: 'center', fontWeight: 700 }}>{it.cantidad}</td>
+                          <td style={{ ...tdSub, textAlign: 'right', color: '#8a3a3a' }}>
+                            {hasPrecio ? fmtMoneda(it.cantidad * row.precioUnit) : ''}
+                          </td>
+                          <td style={tdSub}></td>
+                          <td style={tdSub}></td>
+                          <td style={tdSub}></td>
+                          <td style={tdSub}></td>
+                        </tr>
+                      )
+                    })}
                   </React.Fragment>
                 )
               })}
@@ -2719,6 +3696,72 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
           </table>
         </div>
       )}
+
+      {/* ── Vista CONTADURÍA ── */}
+      {sortMode === 'conta' && (() => {
+        // Filas contables: recepcion con monto → DEBE; pago → HABER
+        const contaFilas = []
+        for (const m of [...sortedAsc].reverse()) {
+          if (m.tipo === 'recepcion') {
+            // agrupar por producto para mostrar una fila por producto con subtotal
+            const byProdC = {}
+            for (const it of (m.taller_movimientos_items || [])) {
+              const pid = it.producto_id
+              if (!byProdC[pid]) byProdC[pid] = { nombre: it.productos?.nombre || '?', total: 0, precioUnit: it.precio_unit ?? it.productos?.costo_confeccion ?? null }
+              byProdC[pid].total += it.cantidad || 0
+            }
+            for (const pd of Object.values(byProdC)) {
+              const subtotal = pd.precioUnit != null ? pd.total * pd.precioUnit : null
+              if (subtotal != null) contaFilas.push({ fecha: m.fecha, concepto: `Rec. ${pd.nombre} (${pd.total}u × $${pd.precioUnit})`, debe: subtotal, haber: null, movId: m.id })
+            }
+          } else if (m.tipo === 'pago') {
+            if (m.monto != null) contaFilas.push({ fecha: m.fecha, concepto: m.nota || 'Pago', debe: null, haber: m.monto, movId: m.id })
+          }
+        }
+        // calcular saldo acumulado (más viejo primero = contaFilas invertido)
+        let saldoAcum = 0
+        const filasConSaldo = [...contaFilas].reverse().map(f => {
+          saldoAcum += (f.debe || 0) - (f.haber || 0)
+          return { ...f, saldo: saldoAcum }
+        }).reverse()
+        const thC = { padding: '5px 8px', fontWeight: 700, borderBottom: '2px solid #a8a8a0', color: '#111', fontSize: 12, background: '#dcdcd4' }
+        return (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
+              <thead>
+                <tr>
+                  <th style={{ ...thC, textAlign: 'left', whiteSpace: 'nowrap' }}>Fecha</th>
+                  <th style={{ ...thC, textAlign: 'left' }}>Concepto</th>
+                  <th style={{ ...thC, textAlign: 'right', color: '#8a3a3a' }}>Debe</th>
+                  <th style={{ ...thC, textAlign: 'right', color: '#1a6a1a' }}>Haber</th>
+                  <th style={{ ...thC, textAlign: 'right' }}>Saldo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filasConSaldo.map((f, i) => (
+                  <tr key={i} style={{ borderBottom: '1px solid #e0e0d8', background: i % 2 === 0 ? '#fafaf6' : 'transparent' }}>
+                    <td style={{ padding: '4px 8px', whiteSpace: 'nowrap', color: '#444' }}>{fmtF(f.fecha)}</td>
+                    <td style={{ padding: '4px 8px', color: '#111' }}>{f.concepto}</td>
+                    <td style={{ padding: '4px 8px', textAlign: 'right', color: '#8a3a3a', fontWeight: f.debe ? 700 : 400 }}>{f.debe != null ? fmtMoneda(f.debe) : ''}</td>
+                    <td style={{ padding: '4px 8px', textAlign: 'right', color: '#1a6a1a', fontWeight: f.haber ? 700 : 400 }}>{f.haber != null ? fmtMoneda(f.haber) : ''}</td>
+                    <td style={{ padding: '4px 8px', textAlign: 'right', fontWeight: 700, color: f.saldo > 0 ? '#8a3a3a' : '#1a6a1a' }}>{fmtMoneda(Math.abs(f.saldo))}{f.saldo > 0 ? ' D' : ' H'}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ borderTop: '2px solid #a8a8a0', background: '#dcdcd4' }}>
+                  <td colSpan={2} style={{ padding: '5px 8px', fontWeight: 700, fontSize: 12 }}>Total</td>
+                  <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: 700, color: '#8a3a3a' }}>{fmtMoneda(filasConSaldo.reduce((s, f) => s + (f.debe || 0), 0))}</td>
+                  <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: 700, color: '#1a6a1a' }}>{fmtMoneda(filasConSaldo.reduce((s, f) => s + (f.haber || 0), 0))}</td>
+                  <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: 700, color: filasConSaldo[0]?.saldo > 0 ? '#8a3a3a' : '#1a6a1a' }}>
+                    {filasConSaldo.length > 0 ? (fmtMoneda(Math.abs(filasConSaldo[0].saldo)) + (filasConSaldo[0].saldo > 0 ? ' D' : ' H')) : '—'}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )
+      })()}
 
       {/* ── Vista POR PRODUCTO ── */}
       {sortMode === 'producto' && (
@@ -2756,7 +3799,7 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
                 {isGroupOpen && (
                   <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
                     <tbody>
-                      {g.rows.map(row => {
+                      {[...g.rows].reverse().map(row => {
                         const isOpen = !!openRows[row.key]
                         const cfg = row.cfg
                         return (
@@ -2821,6 +3864,16 @@ function TallerBlock({ nombre, movs, controlMap, entregasMap, onDelete, onEdit, 
         </div>
       )}
     </div>
+    {controlando && (
+      <ModalControl
+        movId={controlando.movId}
+        items={controlando.items}
+        tallerNombre={controlando.tallerNombre}
+        onClose={() => setControlando(null)}
+        onSave={() => { setControlando(null); onEnviarFalla() }}
+      />
+    )}
+    </>
   )
 }
 
@@ -2855,8 +3908,8 @@ export default function Talleres({ onMenuClick }) {
       supabase.from('taller_movimientos')
         .select(`id, tipo, fecha, nota, monto, lote_id, created_at,
           contactos(id, nombre),
-          taller_movimientos_items(id, producto_id, talle, cantidad, observacion, lote_id,
-            productos(id, nombre, codigo, tabla, tela1_id, telas:tela1_id(tipo, color))))`)
+          taller_movimientos_items(id, producto_id, talle, cantidad, observacion, lote_id, precio_unit,
+            productos(id, nombre, codigo, tabla, tela1_id, costo_confeccion, telas:tela1_id(tipo, color))))`)
         .order('fecha', { ascending: false })
         .order('created_at', { ascending: false }),
       supabase.from('taller_control_items')
@@ -3047,7 +4100,7 @@ export default function Talleres({ onMenuClick }) {
                       tallerInicial={selCid && todosTalleres[selCid] ? { id: selCid, nombre: todosTalleres[selCid].nombre } : null} />}
       {repitiendo && <ModalNuevo   onClose={() => setRepitiendo(null)}  onSave={() => { setRepitiendo(null);  fetchAll() }}
                       tipoInicial="envio" tallerInicial={repitiendo.taller} itemsInicial={repitiendo.itemsInicial} />}
-      {editando   && <ModalEditar  mov={editando}   onClose={() => setEditando(null)}   onSave={() => { setEditando(null);   fetchAll() }} />}
+      {editando   && <ModalEditar  mov={editando}   onClose={() => setEditando(null)}   onSave={() => { setEditando(null);   fetchAll() }} onDelete={async (id) => { await supabase.from('taller_movimientos').delete().eq('id', id); setEditando(null); fetchAll() }} />}
       {calidad    && <ModalCalidad mov={calidad} entregasVinculadas={entregasMap[calidad.id] || []} controlItems={controlMap[calidad.id] || []} onClose={() => setCalidad(null)} onSave={() => { setCalidad(null); fetchAll() }} />}
       {recibiendo && <ModalRecibir envio={recibiendo} onClose={() => setRecibiendo(null)} onSave={() => { setRecibiendo(null); fetchAll() }} />}
       {recibiendoStock && <ModalRecibirStock taller={recibiendoStock.taller} stockItems={recibiendoStock.stockItems} fallaControlItems={recibiendoStock.fallaControlItems} onClose={() => setRecibiendoStock(null)} onSave={() => { setRecibiendoStock(null); fetchAll() }} />}
