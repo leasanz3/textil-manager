@@ -271,13 +271,14 @@ function EntregaItemProd({ item, index, onChange, onRemove, timers, clienteId })
 }
 
 function ModalEntregaCliente({ clienteId, clienteNombre, onClose, onSave }) {
-  const [fecha,  setFecha]  = useState(today())
-  const [cliQ,   setCliQ]   = useState(clienteNombre || '')
-  const [cliId,  setCliId]  = useState(clienteId || null)
-  const [cliRes, setCliRes] = useState([])
-  const [nota,   setNota]   = useState('')
-  const [items,  setItems]  = useState([newEntregaItem()])
-  const [saving, setSaving] = useState(false)
+  const [fecha,      setFecha]      = useState(today())
+  const [cliQ,       setCliQ]       = useState(clienteNombre || '')
+  const [cliId,      setCliId]      = useState(clienteId || null)
+  const [cliRes,     setCliRes]     = useState([])
+  const [nota,       setNota]       = useState('')
+  const [items,      setItems]      = useState([newEntregaItem()])
+  const [saving,     setSaving]     = useState(false)
+  const [esFact,     setEsFact]     = useState(null) // null | true | false
   const timers = useRef({})
 
   function onCliInput(val) {
@@ -307,17 +308,18 @@ function ModalEntregaCliente({ clienteId, clienteNombre, onClose, onSave }) {
     setSaving(true)
     const { data: { user } } = await supabase.auth.getUser()
     const { data: mov, error } = await supabase.from('taller_movimientos')
-      .insert({ tipo: 'entrega', fecha, contacto_id: cliId, nota: nota.trim() || null, user_id: user?.id })
+      .insert({ tipo: 'entrega', fecha, contacto_id: cliId, nota: nota.trim() || null, user_id: user?.id, facturado: esFact })
       .select().single()
     if (error) { alert('Error: ' + error.message); setSaving(false); return }
     await supabase.from('taller_movimientos_items').insert(rows.map(r => ({ movimiento_id: mov.id, producto_id: r.producto_id, talle: r.talle, cantidad: r.cantidad, precio_unit: r.precio_unitario > 0 ? r.precio_unitario : null })))
-    // Crear deuda automática en cuenta corriente
+    // Crear DEBE en cuenta corriente (siempre, con facturado según esFact)
     const total = rows.reduce((s, r) => s + r.cantidad * r.precio_unitario, 0)
     if (total > 0) {
       await supabase.from('cuenta_corriente').insert({
         contacto_id: cliId, tipo: 'debe', fecha,
         monto: total, total_cobrar: total,
         observacion: nota.trim() || 'Entrega de mercadería',
+        facturado: esFact,
         movimiento_id: mov.id, user_id: user?.id,
       })
     }
@@ -361,6 +363,14 @@ function ModalEntregaCliente({ clienteId, clienteNombre, onClose, onSave }) {
             <span style={lbl}>Nota (opcional)</span>
             <input style={{ ...S.inp, width:'100%', boxSizing:'border-box' }} value={nota}
               onChange={e => setNota(e.target.value)} placeholder="..." />
+          </div>
+          <div style={{ marginTop:10, display:'flex', gap:6, alignItems:'center' }}>
+            <span style={lbl}>Facturación:</span>
+            <button style={esFact === true ? { ...S.btn, background:'#1a3a6b', color:'#fff', border:'1px solid #1a3a6b' } : S.btn}
+              onClick={() => setEsFact(esFact === true ? null : true)}>🧾 Facturada</button>
+            <button style={esFact === false ? { ...S.btn, background:'#1a3a6b', color:'#fff', border:'1px solid #1a3a6b' } : S.btn}
+              onClick={() => setEsFact(esFact === false ? null : false)}>No facturada</button>
+            {esFact === true && <span style={{ fontSize:10, color:'#888' }}>Genera DEBE facturado</span>}
           </div>
         </div>
         <div style={{ padding:'8px 12px', borderTop:'1px solid #c0c0b0', display:'flex', justifyContent:'flex-end', gap:6 }}>
@@ -518,6 +528,155 @@ function MovCardCliente({ mov, onDelete, onRefresh }) {
   )
 }
 
+function CuentaCorrienteSection({ clienteId }) {
+  const [rows, setRows] = useState([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!clienteId) return
+    setLoading(true)
+    supabase.from('cuenta_corriente').select('*').eq('contacto_id', clienteId)
+      .order('fecha', { ascending: false })
+      .then(({ data }) => { setRows(data || []); setLoading(false) })
+  }, [clienteId])
+
+  async function setFact(id, val) {
+    await supabase.from('cuenta_corriente').update({ facturado: val }).eq('id', id)
+    const { data } = await supabase.from('cuenta_corriente').select('*').eq('contacto_id', clienteId).order('fecha', { ascending: false })
+    setRows(data || [])
+  }
+
+  function netSaldo(list) {
+    return list.reduce((s, r) => {
+      if (r.tipo === 'debe') return s + Number(r.monto || 0)
+      if (r.tipo === 'recibo' || r.tipo === 'haber') return s - Number(r.monto || 0)
+      return s
+    }, 0)
+  }
+
+  const rFact    = rows.filter(r => r.facturado === true)
+  const rNoFact  = rows.filter(r => r.facturado === false)
+  const rSinAsig = rows.filter(r => r.facturado == null)
+  const sFact    = netSaldo(rFact)
+  const sNoFact  = netSaldo(rNoFact)
+  const sSinAsig = netSaldo(rSinAsig)
+  const sTotal   = sFact + sNoFact + sSinAsig
+
+  const colSaldo = v => v > 0 ? '#8a2020' : v < 0 ? '#1a5a1a' : '#888'
+  const TIPO_LBL = { debe: 'DEBE', haber: 'HABER', recibo: 'COBRO', factura: 'FACTURA' }
+  const btnAct = { ...S.btn, background: '#1a3a6b', color: '#fff', border: '1px solid #1a3a6b' }
+
+  if (loading) return null
+  if (rows.length === 0) return null
+
+  return (
+    <div style={{ border: '2px solid #a0a8b8', background: '#f4f4f0', marginBottom: 12, boxShadow: '1px 1px 0 #b8b8b8' }}>
+      {/* Heading */}
+      <div style={{ background: 'linear-gradient(to bottom,#e0e8f4,#d0ddf0)', padding: '6px 10px', borderBottom: '1px solid #a0a8b8', display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span style={{ fontWeight: 700, fontSize: 11, color: '#1a3a6b' }}>📊 Cuenta corriente</span>
+        <span style={{ fontSize: 11 }}>
+          {sFact > 0
+            ? <>Pendiente de facturar: <strong style={{ color: '#8a2020' }}>{fmtMoneda(sFact)}</strong></>
+            : sFact < 0
+            ? <>Mercadería a entregar: <strong style={{ color: '#1a5a1a' }}>{fmtMoneda(Math.abs(sFact))}</strong></>
+            : <>Facturado: <strong style={{ color: '#888' }}>$0</strong></>
+          }
+        </span>
+        <span style={{ fontSize: 11 }}>No facturado: <strong style={{ color: colSaldo(sNoFact) }}>{fmtMoneda(Math.abs(sNoFact))}{sNoFact > 0 ? ' D' : sNoFact < 0 ? ' H' : ''}</strong></span>
+        {sSinAsig !== 0 && <span style={{ fontSize: 11, color: '#888' }}>Sin asignar: <strong>{fmtMoneda(Math.abs(sSinAsig))}{sSinAsig > 0 ? ' D' : ' H'}</strong></span>}
+        <span style={{ fontSize: 11, fontWeight: 700, marginLeft: 'auto' }}>Total: <span style={{ color: colSaldo(sTotal) }}>{fmtMoneda(Math.abs(sTotal))}{sTotal > 0 ? ' D' : sTotal < 0 ? ' H' : ''}</span></span>
+      </div>
+      {/* Filas */}
+      <table style={{ ...S.tbl, fontSize: 11 }}>
+        <thead>
+          <tr>
+            <th style={{ ...S.th, textAlign: 'left' }}>Fecha</th>
+            <th style={S.th}>Tipo</th>
+            <th style={{ ...S.th, textAlign: 'left' }}>Observación</th>
+            <th style={{ ...S.th, textAlign: 'right' }}>Monto</th>
+            <th style={S.th}>Asignar</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r => {
+            const esDebe = r.tipo === 'debe' || r.tipo === 'factura'
+            const mColor = esDebe ? '#8a2020' : '#1a5a1a'
+            return (
+              <tr key={r.id}>
+                <td style={{ ...S.td, textAlign: 'left', whiteSpace: 'nowrap' }}>{fmtF(r.fecha)}</td>
+                <td style={{ ...S.td, fontWeight: 700, color: mColor }}>{TIPO_LBL[r.tipo] || r.tipo}</td>
+                <td style={{ ...S.td, textAlign: 'left', color: '#555', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.observacion || '—'}</td>
+                <td style={{ ...S.td, textAlign: 'right', fontWeight: 700, color: mColor }}>{fmtMoneda(r.monto)}</td>
+                <td style={{ ...S.td, whiteSpace: 'nowrap' }}>
+                  <div style={{ display: 'flex', gap: 3, justifyContent: 'center' }}>
+                    <button style={r.facturado === true ? btnAct : S.btn} onClick={() => setFact(r.id, r.facturado === true ? null : true)}>F</button>
+                    <button style={r.facturado === false ? btnAct : S.btn} onClick={() => setFact(r.id, r.facturado === false ? null : false)}>NF</button>
+                  </div>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function ModalFactura({ clienteId, clienteNombre, onClose, onSave }) {
+  const [fecha,  setFecha]  = useState(today())
+  const [monto,  setMonto]  = useState('')
+  const [obs,    setObs]    = useState('')
+  const [saving, setSaving] = useState(false)
+
+  async function save() {
+    const m = parseFloat(monto)
+    if (!m || m <= 0) { alert('Ingresá un monto válido'); return }
+    setSaving(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    await supabase.from('cuenta_corriente').insert({
+      contacto_id: clienteId, tipo: 'factura', fecha,
+      monto: m, total_cobrar: m,
+      observacion: obs.trim() || null,
+      facturado: true, user_id: user?.id,
+    })
+    setSaving(false); onSave()
+  }
+
+  return (
+    <div style={overlay} onClick={onClose}>
+      <div style={{ ...modal, width: 380 }} onClick={e => e.stopPropagation()}>
+        <div style={{ ...modalH, background: 'linear-gradient(to bottom,#1a3a6b,#0a2050)' }}>
+          <span>🧾 Nueva factura — {clienteNombre}</span>
+          <button style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: F }} onClick={onClose}>✕</button>
+        </div>
+        <div style={modalB}>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
+            <div>
+              <span style={lbl}>Fecha</span>
+              <input style={S.inp} type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <span style={lbl}>Monto</span>
+              <input style={{ ...S.inp, width: '100%', boxSizing: 'border-box' }} type="number" min="0" step="1"
+                value={monto} onChange={e => setMonto(e.target.value)} placeholder="0" />
+            </div>
+          </div>
+          <div>
+            <span style={lbl}>Observación</span>
+            <input style={{ ...S.inp, width: '100%', boxSizing: 'border-box' }} value={obs}
+              onChange={e => setObs(e.target.value)} placeholder="Ej: Factura N° 001, producto..." />
+          </div>
+        </div>
+        <div style={{ padding: '8px 12px', borderTop: '1px solid #c0c0b0', display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+          <button style={S.btn} onClick={onClose}>Cancelar</button>
+          <button style={{ ...S.btn, background: 'linear-gradient(to bottom,#1a3a6b,#0a2050)', color: '#fff', border: '1px solid #0a2050' }}
+            onClick={save} disabled={saving}>{saving ? 'Guardando...' : '🧾 Registrar factura'}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ClienteBlock({ nombre, movs, onDelete, onRefresh, filtroTipo, filtroProd }) {
   const filtered = movs.filter(m => {
     if (filtroTipo && m.tipo !== filtroTipo) return false
@@ -550,6 +709,7 @@ export default function Clientes({ onMenuClick }) {
   const [selected,     setSelected]     = useState(null)
   const [devolviendo,  setDevolviendo]  = useState(false)
   const [entregando,   setEntregando]   = useState(false)
+  const [facturando,   setFacturando]   = useState(false)
   const initialLoad = useRef(true)
 
   useEffect(() => { fetchAll() }, [])
@@ -608,6 +768,12 @@ export default function Clientes({ onMenuClick }) {
             📦 Entrega
           </button>
           {selGrupo && (
+            <button style={{ ...S.btn, background:'linear-gradient(to bottom,#1a3a6b,#0a2050)', color:'#fff', border:'1px solid #0a2050', fontSize:11 }}
+              onClick={() => setFacturando(true)}>
+              🧾 Factura
+            </button>
+          )}
+          {selGrupo && (
             <button style={{ ...S.btn, background:'linear-gradient(to bottom,#6a006a,#4a004a)', color:'#fff', border:'1px solid #4a004a', fontSize:11 }}
               onClick={() => setDevolviendo(true)}>
               ↩ Devolución
@@ -665,14 +831,17 @@ export default function Clientes({ onMenuClick }) {
               <div>Sin entregas registradas.</div>
             </div>
           ) : (
-            <ClienteBlock
-              nombre={selGrupo.nombre}
-              movs={selGrupo.movs}
-              onDelete={deleteMov}
-              onRefresh={fetchAll}
-              filtroTipo={filtroTipo}
-              filtroProd={filtroProd}
-            />
+            <>
+              <CuentaCorrienteSection clienteId={selCid} />
+              <ClienteBlock
+                nombre={selGrupo.nombre}
+                movs={selGrupo.movs}
+                onDelete={deleteMov}
+                onRefresh={fetchAll}
+                filtroTipo={filtroTipo}
+                filtroProd={filtroProd}
+              />
+            </>
           )}
         </div>
       </div>
@@ -683,6 +852,14 @@ export default function Clientes({ onMenuClick }) {
           clienteNombre={selGrupo?.nombre}
           onClose={() => setEntregando(false)}
           onSave={() => { setEntregando(false); fetchAll() }}
+        />
+      )}
+      {facturando && selGrupo && (
+        <ModalFactura
+          clienteId={selGrupo.cid}
+          clienteNombre={selGrupo.nombre}
+          onClose={() => setFacturando(false)}
+          onSave={() => { setFacturando(false); fetchAll() }}
         />
       )}
       {devolviendo && selGrupo && (
