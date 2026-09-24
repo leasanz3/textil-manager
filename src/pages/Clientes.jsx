@@ -567,7 +567,7 @@ function MovCardCliente({ mov, onDelete, onRefresh }) {
   )
 }
 
-function CuentaCorrienteSection({ clienteId, refreshKey }) {
+function CuentaCorrienteSection({ clienteId, refreshKey, movs }) {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(false)
 
@@ -585,26 +585,17 @@ function CuentaCorrienteSection({ clienteId, refreshKey }) {
     fetchRows().finally(() => setLoading(false))
   }, [clienteId, refreshKey])
 
-  async function setFact(id, val) {
-    await supabase.from('cuenta_corriente').update({ facturado: val }).eq('id', id)
-    fetchRows()
-  }
-
-  // CC solo incluye dinero: entregas (debe) y cobros (haber/recibo). Facturas van aparte.
-  const ccRows     = rows.filter(r => r.tipo !== 'factura')
-  const factRows   = rows.filter(r => r.tipo === 'factura')
+  const ccRows   = rows.filter(r => r.tipo !== 'factura')
+  const factRows = rows.filter(r => r.tipo === 'factura')
 
   const TIPO_META = {
     debe:   { label: 'ENTREGA', color: '#8a2020', bg: '#f8eded' },
     haber:  { label: 'COBRO',   color: '#1a5a1a', bg: '#edf8ed' },
     recibo: { label: 'COBRO',   color: '#1a5a1a', bg: '#edf8ed' },
   }
-  const meta = r => TIPO_META[r.tipo] || { label: r.tipo.toUpperCase(), color: '#888', bg: '#f4f4f0' }
-  const concepto = r => r.tipo === 'debe'
-    ? (r.observacion || 'Entrega de mercadería')
-    : (r.observacion || 'Cobro')
+  const meta    = r => TIPO_META[r.tipo] || { label: r.tipo.toUpperCase(), color: '#888', bg: '#f4f4f0' }
+  const concepto = r => r.tipo === 'debe' ? (r.observacion || 'Entrega de mercadería') : (r.observacion || 'Cobro')
 
-  // Saldo acumulado solo sobre ccRows (sin facturas)
   let running = 0
   const ccWithSaldo = ccRows.map(r => {
     running = r.tipo === 'debe' ? running + Number(r.monto || 0) : running - Number(r.monto || 0)
@@ -615,15 +606,21 @@ function CuentaCorrienteSection({ clienteId, refreshKey }) {
   const totalEntregas = ccRows.filter(r => r.tipo === 'debe').reduce((s, r) => s + Number(r.monto || 0), 0)
   const totalHaber    = ccRows.filter(r => r.tipo !== 'debe').reduce((s, r) => s + Number(r.monto || 0), 0)
   const saldo         = totalEntregas - totalHaber
+  const totalFacturas = factRows.reduce((s, r) => s + Number(r.monto || 0), 0)
 
-  const netCC   = list => list.reduce((s, r) => r.tipo === 'debe' ? s + Number(r.monto||0) : s - Number(r.monto||0), 0)
-  const sFact   = netCC(ccRows.filter(r => r.facturado === true))
-  const sNoFact = netCC(ccRows.filter(r => r.facturado === false))
-  const sSinAsig= netCC(ccRows.filter(r => r.facturado == null))
+  // Entregado c/IVA: suma de ítems donde precio_unit === Math.round(precio_venta)
+  const entregadoCIVA = (movs || [])
+    .filter(m => m.tipo === 'entrega')
+    .flatMap(m => m.taller_movimientos_items || [])
+    .filter(it => {
+      if (it.precio_unit == null || it.productos?.precio_venta == null) return false
+      return Math.round(Number(it.precio_unit)) === Math.round(Number(it.productos.precio_venta))
+    })
+    .reduce((s, it) => s + (it.cantidad || 0) * Number(it.precio_unit), 0)
+  const faltaFacturar = entregadoCIVA - totalFacturas
 
-  const colS  = v => v > 0 ? '#8a2020' : v < 0 ? '#1a5a1a' : '#888'
-  const fmtS  = v => `${fmtMoneda(Math.abs(v))}${v > 0 ? ' D' : v < 0 ? ' H' : ''}`
-  const btnAct = { ...S.btn, background: '#1a3a6b', color: '#fff', border: '1px solid #1a3a6b' }
+  const colS = v => v > 0 ? '#8a2020' : v < 0 ? '#1a5a1a' : '#888'
+  const fmtS = v => `${fmtMoneda(Math.abs(v))}${v > 0 ? ' D' : v < 0 ? ' H' : ''}`
 
   if (loading) return null
   if (rows.length === 0) return null
@@ -638,11 +635,6 @@ function CuentaCorrienteSection({ clienteId, refreshKey }) {
             {totalEntregas > 0 && <span style={{ fontSize: 11 }}>Entregas: <strong style={{ color: '#8a2020' }}>{fmtMoneda(totalEntregas)}</strong></span>}
             <span style={{ fontSize: 11 }}>Cobros: <strong style={{ color: '#1a5a1a' }}>{fmtMoneda(totalHaber)}</strong></span>
             <span style={{ fontSize: 11, fontWeight: 700 }}>Saldo: <strong style={{ color: colS(saldo) }}>{fmtS(saldo)}</strong></span>
-            <span style={{ fontSize: 10, color: '#888', marginLeft: 'auto', display: 'flex', gap: 8 }}>
-              {sFact !== 0 && <span>Fact: <strong style={{ color: colS(sFact) }}>{fmtS(sFact)}</strong></span>}
-              {sNoFact !== 0 && <span>NoFact: <strong style={{ color: colS(sNoFact) }}>{fmtS(sNoFact)}</strong></span>}
-              {sSinAsig !== 0 && <span>S/asig: <strong style={{ color: colS(sSinAsig) }}>{fmtS(sSinAsig)}</strong></span>}
-            </span>
           </div>
           <table style={{ ...S.tbl, fontSize: 11 }}>
             <thead>
@@ -653,7 +645,6 @@ function CuentaCorrienteSection({ clienteId, refreshKey }) {
                 <th style={{ ...S.th, textAlign: 'right' }}>DEBE</th>
                 <th style={{ ...S.th, textAlign: 'right' }}>HABER</th>
                 <th style={{ ...S.th, textAlign: 'right' }}>Saldo</th>
-                <th style={S.th}>Asignar</th>
               </tr>
             </thead>
             <tbody>
@@ -670,12 +661,6 @@ function CuentaCorrienteSection({ clienteId, refreshKey }) {
                     <td style={{ ...S.td, textAlign: 'right', color: esDebe ? '#8a2020' : '#ccc', fontWeight: esDebe ? 700 : 400 }}>{esDebe ? fmtMoneda(r.monto) : ''}</td>
                     <td style={{ ...S.td, textAlign: 'right', color: !esDebe ? '#1a5a1a' : '#ccc', fontWeight: !esDebe ? 700 : 400 }}>{!esDebe ? fmtMoneda(r.monto) : ''}</td>
                     <td style={{ ...S.td, textAlign: 'right', fontWeight: 700, color: colS(r.saldo) }}>{fmtS(r.saldo)}</td>
-                    <td style={{ ...S.td, whiteSpace: 'nowrap' }}>
-                      <div style={{ display: 'flex', gap: 3, justifyContent: 'center' }}>
-                        <button style={r.facturado === true ? btnAct : S.btn} onClick={() => setFact(r.id, r.facturado === true ? null : true)}>F</button>
-                        <button style={r.facturado === false ? btnAct : S.btn} onClick={() => setFact(r.id, r.facturado === false ? null : false)}>NF</button>
-                      </div>
-                    </td>
                   </tr>
                 )
               })}
@@ -685,30 +670,43 @@ function CuentaCorrienteSection({ clienteId, refreshKey }) {
       )}
 
       {/* ── Panel de facturas DGI ── */}
-      {factRows.length > 0 && (
+      {(factRows.length > 0 || entregadoCIVA > 0) && (
         <div style={{ border: '2px solid #a0a8b8', background: '#f4f4f0', marginBottom: 8, boxShadow: '1px 1px 0 #b8b8b8' }}>
-          <div style={{ background: 'linear-gradient(to bottom,#e8ecf4,#dce2f0)', padding: '6px 10px', borderBottom: '1px solid #a0a8b8', display: 'flex', gap: 14, alignItems: 'center' }}>
+          <div style={{ background: 'linear-gradient(to bottom,#e8ecf4,#dce2f0)', padding: '6px 10px', borderBottom: '1px solid #a0a8b8', display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
             <span style={{ fontWeight: 700, fontSize: 11, color: '#1a3a6b' }}>🧾 Facturas DGI</span>
-            <span style={{ fontSize: 11 }}>Total: <strong style={{ color: '#1a3a6b' }}>{fmtMoneda(factRows.reduce((s, r) => s + Number(r.monto || 0), 0))}</strong></span>
+            {entregadoCIVA > 0 && <span style={{ fontSize: 11 }}>Entregado c/IVA: <strong style={{ color: '#555' }}>{fmtMoneda(entregadoCIVA)}</strong></span>}
+            {totalFacturas > 0 && <span style={{ fontSize: 11 }}>Facturado: <strong style={{ color: '#1a3a6b' }}>{fmtMoneda(totalFacturas)}</strong></span>}
+            {entregadoCIVA > 0 && (
+              <span style={{ fontSize: 11, fontWeight: 700 }}>
+                {faltaFacturar > 0
+                  ? <>Falta facturar: <strong style={{ color: '#8a2020' }}>{fmtMoneda(faltaFacturar)}</strong></>
+                  : faltaFacturar < 0
+                  ? <>Facturado de más: <strong style={{ color: '#1a5a1a' }}>{fmtMoneda(Math.abs(faltaFacturar))}</strong></>
+                  : <span style={{ color: '#888' }}>Al día ✓</span>
+                }
+              </span>
+            )}
           </div>
-          <table style={{ ...S.tbl, fontSize: 11 }}>
-            <thead>
-              <tr>
-                <th style={{ ...S.th, textAlign: 'left' }}>Fecha</th>
-                <th style={{ ...S.th, textAlign: 'left' }}>Observación</th>
-                <th style={{ ...S.th, textAlign: 'right' }}>Monto</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[...factRows].reverse().map(r => (
-                <tr key={r.id}>
-                  <td style={{ ...S.td, textAlign: 'left', whiteSpace: 'nowrap' }}>{fmtF(r.fecha)}</td>
-                  <td style={{ ...S.td, textAlign: 'left', color: '#555' }}>{r.observacion || '—'}</td>
-                  <td style={{ ...S.td, textAlign: 'right', fontWeight: 700, color: '#1a3a6b' }}>{fmtMoneda(r.monto)}</td>
+          {factRows.length > 0 && (
+            <table style={{ ...S.tbl, fontSize: 11 }}>
+              <thead>
+                <tr>
+                  <th style={{ ...S.th, textAlign: 'left' }}>Fecha</th>
+                  <th style={{ ...S.th, textAlign: 'left' }}>Observación</th>
+                  <th style={{ ...S.th, textAlign: 'right' }}>Monto</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {[...factRows].reverse().map(r => (
+                  <tr key={r.id}>
+                    <td style={{ ...S.td, textAlign: 'left', whiteSpace: 'nowrap' }}>{fmtF(r.fecha)}</td>
+                    <td style={{ ...S.td, textAlign: 'left', color: '#555' }}>{r.observacion || '—'}</td>
+                    <td style={{ ...S.td, textAlign: 'right', fontWeight: 700, color: '#1a3a6b' }}>{fmtMoneda(r.monto)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       )}
     </>
@@ -926,7 +924,7 @@ export default function Clientes({ onMenuClick }) {
             </div>
           ) : (
             <>
-              <CuentaCorrienteSection key={selCid} clienteId={selCid} refreshKey={ccRefresh} />
+              <CuentaCorrienteSection key={selCid} clienteId={selCid} refreshKey={ccRefresh} movs={selGrupo.movs} />
               <ClienteBlock
                 nombre={selGrupo.nombre}
                 movs={selGrupo.movs}
