@@ -550,38 +550,47 @@ function CuentaCorrienteSection({ clienteId }) {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(false)
 
+  const fetchRows = async () => {
+    const { data } = await supabase.from('cuenta_corriente').select('*')
+      .eq('contacto_id', clienteId)
+      .order('fecha', { ascending: true })
+      .order('created_at', { ascending: true })
+    setRows(data || [])
+  }
+
   useEffect(() => {
     if (!clienteId) return
     setLoading(true)
-    supabase.from('cuenta_corriente').select('*').eq('contacto_id', clienteId)
-      .order('fecha', { ascending: false })
-      .then(({ data }) => { setRows(data || []); setLoading(false) })
+    fetchRows().finally(() => setLoading(false))
   }, [clienteId])
 
   async function setFact(id, val) {
     await supabase.from('cuenta_corriente').update({ facturado: val }).eq('id', id)
-    const { data } = await supabase.from('cuenta_corriente').select('*').eq('contacto_id', clienteId).order('fecha', { ascending: false })
-    setRows(data || [])
+    fetchRows()
   }
 
-  function netSaldo(list) {
-    return list.reduce((s, r) => {
-      if (r.tipo === 'debe') return s + Number(r.monto || 0)
-      if (r.tipo === 'recibo' || r.tipo === 'haber') return s - Number(r.monto || 0)
-      return s
-    }, 0)
-  }
+  const isDebe = r => r.tipo === 'debe' || r.tipo === 'factura'
+  const concepto = r => isDebe(r) ? (r.observacion || 'Entrega') : (r.observacion || 'Cobro')
 
-  const rFact    = rows.filter(r => r.facturado === true)
-  const rNoFact  = rows.filter(r => r.facturado === false)
-  const rSinAsig = rows.filter(r => r.facturado == null)
-  const sFact    = netSaldo(rFact)
-  const sNoFact  = netSaldo(rNoFact)
-  const sSinAsig = netSaldo(rSinAsig)
-  const sTotal   = sFact + sNoFact + sSinAsig
+  // Saldo acumulado de más viejo a más nuevo
+  let running = 0
+  const rowsWithSaldo = rows.map(r => {
+    running = isDebe(r) ? running + Number(r.monto || 0) : running - Number(r.monto || 0)
+    return { ...r, saldo: running }
+  })
+  const displayRows = [...rowsWithSaldo].reverse() // más nuevo arriba
 
-  const colSaldo = v => v > 0 ? '#8a2020' : v < 0 ? '#1a5a1a' : '#888'
-  const TIPO_LBL = { debe: 'DEBE', haber: 'HABER', recibo: 'COBRO', factura: 'FACTURA' }
+  const totalDebe  = rows.filter(isDebe).reduce((s, r) => s + Number(r.monto || 0), 0)
+  const totalHaber = rows.filter(r => !isDebe(r)).reduce((s, r) => s + Number(r.monto || 0), 0)
+  const saldo      = totalDebe - totalHaber
+
+  const netSaldo = list => list.reduce((s, r) => isDebe(r) ? s + Number(r.monto||0) : s - Number(r.monto||0), 0)
+  const sFact    = netSaldo(rows.filter(r => r.facturado === true))
+  const sNoFact  = netSaldo(rows.filter(r => r.facturado === false))
+  const sSinAsig = netSaldo(rows.filter(r => r.facturado == null))
+
+  const colS = v => v > 0 ? '#8a2020' : v < 0 ? '#1a5a1a' : '#888'
+  const fmtS = v => `${fmtMoneda(Math.abs(v))}${v > 0 ? ' D' : v < 0 ? ' H' : ''}`
   const btnAct = { ...S.btn, background: '#1a3a6b', color: '#fff', border: '1px solid #1a3a6b' }
 
   if (loading) return null
@@ -589,42 +598,38 @@ function CuentaCorrienteSection({ clienteId }) {
 
   return (
     <div style={{ border: '2px solid #a0a8b8', background: '#f4f4f0', marginBottom: 12, boxShadow: '1px 1px 0 #b8b8b8' }}>
-      {/* Heading */}
       <div style={{ background: 'linear-gradient(to bottom,#e0e8f4,#d0ddf0)', padding: '6px 10px', borderBottom: '1px solid #a0a8b8', display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
         <span style={{ fontWeight: 700, fontSize: 11, color: '#1a3a6b' }}>📊 Cuenta corriente</span>
-        <span style={{ fontSize: 11 }}>
-          {sFact > 0
-            ? <>Pendiente de facturar: <strong style={{ color: '#8a2020' }}>{fmtMoneda(sFact)}</strong></>
-            : sFact < 0
-            ? <>Mercadería a entregar: <strong style={{ color: '#1a5a1a' }}>{fmtMoneda(Math.abs(sFact))}</strong></>
-            : <>Facturado: <strong style={{ color: '#888' }}>$0</strong></>
-          }
+        <span style={{ fontSize: 11 }}>DEBE: <strong style={{ color: '#8a2020' }}>{fmtMoneda(totalDebe)}</strong></span>
+        <span style={{ fontSize: 11 }}>HABER: <strong style={{ color: '#1a5a1a' }}>{fmtMoneda(totalHaber)}</strong></span>
+        <span style={{ fontSize: 11, fontWeight: 700 }}>Saldo: <strong style={{ color: colS(saldo) }}>{fmtS(saldo)}</strong></span>
+        <span style={{ fontSize: 10, color: '#888', marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          {sFact !== 0 && <span>Fact: <strong style={{ color: colS(sFact) }}>{fmtS(sFact)}</strong></span>}
+          {sNoFact !== 0 && <span>NoFact: <strong style={{ color: colS(sNoFact) }}>{fmtS(sNoFact)}</strong></span>}
+          {sSinAsig !== 0 && <span>S/asig: <strong style={{ color: colS(sSinAsig) }}>{fmtS(sSinAsig)}</strong></span>}
         </span>
-        <span style={{ fontSize: 11 }}>No facturado: <strong style={{ color: colSaldo(sNoFact) }}>{fmtMoneda(Math.abs(sNoFact))}{sNoFact > 0 ? ' D' : sNoFact < 0 ? ' H' : ''}</strong></span>
-        {sSinAsig !== 0 && <span style={{ fontSize: 11, color: '#888' }}>Sin asignar: <strong>{fmtMoneda(Math.abs(sSinAsig))}{sSinAsig > 0 ? ' D' : ' H'}</strong></span>}
-        <span style={{ fontSize: 11, fontWeight: 700, marginLeft: 'auto' }}>Total: <span style={{ color: colSaldo(sTotal) }}>{fmtMoneda(Math.abs(sTotal))}{sTotal > 0 ? ' D' : sTotal < 0 ? ' H' : ''}</span></span>
       </div>
-      {/* Filas */}
       <table style={{ ...S.tbl, fontSize: 11 }}>
         <thead>
           <tr>
             <th style={{ ...S.th, textAlign: 'left' }}>Fecha</th>
-            <th style={S.th}>Tipo</th>
-            <th style={{ ...S.th, textAlign: 'left' }}>Observación</th>
-            <th style={{ ...S.th, textAlign: 'right' }}>Monto</th>
+            <th style={{ ...S.th, textAlign: 'left' }}>Concepto</th>
+            <th style={{ ...S.th, textAlign: 'right' }}>DEBE</th>
+            <th style={{ ...S.th, textAlign: 'right' }}>HABER</th>
+            <th style={{ ...S.th, textAlign: 'right' }}>Saldo</th>
             <th style={S.th}>Asignar</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map(r => {
-            const esDebe = r.tipo === 'debe' || r.tipo === 'factura'
-            const mColor = esDebe ? '#8a2020' : '#1a5a1a'
+          {displayRows.map(r => {
+            const debe = isDebe(r)
             return (
               <tr key={r.id}>
                 <td style={{ ...S.td, textAlign: 'left', whiteSpace: 'nowrap' }}>{fmtF(r.fecha)}</td>
-                <td style={{ ...S.td, fontWeight: 700, color: mColor }}>{TIPO_LBL[r.tipo] || r.tipo}</td>
-                <td style={{ ...S.td, textAlign: 'left', color: '#555', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.observacion || '—'}</td>
-                <td style={{ ...S.td, textAlign: 'right', fontWeight: 700, color: mColor }}>{fmtMoneda(r.monto)}</td>
+                <td style={{ ...S.td, textAlign: 'left', color: '#555', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{concepto(r)}</td>
+                <td style={{ ...S.td, textAlign: 'right', color: debe ? '#8a2020' : '#ccc', fontWeight: debe ? 700 : 400 }}>{debe ? fmtMoneda(r.monto) : ''}</td>
+                <td style={{ ...S.td, textAlign: 'right', color: !debe ? '#1a5a1a' : '#ccc', fontWeight: !debe ? 700 : 400 }}>{!debe ? fmtMoneda(r.monto) : ''}</td>
+                <td style={{ ...S.td, textAlign: 'right', fontWeight: 700, color: colS(r.saldo) }}>{fmtS(r.saldo)}</td>
                 <td style={{ ...S.td, whiteSpace: 'nowrap' }}>
                   <div style={{ display: 'flex', gap: 3, justifyContent: 'center' }}>
                     <button style={r.facturado === true ? btnAct : S.btn} onClick={() => setFact(r.id, r.facturado === true ? null : true)}>F</button>
