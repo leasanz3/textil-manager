@@ -177,6 +177,9 @@ function EntregaItemProd({ item, index, onChange, onRemove, timers, clienteId })
         if (precioConIVA != null && lastPu === precioConIVA) { precioMode = 'conIVA'; precio_unitario = String(precioConIVA) }
         else if (precioSinIVA != null && lastPu === precioSinIVA) { precioMode = 'sinIVA'; precio_unitario = String(precioSinIVA) }
         else { precio_unitario = String(hist[0].precio_unit) }
+      } else if (precioConIVA != null) {
+        precioMode = 'conIVA'
+        precio_unitario = String(precioConIVA)
       }
     }
     onChange(index, { ...item, producto_id: p.id, prodQ: p.nombre, prodRes: [], tabla: p.tabla, talles, conNino: false, cantidades: {}, precioConIVA, precioSinIVA, precioMode, precio_unitario })
@@ -402,10 +405,14 @@ const TIPOS_CLIENTE = [
 ]
 
 function ModalEditarMonto({ mov, onClose, onSave }) {
-  const [monto,  setMonto]  = useState('')
-  const [nota,   setNota]   = useState(mov.nota || '')
-  const [saving, setSaving] = useState(false)
-  const [ccId,   setCcId]   = useState(null)
+  const items     = mov.taller_movimientos_items || []
+  const totalCant = items.reduce((s, it) => s + (it.cantidad || 0), 0)
+  const firstPu   = items.find(it => it.precio_unit != null)?.precio_unit
+
+  const [precioUnit, setPrecioUnit] = useState(firstPu != null ? String(Math.round(Number(firstPu))) : '')
+  const [nota,       setNota]       = useState(mov.nota || '')
+  const [saving,     setSaving]     = useState(false)
+  const [ccId,       setCcId]       = useState(null)
 
   useEffect(() => {
     supabase.from('cuenta_corriente')
@@ -413,23 +420,34 @@ function ModalEditarMonto({ mov, onClose, onSave }) {
       .eq('movimiento_id', mov.id)
       .single()
       .then(({ data }) => {
-        if (data) { setCcId(data.id); setMonto(String(data.monto || '')); setNota(data.observacion || mov.nota || '') }
+        if (data) {
+          setCcId(data.id)
+          if (!firstPu && data.monto && totalCant > 0) {
+            setPrecioUnit(String(Math.round(Number(data.monto) / totalCant)))
+          }
+          setNota(prev => prev || data.observacion || '')
+        }
       })
   }, [mov.id])
 
+  const pu    = parseFloat(precioUnit) || 0
+  const total = items.reduce((s, it) => s + (it.cantidad || 0) * pu, 0)
+
   async function save() {
-    const m = parseFloat(monto)
-    if (!m || m <= 0) { alert('Ingresá un monto válido'); return }
+    if (!pu || pu <= 0) { alert('Ingresá un precio unitario válido'); return }
     setSaving(true)
+    const { data: { user } } = await supabase.auth.getUser()
     if (ccId) {
-      await supabase.from('cuenta_corriente').update({ monto: m, total_cobrar: m, observacion: nota || null }).eq('id', ccId)
+      await supabase.from('cuenta_corriente').update({ monto: total, total_cobrar: total, observacion: nota || null }).eq('id', ccId)
     } else {
-      const { data: { user } } = await supabase.auth.getUser()
       await supabase.from('cuenta_corriente').insert({
         contacto_id: mov.contactos?.id, tipo: 'debe', fecha: mov.fecha,
-        monto: m, total_cobrar: m, observacion: nota || null,
+        monto: total, total_cobrar: total, observacion: nota || null,
         movimiento_id: mov.id, user_id: user?.id,
       })
+    }
+    for (const it of items) {
+      await supabase.from('taller_movimientos_items').update({ precio_unit: pu }).eq('id', it.id)
     }
     if (nota !== mov.nota) await supabase.from('taller_movimientos').update({ nota }).eq('id', mov.id)
     setSaving(false); onSave()
@@ -443,13 +461,40 @@ function ModalEditarMonto({ mov, onClose, onSave }) {
           <button style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: F }} onClick={onClose}>✕</button>
         </div>
         <div style={modalB}>
+          {items.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <table style={S.tbl}>
+                <thead><tr>
+                  <th style={{ ...S.th, textAlign: 'left' }}>Producto</th>
+                  <th style={S.th}>Talle</th>
+                  <th style={S.th}>Cant.</th>
+                  <th style={S.th}>Subtotal</th>
+                </tr></thead>
+                <tbody>
+                  {items.map(it => (
+                    <tr key={it.id}>
+                      <td style={{ ...S.td, textAlign: 'left' }}>{it.productos?.nombre || '?'}</td>
+                      <td style={S.td}>{it.talle}</td>
+                      <td style={S.td}>{it.cantidad}</td>
+                      <td style={{ ...S.td, fontWeight: 700, color: '#1a5a1a' }}>{pu > 0 ? fmtMoneda((it.cantidad || 0) * pu) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
           <div style={{ marginBottom: 10 }}>
-            <span style={lbl}>Monto total *</span>
+            <span style={lbl}>Precio unitario *</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ fontWeight: 700 }}>$</span>
-              <input style={{ ...S.inp, width: 140, fontSize: 14, fontWeight: 700 }}
-                type="number" min="0" step="0.01" value={monto} autoFocus
-                onChange={e => setMonto(e.target.value)} placeholder="0.00" />
+              <input style={{ ...S.inp, width: 100, fontSize: 14, fontWeight: 700 }}
+                type="number" min="0" step="1" value={precioUnit} autoFocus
+                onChange={e => setPrecioUnit(e.target.value)} placeholder="0" />
+              {totalCant > 0 && pu > 0 && (
+                <span style={{ fontSize: 12, color: '#1a5a1a', fontWeight: 700 }}>
+                  × {totalCant}u = {fmtMoneda(total)}
+                </span>
+              )}
             </div>
           </div>
           <div>
@@ -461,7 +506,7 @@ function ModalEditarMonto({ mov, onClose, onSave }) {
         <div style={{ padding: '8px 12px', borderTop: '1px solid #c0c0b0', display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
           <button style={S.btn} onClick={onClose}>Cancelar</button>
           <button style={{ ...S.btn, background: 'linear-gradient(to bottom,#3a6a00,#1a4a00)', color: '#fff', border: '1px solid #1a4a00' }}
-            onClick={save} disabled={saving}>{saving ? 'Guardando...' : '✔ Guardar'}</button>
+            onClick={save} disabled={saving}>{saving ? 'Guardando...' : '💾 Guardar'}</button>
         </div>
       </div>
     </div>
