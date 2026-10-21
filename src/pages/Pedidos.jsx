@@ -221,6 +221,23 @@ function ItemPedido({ item, index, total, clienteId, onUpdate, onDelete, onOpenN
           </div>
         )}
       </div>
+      {/* Precio unitario c/IVA */}
+      <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 12, color: 'var(--text2)', fontWeight: 600 }}>Precio c/IVA:</span>
+        <span style={{ fontWeight: 700 }}>$</span>
+        <input
+          type="number" min="0" step="1"
+          value={item.precio_unit || ''}
+          onChange={e => onUpdate({ precio_unit: e.target.value })}
+          placeholder="0"
+          style={{ width: 90, textAlign: 'right' }}
+        />
+        {totalTalles(item.talles) > 0 && parseFloat(item.precio_unit) > 0 && (
+          <span style={{ fontSize: 12, color: 'var(--text2)', marginLeft: 4 }}>
+            × {totalTalles(item.talles)}u = <strong>${(totalTalles(item.talles) * parseFloat(item.precio_unit)).toLocaleString('es-AR')}</strong>
+          </span>
+        )}
+      </div>
     </div>
   )
 }
@@ -289,7 +306,9 @@ export default function Pedidos({ onMenuClick }) {
     etapa_actual: 'recibido',
     fecha_pedido: '',
     fecha:        '',
-    items: [{ producto: '', producto_id: null, tabla: 'adulto', talles: {} }],
+    items:         [{ producto: '', producto_id: null, tabla: 'adulto', talles: {}, precio_unit: '' }],
+    descuento_pct: '10',
+    sena_pct:      '50',
   }
   const [form, setForm] = useState(emptyForm)
   const setF = (k, v) => setForm(f => ({ ...f, [k]: v }))
@@ -324,14 +343,16 @@ export default function Pedidos({ onMenuClick }) {
   function openEdit(p) {
     setEditing(p.id)
     setForm({
-      cliente:      p.cliente      || '',
-      cliente_id:   null,
-      etapa_actual: normalizeEtapa(p.etapa_actual || 'recibido'),
-      fecha_pedido: p.fecha_pedido || '',
-      fecha:        p.fecha        || '',
+      cliente:       p.cliente      || '',
+      cliente_id:    null,
+      etapa_actual:  normalizeEtapa(p.etapa_actual || 'recibido'),
+      fecha_pedido:  p.fecha_pedido || '',
+      fecha:         p.fecha        || '',
       items: p.items && p.items.length > 0
         ? p.items
-        : [{ producto: p.producto || '', producto_id: p.producto_id || null, tabla: inferirTabla(p.talles), talles: p.talles || {} }],
+        : [{ producto: p.producto || '', producto_id: p.producto_id || null, tabla: inferirTabla(p.talles), talles: p.talles || {}, precio_unit: '' }],
+      descuento_pct: p.descuento_pct != null ? String(p.descuento_pct) : '10',
+      sena_pct:      p.sena_pct      != null ? String(p.sena_pct)      : '50',
     })
     setClienteQuery(p.cliente || '')
     setContactosResults([])
@@ -447,14 +468,16 @@ export default function Pedidos({ onMenuClick }) {
 
     const firstItem = form.items[0]
     const datos = {
-      producto:     firstItem.producto.trim(),
-      producto_id:  firstItem.producto_id || null,
-      cliente:      form.cliente.trim(),
-      etapa_actual: form.etapa_actual,
-      fecha_pedido: form.fecha_pedido || null,
-      fecha:        form.fecha || null,
-      talles:       firstItem.talles,
-      items:        form.items,
+      producto:      firstItem.producto.trim(),
+      producto_id:   firstItem.producto_id || null,
+      cliente:       form.cliente.trim(),
+      etapa_actual:  form.etapa_actual,
+      fecha_pedido:  form.fecha_pedido || null,
+      fecha:         form.fecha || null,
+      talles:        firstItem.talles,
+      items:         form.items,
+      descuento_pct: parseFloat(form.descuento_pct) || 0,
+      sena_pct:      parseFloat(form.sena_pct) || 50,
     }
 
     if (editing) {
@@ -893,6 +916,60 @@ export default function Pedidos({ onMenuClick }) {
               <button className="btn btn-secondary btn-sm" style={{ marginBottom: 12 }} onClick={addItem}>
                 + Agregar producto
               </button>
+
+              {/* ── Presupuesto / Seña ── */}
+              {(() => {
+                const totalCIVA = form.items.reduce((s, it) => s + totalTalles(it.talles) * (parseFloat(it.precio_unit) || 0), 0)
+                const desc      = parseFloat(form.descuento_pct) || 0
+                const totalSIVA = Math.round(totalCIVA * (1 - desc / 100))
+                const senaPct   = parseFloat(form.sena_pct) || 0
+                const senaMonto = Math.round(totalSIVA * senaPct / 100)
+                const hayPrecio = totalCIVA > 0
+                return (
+                  <div style={{ borderTop: '2px solid var(--border)', paddingTop: 14, marginTop: 4 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10, color: 'var(--accent)' }}>💰 Presupuesto</div>
+                    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 10 }}>
+                      <div className="form-group" style={{ margin: 0, minWidth: 130 }}>
+                        <label>Descuento s/IVA (%)</label>
+                        <input type="number" min="0" max="100" step="0.5"
+                          value={form.descuento_pct}
+                          onChange={e => setF('descuento_pct', e.target.value)}
+                          placeholder="10" style={{ width: 80 }} />
+                      </div>
+                      <div className="form-group" style={{ margin: 0, minWidth: 130 }}>
+                        <label>Seña (%)</label>
+                        <input type="number" min="0" max="100" step="5"
+                          value={form.sena_pct}
+                          onChange={e => setF('sena_pct', e.target.value)}
+                          placeholder="50" style={{ width: 80 }} />
+                      </div>
+                    </div>
+                    {hayPrecio && (
+                      <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '10px 14px', fontSize: 13, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ color: 'var(--text2)' }}>Total c/IVA</span>
+                          <strong>${totalCIVA.toLocaleString('es-AR')}</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ color: 'var(--text2)' }}>Descuento {desc}% s/IVA</span>
+                          <strong style={{ color: 'var(--danger)' }}>− ${(totalCIVA - totalSIVA).toLocaleString('es-AR')}</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border)', paddingTop: 6 }}>
+                          <span style={{ fontWeight: 700 }}>Total s/IVA</span>
+                          <strong style={{ fontSize: 15 }}>${totalSIVA.toLocaleString('es-AR')}</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--accent)', color: '#fff', margin: '4px -14px -10px', padding: '8px 14px', borderRadius: '0 0 var(--radius) var(--radius)' }}>
+                          <span style={{ fontWeight: 700 }}>Seña {senaPct}%</span>
+                          <strong style={{ fontSize: 15 }}>${senaMonto.toLocaleString('es-AR')}</strong>
+                        </div>
+                      </div>
+                    )}
+                    {!hayPrecio && (
+                      <p style={{ fontSize: 12, color: 'var(--text2)', fontStyle: 'italic' }}>Cargá el precio c/IVA en cada producto para ver el presupuesto.</p>
+                    )}
+                  </div>
+                )
+              })()}
 
               {error && (
                 <p style={{ color: 'var(--danger)', fontSize: 12, marginTop: 4 }}>⚠ {error}</p>
