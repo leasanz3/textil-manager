@@ -1357,6 +1357,69 @@ export default function Productos({ onMenuClick }) {
                           )
                         })}
 
+                        {/* — Ojal y botón — */}
+                        {(subtotalOjalBoton > 0 || (editandoCostos && (costosDraft.ojal_boton_cant || costosDraft.ojal_boton_precio))) && (
+                          <tr onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'} onMouseLeave={e => e.currentTarget.style.background = ''}>
+                            <td style={TD}>🪢 Ojal y botón</td>
+                            <td style={{ ...TD, textAlign: 'center' }}>
+                              {editandoCostos ? (
+                                <div style={{ display: 'flex', gap: 4, alignItems: 'center', justifyContent: 'center' }}>
+                                  <input type="number" min="1" value={costosDraft.ojal_boton_cant || ''}
+                                    onChange={e => setCostosDraft(d => ({ ...d, ojal_boton_cant: e.target.value }))}
+                                    placeholder="cant" style={{ width: 50, textAlign: 'right', fontSize: 11 }} />
+                                  <span style={{ fontSize: 10 }}>u</span>
+                                </div>
+                              ) : <span>{ojalCant} u</span>}
+                            </td>
+                            <td style={{ ...TD, textAlign: 'right', color: '#555' }}>
+                              {editandoCostos ? (
+                                <input type="number" min="0" value={costosDraft.ojal_boton_precio || ''}
+                                  onChange={e => setCostosDraft(d => ({ ...d, ojal_boton_precio: e.target.value }))}
+                                  placeholder="$/u" style={{ width: 70, textAlign: 'right', fontSize: 11 }} />
+                              ) : ojalPrecio > 0 ? fmtUYU(ojalPrecio) : '—'}
+                            </td>
+                            <td style={{ ...TD, textAlign: 'right', fontWeight: 700 }}>{subtotalOjalBoton > 0 ? fmtUYU(subtotalOjalBoton) : '—'}</td>
+                            <td style={{ ...TD, textAlign: 'right', color: '#1a5a1a', fontWeight: 700, fontSize: 11 }}>{subtotalOjalBoton > 0 ? fmtUYU(Math.ceil(subtotalOjalBoton / 5) * 5) : '—'}</td>
+                            <td style={{ ...TD, color: '#888', fontStyle: 'italic', fontSize: 10 }}>—</td>
+                          </tr>
+                        )}
+
+                        {/* — Cuello tejido — */}
+                        {(subtotalCuello > 0 || (editandoCostos && costosDraft.costo_cuello)) && (
+                          <tr onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'} onMouseLeave={e => e.currentTarget.style.background = ''}>
+                            <td style={TD}>🧶 Cuello tejido</td>
+                            <td style={{ ...TD, textAlign: 'center' }}></td>
+                            <td style={TD}></td>
+                            <td style={{ ...TD, textAlign: 'right', fontWeight: editandoCostos ? 400 : 700 }}>
+                              {editandoCostos ? (
+                                <input type="number" min="0" value={costosDraft.costo_cuello || ''}
+                                  onChange={e => setCostosDraft(d => ({ ...d, costo_cuello: e.target.value }))}
+                                  placeholder="0" style={{ width: 80, textAlign: 'right', fontSize: 11 }} />
+                              ) : fmtUYU(subtotalCuello)}
+                            </td>
+                            <td style={{ ...TD, textAlign: 'right', color: '#1a5a1a', fontWeight: 700, fontSize: 11 }}>{subtotalCuello > 0 ? fmtUYU(Math.ceil(subtotalCuello / 5) * 5) : '—'}</td>
+                            <td style={{ ...TD, color: '#888', fontStyle: 'italic', fontSize: 10 }}>—</td>
+                          </tr>
+                        )}
+
+                        {/* — Par de puños — */}
+                        {(subtotalPunos > 0 || (editandoCostos && costosDraft.costo_punos)) && (
+                          <tr onMouseEnter={e => e.currentTarget.style.background = '#ffffcc'} onMouseLeave={e => e.currentTarget.style.background = ''}>
+                            <td style={TD}>🧶 Par de puños tejido</td>
+                            <td style={{ ...TD, textAlign: 'center' }}></td>
+                            <td style={TD}></td>
+                            <td style={{ ...TD, textAlign: 'right', fontWeight: editandoCostos ? 400 : 700 }}>
+                              {editandoCostos ? (
+                                <input type="number" min="0" value={costosDraft.costo_punos || ''}
+                                  onChange={e => setCostosDraft(d => ({ ...d, costo_punos: e.target.value }))}
+                                  placeholder="0" style={{ width: 80, textAlign: 'right', fontSize: 11 }} />
+                              ) : fmtUYU(subtotalPunos)}
+                            </td>
+                            <td style={{ ...TD, textAlign: 'right', color: '#1a5a1a', fontWeight: 700, fontSize: 11 }}>{subtotalPunos > 0 ? fmtUYU(Math.ceil(subtotalPunos / 5) * 5) : '—'}</td>
+                            <td style={{ ...TD, color: '#888', fontStyle: 'italic', fontSize: 10 }}>—</td>
+                          </tr>
+                        )}
+
                         {/* — Estampados / bordados — */}
                         {estampadosConPrecio.length > 0 && (
                           <>
