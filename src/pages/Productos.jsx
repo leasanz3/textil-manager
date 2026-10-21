@@ -279,6 +279,7 @@ export default function Productos({ onMenuClick }) {
     precio_iva: 'exc',
     cara_uso: '',
     costo_confeccion: '', costo_corte: '', costo_elasticos: '', costo_otros: '',
+    costo_ojal_boton: '', costo_cuello_punos: '',
   }
   const [form, setForm]             = useState(emptyForm)
   const [nuevaPieza, setNuevaPieza] = useState({ nombre: '', mult: '1', tela_rol: 'tela1' })
@@ -458,6 +459,8 @@ export default function Productos({ onMenuClick }) {
       costo_confeccion:        p.costo_confeccion        != null ? String(p.costo_confeccion)        : '',
       costo_corte:             p.costo_corte             != null ? String(p.costo_corte)             : '',
       costo_elasticos:         p.costo_elasticos         != null ? String(p.costo_elasticos)         : '',
+      costo_ojal_boton:        p.costo_ojal_boton        != null ? String(p.costo_ojal_boton)        : '',
+      costo_cuello_punos:      p.costo_cuello_punos      != null ? String(p.costo_cuello_punos)      : '',
       estampados:              p.estampados              || [],
       precio_venta:            p.precio_venta            != null ? String(p.precio_venta)            : '',
       precio_iva:              p.precio_iva              || 'exc',
@@ -702,6 +705,8 @@ export default function Productos({ onMenuClick }) {
       costo_confeccion:         parseFloat(form.costo_confeccion)        || 0,
       costo_corte:              parseFloat(form.costo_corte)             || 0,
       costo_elasticos:          parseFloat(form.costo_elasticos)         || 0,
+      costo_ojal_boton:         parseFloat(form.costo_ojal_boton)        || 0,
+      costo_cuello_punos:       parseFloat(form.costo_cuello_punos)      || 0,
       estampados:               (form.estampados || []).map(e => ({ ...e, precio: parseFloat(e.precio) || 0 })),
       precio_venta:             parseFloat(form.precio_venta) || null,
       precio_iva:               form.precio_iva || null,
@@ -755,6 +760,8 @@ export default function Productos({ onMenuClick }) {
       costo_confeccion:        vistaFicha.costo_confeccion        != null ? String(vistaFicha.costo_confeccion)        : '',
       costo_corte:             vistaFicha.costo_corte             != null ? String(vistaFicha.costo_corte)             : '',
       costo_elasticos:         vistaFicha.costo_elasticos         != null ? String(vistaFicha.costo_elasticos)         : '',
+      costo_ojal_boton:        vistaFicha.costo_ojal_boton        != null ? String(vistaFicha.costo_ojal_boton)        : '',
+      costo_cuello_punos:      vistaFicha.costo_cuello_punos      != null ? String(vistaFicha.costo_cuello_punos)      : '',
       estampados:              (vistaFicha.estampados || []).map(e => ({ ...e, precio: e.precio != null ? String(e.precio) : '' })),
       costo_otros:             vistaFicha.costo_otros             != null ? String(vistaFicha.costo_otros)             : '',
       precio_venta:            vistaFicha.precio_venta            != null ? String(vistaFicha.precio_venta)            : '',
@@ -780,6 +787,8 @@ export default function Productos({ onMenuClick }) {
       costo_confeccion:        parseFloat(costosDraft.costo_confeccion)        || 0,
       costo_corte:             parseFloat(costosDraft.costo_corte)             || 0,
       costo_elasticos:         parseFloat(costosDraft.costo_elasticos)         || 0,
+      costo_ojal_boton:        parseFloat(costosDraft.costo_ojal_boton)        || 0,
+      costo_cuello_punos:      parseFloat(costosDraft.costo_cuello_punos)      || 0,
       estampados:              (costosDraft.estampados || []).map(e => ({ ...e, precio: parseFloat(e.precio) || 0 })),
       costo_otros:             parseFloat(costosDraft.costo_otros)             || 0,
       precio_venta:            parseFloat(costosDraft.precio_venta)            || null,
@@ -1147,8 +1156,10 @@ export default function Productos({ onMenuClick }) {
                 })
                 const subtotalAvios = aviosConCosto.reduce((s, a) => s + a.costo, 0)
                 const COSTO_KEYS = [
-                  { key: 'costo_confeccion',  label: 'Confección' },
-                  { key: 'costo_corte',       label: 'Corte'      },
+                  { key: 'costo_confeccion',  label: 'Confección'    },
+                  { key: 'costo_corte',       label: 'Corte'         },
+                  { key: 'costo_ojal_boton',  label: 'Ojal y botón'  },
+                  { key: 'costo_cuello_punos',label: 'Cuello y puños'},
                 ]
                 const estampadosConPrecio = editandoCostos
                   ? (costosDraft.estampados || [])
@@ -1873,8 +1884,10 @@ export default function Productos({ onMenuClick }) {
                 <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 10 }}>💰 Costos por unidad</div>
                 <div className="form-grid">
                   {[
-                    ['costo_confeccion', 'Confección'],
-                    ['costo_corte',      'Corte'],
+                    ['costo_confeccion',   'Confección'],
+                    ['costo_corte',        'Corte'],
+                    ['costo_ojal_boton',   'Ojal y botón'],
+                    ['costo_cuello_punos', 'Cuello y puños'],
                   ].map(([key, label]) => (
                     <div key={key} className="form-group">
                       <label>{label}</label>
