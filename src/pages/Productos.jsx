@@ -279,7 +279,8 @@ export default function Productos({ onMenuClick }) {
     precio_iva: 'exc',
     cara_uso: '',
     costo_confeccion: '', costo_corte: '', costo_elasticos: '', costo_otros: '',
-    costo_ojal_boton: '', costo_cuello_punos: '',
+    ojal_boton_cant: '', ojal_boton_precio: '',
+    costo_cuello: '', costo_punos: '',
   }
   const [form, setForm]             = useState(emptyForm)
   const [nuevaPieza, setNuevaPieza] = useState({ nombre: '', mult: '1', tela_rol: 'tela1' })
@@ -459,8 +460,10 @@ export default function Productos({ onMenuClick }) {
       costo_confeccion:        p.costo_confeccion        != null ? String(p.costo_confeccion)        : '',
       costo_corte:             p.costo_corte             != null ? String(p.costo_corte)             : '',
       costo_elasticos:         p.costo_elasticos         != null ? String(p.costo_elasticos)         : '',
-      costo_ojal_boton:        p.costo_ojal_boton        != null ? String(p.costo_ojal_boton)        : '',
-      costo_cuello_punos:      p.costo_cuello_punos      != null ? String(p.costo_cuello_punos)      : '',
+      ojal_boton_cant:         p.ojal_boton_cant         != null ? String(p.ojal_boton_cant)         : '',
+      ojal_boton_precio:       p.ojal_boton_precio       != null ? String(p.ojal_boton_precio)       : '',
+      costo_cuello:            p.costo_cuello            != null ? String(p.costo_cuello)            : '',
+      costo_punos:             p.costo_punos             != null ? String(p.costo_punos)             : '',
       estampados:              p.estampados              || [],
       precio_venta:            p.precio_venta            != null ? String(p.precio_venta)            : '',
       precio_iva:              p.precio_iva              || 'exc',
@@ -705,8 +708,10 @@ export default function Productos({ onMenuClick }) {
       costo_confeccion:         parseFloat(form.costo_confeccion)        || 0,
       costo_corte:              parseFloat(form.costo_corte)             || 0,
       costo_elasticos:          parseFloat(form.costo_elasticos)         || 0,
-      costo_ojal_boton:         parseFloat(form.costo_ojal_boton)        || 0,
-      costo_cuello_punos:       parseFloat(form.costo_cuello_punos)      || 0,
+      ojal_boton_cant:          parseFloat(form.ojal_boton_cant)          || null,
+      ojal_boton_precio:        parseFloat(form.ojal_boton_precio)        || null,
+      costo_cuello:             parseFloat(form.costo_cuello)             || null,
+      costo_punos:              parseFloat(form.costo_punos)              || null,
       estampados:               (form.estampados || []).map(e => ({ ...e, precio: parseFloat(e.precio) || 0 })),
       precio_venta:             parseFloat(form.precio_venta) || null,
       precio_iva:               form.precio_iva || null,
@@ -760,8 +765,10 @@ export default function Productos({ onMenuClick }) {
       costo_confeccion:        vistaFicha.costo_confeccion        != null ? String(vistaFicha.costo_confeccion)        : '',
       costo_corte:             vistaFicha.costo_corte             != null ? String(vistaFicha.costo_corte)             : '',
       costo_elasticos:         vistaFicha.costo_elasticos         != null ? String(vistaFicha.costo_elasticos)         : '',
-      costo_ojal_boton:        vistaFicha.costo_ojal_boton        != null ? String(vistaFicha.costo_ojal_boton)        : '',
-      costo_cuello_punos:      vistaFicha.costo_cuello_punos      != null ? String(vistaFicha.costo_cuello_punos)      : '',
+      ojal_boton_cant:         vistaFicha.ojal_boton_cant         != null ? String(vistaFicha.ojal_boton_cant)         : '',
+      ojal_boton_precio:       vistaFicha.ojal_boton_precio       != null ? String(vistaFicha.ojal_boton_precio)       : '',
+      costo_cuello:            vistaFicha.costo_cuello            != null ? String(vistaFicha.costo_cuello)            : '',
+      costo_punos:             vistaFicha.costo_punos             != null ? String(vistaFicha.costo_punos)             : '',
       estampados:              (vistaFicha.estampados || []).map(e => ({ ...e, precio: e.precio != null ? String(e.precio) : '' })),
       costo_otros:             vistaFicha.costo_otros             != null ? String(vistaFicha.costo_otros)             : '',
       precio_venta:            vistaFicha.precio_venta            != null ? String(vistaFicha.precio_venta)            : '',
@@ -787,8 +794,10 @@ export default function Productos({ onMenuClick }) {
       costo_confeccion:        parseFloat(costosDraft.costo_confeccion)        || 0,
       costo_corte:             parseFloat(costosDraft.costo_corte)             || 0,
       costo_elasticos:         parseFloat(costosDraft.costo_elasticos)         || 0,
-      costo_ojal_boton:        parseFloat(costosDraft.costo_ojal_boton)        || 0,
-      costo_cuello_punos:      parseFloat(costosDraft.costo_cuello_punos)      || 0,
+      ojal_boton_cant:         parseFloat(costosDraft.ojal_boton_cant)         || null,
+      ojal_boton_precio:       parseFloat(costosDraft.ojal_boton_precio)       || null,
+      costo_cuello:            parseFloat(costosDraft.costo_cuello)            || null,
+      costo_punos:             parseFloat(costosDraft.costo_punos)             || null,
       estampados:              (costosDraft.estampados || []).map(e => ({ ...e, precio: parseFloat(e.precio) || 0 })),
       costo_otros:             parseFloat(costosDraft.costo_otros)             || 0,
       precio_venta:            parseFloat(costosDraft.precio_venta)            || null,
@@ -1156,18 +1165,23 @@ export default function Productos({ onMenuClick }) {
                 })
                 const subtotalAvios = aviosConCosto.reduce((s, a) => s + a.costo, 0)
                 const COSTO_KEYS = [
-                  { key: 'costo_confeccion',  label: 'Confección'    },
-                  { key: 'costo_corte',       label: 'Corte'         },
-                  { key: 'costo_ojal_boton',  label: 'Ojal y botón'  },
-                  { key: 'costo_cuello_punos',label: 'Cuello y puños'},
+                  { key: 'costo_confeccion', label: 'Confección' },
+                  { key: 'costo_corte',      label: 'Corte'      },
                 ]
+                const src = editandoCostos ? costosDraft : vistaFicha
+                const ojalCant   = parseFloat(src.ojal_boton_cant)   || 0
+                const ojalPrecio = parseFloat(src.ojal_boton_precio) || 0
+                const subtotalOjalBoton  = ojalCant * ojalPrecio
+                const subtotalCuello     = parseFloat(src.costo_cuello) || 0
+                const subtotalPunos      = parseFloat(src.costo_punos)  || 0
                 const estampadosConPrecio = editandoCostos
                   ? (costosDraft.estampados || [])
                   : (vistaFicha.estampados || [])
                 const subtotalOtros = COSTO_KEYS.reduce((a, c) => {
                   const v = editandoCostos ? costosDraft[c.key] : vistaFicha[c.key]
                   return a + (parseFloat(v) || 0)
-                }, 0) + estampadosConPrecio.reduce((a, e) => a + (parseFloat(e.precio) || 0), 0)
+                }, 0) + subtotalOjalBoton + subtotalCuello + subtotalPunos
+                  + estampadosConPrecio.reduce((a, e) => a + (parseFloat(e.precio) || 0), 0)
                 const costoTotal = subtotalTelas + subtotalAvios + subtotalOtros
                 const fmtUYU  = n => '$ ' + Number(n || 0).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
                 const fmtUSD  = n => 'U$D ' + Number(n || 0).toLocaleString('es-UY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -1898,37 +1912,88 @@ export default function Productos({ onMenuClick }) {
                     </div>
                   ))}
                 </div>
-                {/* Costos opcionales por proceso */}
+                {/* Procesos externos opcionales */}
                 <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
                   <div style={{ fontWeight: 600, fontSize: 11, marginBottom: 8, color: 'var(--text2)' }}>Procesos externos opcionales</div>
-                  {[
-                    ['costo_ojal_boton',   '🪢 Ojal y botón'],
-                    ['costo_cuello_punos', '🧶 Cuello y puños'],
-                  ].map(([key, label]) => {
-                    const activo = form[key] !== '' && form[key] != null
+
+                  {/* Ojal y botón */}
+                  {(() => {
+                    const activo = form.ojal_boton_cant !== '' || form.ojal_boton_precio !== ''
+                    const cant   = parseFloat(form.ojal_boton_cant)   || 0
+                    const precio = parseFloat(form.ojal_boton_precio) || 0
                     return (
-                      <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, userSelect: 'none' }}>
-                          <input
-                            type="checkbox"
-                            checked={activo}
-                            onChange={e => setForm(f => ({ ...f, [key]: e.target.checked ? '0' : '' }))}
-                          />
-                          {label}
+                      <div style={{ marginBottom: 10 }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, userSelect: 'none', marginBottom: 6 }}>
+                          <input type="checkbox" checked={activo}
+                            onChange={e => setForm(f => ({ ...f, ojal_boton_cant: e.target.checked ? '1' : '', ojal_boton_precio: e.target.checked ? '' : '' }))} />
+                          🪢 Ojal y botón
                         </label>
                         {activo && (
-                          <input
-                            type="number"
-                            value={form[key]}
-                            onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
-                            placeholder="$ costo"
-                            style={{ width: 100 }}
-                            autoFocus
-                          />
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 22, flexWrap: 'wrap' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <span style={{ fontSize: 11, color: 'var(--text2)' }}>Cantidad</span>
+                              <input type="number" min="1" step="1" value={form.ojal_boton_cant}
+                                onChange={e => setForm(f => ({ ...f, ojal_boton_cant: e.target.value }))}
+                                placeholder="2" style={{ width: 60 }} />
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <span style={{ fontSize: 11, color: 'var(--text2)' }}>$/u</span>
+                              <input type="number" min="0" step="1" value={form.ojal_boton_precio}
+                                onChange={e => setForm(f => ({ ...f, ojal_boton_precio: e.target.value }))}
+                                placeholder="6" style={{ width: 80 }} />
+                            </div>
+                            {cant > 0 && precio > 0 && (
+                              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)' }}>= ${(cant * precio).toLocaleString('es-AR')}</span>
+                            )}
+                          </div>
                         )}
                       </div>
                     )
-                  })}
+                  })()}
+
+                  {/* Cuello tejido */}
+                  {(() => {
+                    const activo = form.costo_cuello !== '' && form.costo_cuello != null
+                    return (
+                      <div style={{ marginBottom: 10 }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, userSelect: 'none', marginBottom: 6 }}>
+                          <input type="checkbox" checked={activo}
+                            onChange={e => setForm(f => ({ ...f, costo_cuello: e.target.checked ? '0' : '' }))} />
+                          🧶 Cuello tejido
+                        </label>
+                        {activo && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 22 }}>
+                            <span style={{ fontSize: 11, color: 'var(--text2)' }}>$</span>
+                            <input type="number" min="0" step="1" value={form.costo_cuello}
+                              onChange={e => setForm(f => ({ ...f, costo_cuello: e.target.value }))}
+                              placeholder="40" style={{ width: 100 }} autoFocus />
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
+
+                  {/* Par de puños */}
+                  {(() => {
+                    const activo = form.costo_punos !== '' && form.costo_punos != null
+                    return (
+                      <div style={{ marginBottom: 4 }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, userSelect: 'none', marginBottom: 6 }}>
+                          <input type="checkbox" checked={activo}
+                            onChange={e => setForm(f => ({ ...f, costo_punos: e.target.checked ? '0' : '' }))} />
+                          🧶 Par de puños tejido
+                        </label>
+                        {activo && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 22 }}>
+                            <span style={{ fontSize: 11, color: 'var(--text2)' }}>$</span>
+                            <input type="number" min="0" step="1" value={form.costo_punos}
+                              onChange={e => setForm(f => ({ ...f, costo_punos: e.target.value }))}
+                              placeholder="40" style={{ width: 100 }} />
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </div>
 
                 {/* Estampados / bordados */}
