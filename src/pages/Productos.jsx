@@ -1884,10 +1884,8 @@ export default function Productos({ onMenuClick }) {
                 <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 10 }}>💰 Costos por unidad</div>
                 <div className="form-grid">
                   {[
-                    ['costo_confeccion',   'Confección'],
-                    ['costo_corte',        'Corte'],
-                    ['costo_ojal_boton',   'Ojal y botón'],
-                    ['costo_cuello_punos', 'Cuello y puños'],
+                    ['costo_confeccion', 'Confección'],
+                    ['costo_corte',      'Corte'],
                   ].map(([key, label]) => (
                     <div key={key} className="form-group">
                       <label>{label}</label>
@@ -1899,6 +1897,38 @@ export default function Productos({ onMenuClick }) {
                       />
                     </div>
                   ))}
+                </div>
+                {/* Costos opcionales por proceso */}
+                <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+                  <div style={{ fontWeight: 600, fontSize: 11, marginBottom: 8, color: 'var(--text2)' }}>Procesos externos opcionales</div>
+                  {[
+                    ['costo_ojal_boton',   '🪢 Ojal y botón'],
+                    ['costo_cuello_punos', '🧶 Cuello y puños'],
+                  ].map(([key, label]) => {
+                    const activo = form[key] !== '' && form[key] != null
+                    return (
+                      <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, userSelect: 'none' }}>
+                          <input
+                            type="checkbox"
+                            checked={activo}
+                            onChange={e => setForm(f => ({ ...f, [key]: e.target.checked ? '0' : '' }))}
+                          />
+                          {label}
+                        </label>
+                        {activo && (
+                          <input
+                            type="number"
+                            value={form[key]}
+                            onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+                            placeholder="$ costo"
+                            style={{ width: 100 }}
+                            autoFocus
+                          />
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
 
                 {/* Estampados / bordados */}
