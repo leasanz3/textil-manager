@@ -7,8 +7,10 @@ const fmtF  = f => { if (!f) return '—'; const s = f.includes('T') ? f.split('
 const fmtM  = n => { const v = parseFloat(n); if (!v) return '$ 0'; return '$ ' + v.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }
 
 const COSTO_FIELDS = [
-  { key: 'costo_confeccion', label: '✂ Confección' },
-  { key: 'costo_corte',      label: 'Corte' },
+  { key: 'costo_confeccion',   label: '✂ Confección' },
+  { key: 'costo_corte',        label: 'Corte' },
+  { key: 'costo_ojal_boton',   label: 'Ojal y botón' },
+  { key: 'costo_cuello_punos', label: 'Cuello y puños' },
 ]
 
 const ESTADO_BG = { pendiente: '#fff3c8', aceptada: '#d4f0d4', no_aceptada: '#ffd4d4', cancelada: '#e8e8e8' }
@@ -34,6 +36,7 @@ const emptyPrenda = () => ({
   telas: [], estampados: [],
   costo_telas: '', costo_otros: '',
   costo_confeccion: '', costo_corte: '', costo_elasticos: '',
+  costo_ojal_boton: '', costo_cuello_punos: '',
   avios: [],
   margen_pct: '', precio_venta: '', precio_cotizado: '', notas: '', open: true,
 })
@@ -101,6 +104,7 @@ export default function Cotizacion({ onMenuClick }) {
             avios: (p.avios_detalle || []).map(a => ({ ...a, _key: Math.random() })),
             costo_telas: p.costo_telas ?? '', costo_confeccion: p.costo_confeccion ?? '',
             costo_corte: p.costo_corte ?? '', costo_elasticos: p.costo_elasticos ?? '',
+            costo_ojal_boton: p.costo_ojal_boton ?? '', costo_cuello_punos: p.costo_cuello_punos ?? '',
             costo_otros: p.costo_otros ?? '', margen_pct: p.margen_pct ?? '', precio_venta: p.precio_venta ?? '', precio_cotizado: p.precio_cotizado ?? '', notas: p.notas ?? '',
           }))
         : [emptyPrenda()],
