@@ -252,6 +252,7 @@ export default function Productos({ onMenuClick }) {
   const clienteSearchTimeout = useRef(null)
   const dragSrcPieza   = useRef(null)
   const dragSrcProceso = useRef(null)
+  const [clonarCostos, setClonarCostos] = useState(false)
 
   const emptyForm = {
     nombre: '', codigo: '', tabla: 'adulto', base_id: '',
@@ -411,6 +412,7 @@ export default function Productos({ onMenuClick }) {
   function openNew() {
     setEditing(null)
     setForm(emptyForm)
+    setClonarCostos(false)
     setFilterProvTela(''); setFilterProvTela2(''); setFilterProvRib(''); setFilterProvAvio('')
     setNuevoAvioSelect({ prov_id: '', avio_id: '', cantidad: '' })
     setClienteQuery(''); setContactosResults([]); setShowClienteDropdown(false)
@@ -473,7 +475,8 @@ export default function Productos({ onMenuClick }) {
     setModal(true)
   }
 
-  function aplicarBase(baseId) {
+  function aplicarBase(baseId, includeCostos) {
+    const withCostos = includeCostos !== undefined ? includeCostos : clonarCostos
     if (!baseId) { setForm(f => ({ ...f, base_id: '' })); return }
     const base = productos.find(p => p.id === parseInt(baseId))
     if (!base) return
@@ -505,6 +508,23 @@ export default function Productos({ onMenuClick }) {
       terminaciones:      { ...(base.terminaciones || {}) },
       terminaciones_extra: (base.terminaciones_extra || []).map(x => ({ ...x })),
       planchado_pares:    (base.planchado_pares  || []).map(x => ({ ...x })),
+      ...(withCostos ? {
+        costo_confeccion:  base.costo_confeccion  != null ? String(base.costo_confeccion)  : '',
+        costo_corte:       base.costo_corte        != null ? String(base.costo_corte)        : '',
+        costo_elasticos:   base.costo_elasticos    != null ? String(base.costo_elasticos)    : '',
+        costo_otros:       base.costo_otros        != null ? String(base.costo_otros)        : '',
+        ojal_boton_cant:   base.ojal_boton_cant    != null ? String(base.ojal_boton_cant)    : '',
+        ojal_boton_precio: base.ojal_boton_precio  != null ? String(base.ojal_boton_precio)  : '',
+        costo_cuello:      base.costo_cuello       != null ? String(base.costo_cuello)       : '',
+        costo_punos:       base.costo_punos        != null ? String(base.costo_punos)        : '',
+        estampados:        (base.estampados || []).map(x => ({ ...x })),
+        precio_venta:      base.precio_venta       != null ? String(base.precio_venta)       : '',
+        precio_iva:        base.precio_iva         || 'exc',
+        tipo_cambio:       base.tipo_cambio        != null ? String(base.tipo_cambio)        : '',
+        cara_uso:          base.cara_uso           || '',
+        molde:             base.molde              || '',
+        notas:             base.notas              || '',
+      } : {}),
     }))
   }
 
@@ -1604,6 +1624,19 @@ export default function Productos({ onMenuClick }) {
                       <option key={p.id} value={p.id}>{p.codigo} {p.nombre}</option>
                     ))}
                   </select>
+                  {!editing && (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 12, cursor: 'pointer', color: clonarCostos ? 'var(--accent)' : 'var(--text2)' }}>
+                      <input
+                        type="checkbox"
+                        checked={clonarCostos}
+                        onChange={e => {
+                          setClonarCostos(e.target.checked)
+                          if (form.base_id) aplicarBase(form.base_id, e.target.checked)
+                        }}
+                      />
+                      Clonar también costos, precios y estampados
+                    </label>
+                  )}
                 </div>
                 <div className="form-group">
                   <label>Molde</label>
