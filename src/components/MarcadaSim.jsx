@@ -132,11 +132,13 @@ function ModificacionesSection({ marcadaId, productoId, piezas, talles, ajustes,
   async function save() {
     if (!f.cantidad || !f.de_talle || !f.a_talle) return
     setSaving(true)
+    const { data:{ user } } = await supabase.auth.getUser()
     const { error } = await supabase.from('marcadas_sim_ajustes').insert({
       marcada_id: marcadaId, producto_id: productoId,
       de_pieza: f.de_pieza || null, a_pieza: f.a_pieza || null,
       de_talle: f.de_talle, a_talle: f.a_talle,
       cantidad: parseInt(f.cantidad) || 0,
+      user_id: user?.id,
     })
     setSaving(false)
     if (error) { alert('Error: ' + error.message); return }
@@ -250,7 +252,8 @@ function TablaPorPar({ marcadaId, productoId, talles, piezas, pares, ajustes, on
     if (ex) {
       await supabase.from('marcadas_sim_piezas').update({ cantidad: v }).eq('id', ex.id)
     } else {
-      await supabase.from('marcadas_sim_piezas').insert({ marcada_id:marcadaId, producto_id:productoId, pieza_nombre:pieza, talle, cantidad:v })
+      const { data:{ user } } = await supabase.auth.getUser()
+      await supabase.from('marcadas_sim_piezas').insert({ marcada_id:marcadaId, producto_id:productoId, pieza_nombre:pieza, talle, cantidad:v, user_id:user?.id })
     }
     onReload()
   }
@@ -408,7 +411,8 @@ function PiezasPorPrendaSection({ marcadaId, productoId, catalogPiezas, piezasRe
   const disponibles = (catalogPiezas || []).filter(p => !mineSet.has(p.nombre))
 
   async function addPieza(nombre) {
-    await supabase.from('marcadas_sim_piezas_req').insert({ marcada_id: marcadaId, producto_id: productoId, pieza_nombre: nombre, cant_prenda: 1 })
+    const { data:{ user } } = await supabase.auth.getUser()
+    await supabase.from('marcadas_sim_piezas_req').insert({ marcada_id: marcadaId, producto_id: productoId, pieza_nombre: nombre, cant_prenda: 1, user_id:user?.id })
     onReload()
   }
   async function delPieza(id) {
@@ -495,7 +499,8 @@ function PedidoSection({ marcadaId, productoId, talles, pedido, onReload }) {
       if (ex) {
         await supabase.from('marcadas_sim_pedido').update({ cantidad }).eq('id', ex.id)
       } else {
-        await supabase.from('marcadas_sim_pedido').insert({ marcada_id: marcadaId, producto_id: productoId, talle, cantidad })
+        const { data:{ user } } = await supabase.auth.getUser()
+        await supabase.from('marcadas_sim_pedido').insert({ marcada_id: marcadaId, producto_id: productoId, talle, cantidad, user_id:user?.id })
       }
       onReload()
     }, 500)
@@ -744,7 +749,7 @@ function TelaSubSection({ tela, items, prod, talles, allPiezas, allAjustes, allP
     }).select().single()
     if (!error && nm) {
       const tablaExtra = items.find(i => i.prodEntry.tabla_extra)?.prodEntry.tabla_extra || null
-      await supabase.from('marcadas_sim_productos').insert({ marcada_id: nm.id, producto_id: productoId, tabla_extra: tablaExtra })
+      await supabase.from('marcadas_sim_productos').insert({ marcada_id: nm.id, producto_id: productoId, tabla_extra: tablaExtra, user_id:user?.id })
     }
     setAdding(false); onReload()
   }
@@ -922,8 +927,9 @@ function SinProductosFallback({ marcadas, sessionId, onReload }) {
 
   async function assignProduct(prod) {
     setSaving(true); setRes([]); setQ(prod.nombre)
+    const { data:{ user } } = await supabase.auth.getUser()
     for (const m of marcadas) {
-      await supabase.from('marcadas_sim_productos').insert({ marcada_id: m.id, producto_id: prod.id })
+      await supabase.from('marcadas_sim_productos').insert({ marcada_id: m.id, producto_id: prod.id, user_id:user?.id })
     }
     setSaving(false); onReload()
   }

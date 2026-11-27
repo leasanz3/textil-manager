@@ -145,7 +145,8 @@ function TablaPorPar({ marcadaId, productoId, talles, piezas, pares, ajustes, on
     if (ex) {
       await supabase.from('cortes_piezas').update({ cantidad: v }).eq('id', ex.id)
     } else {
-      const { error } = await supabase.from('cortes_piezas').insert({ marcada_id:marcadaId, producto_id:productoId, pieza_nombre:pieza, talle, cantidad:v })
+      const { data:{ user } } = await supabase.auth.getUser()
+      const { error } = await supabase.from('cortes_piezas').insert({ marcada_id:marcadaId, producto_id:productoId, pieza_nombre:pieza, talle, cantidad:v, user_id:user?.id })
       if (error) { alert('Error guardando: ' + error.message); return }
     }
     onReload()
@@ -301,7 +302,8 @@ function CortePiezasPorPrendaSection({ marcadaId, productoId, catalogPiezas, pie
   const disponibles = (catalogPiezas || []).filter(p => !mineSet.has(p.nombre))
 
   async function addPieza(nombre) {
-    const { error } = await supabase.from('cortes_piezas_req').insert({ marcada_id: marcadaId, producto_id: productoId, pieza_nombre: nombre, cant_prenda: 1 })
+    const { data:{ user } } = await supabase.auth.getUser()
+    const { error } = await supabase.from('cortes_piezas_req').insert({ marcada_id: marcadaId, producto_id: productoId, pieza_nombre: nombre, cant_prenda: 1, user_id:user?.id })
     if (error) { alert('Error: ' + error.message); return }
     onReload()
   }
@@ -391,7 +393,8 @@ function CortePedidoSection({ marcadaId, productoId, talles, pedidoTalles, onRel
         const r = await supabase.from('cortes_pedido_talles').update({ cantidad }).eq('id', ex.id)
         err = r.error
       } else {
-        const r = await supabase.from('cortes_pedido_talles').insert({ marcada_id: marcadaId, producto_id: productoId, talle, cantidad })
+        const { data:{ user } } = await supabase.auth.getUser()
+        const r = await supabase.from('cortes_pedido_talles').insert({ marcada_id: marcadaId, producto_id: productoId, talle, cantidad, user_id:user?.id })
         err = r.error
       }
       if (err) { alert('Error: ' + err.message); return }
@@ -576,11 +579,13 @@ function ModificacionesSection({ marcadaId, productoId, piezas, talles, ajustes,
   async function save() {
     if (!f.cantidad || !f.de_talle || !f.a_talle) return
     setSaving(true)
+    const { data:{ user } } = await supabase.auth.getUser()
     const { error } = await supabase.from('cortes_ajustes').insert({
       marcada_id:marcadaId, producto_id:productoId,
       de_pieza:f.de_pieza||null, a_pieza:f.a_pieza||null,
       de_talle:f.de_talle, a_talle:f.a_talle,
       cantidad:parseInt(f.cantidad)||0,
+      user_id:user?.id,
     })
     setSaving(false)
     if (error) { alert('Error: ' + error.message); return }
@@ -1266,7 +1271,7 @@ function CorteTelaSection({ tela, compra, items, prod, talles: tallesProp, allPi
     }).select().single()
     if (!error && nm) {
       const tela_rol = items[0]?.prodEntry.tela_rol || null
-      await supabase.from('cortes_marcadas_productos').insert({ marcada_id: nm.id, producto_id: productoId, tela_rol })
+      await supabase.from('cortes_marcadas_productos').insert({ marcada_id: nm.id, producto_id: productoId, tela_rol, user_id:user?.id })
     }
     setAdding(false); onReload()
   }
@@ -1388,7 +1393,7 @@ setTelaId(null); setTelaLabel_(''); setTelaQ(''); setTelaRes([])
       fecha: refFecha, metros: 0, pliegues: 1, total_pliegues: 0, user_id: user?.id,
     }).select('id').single()
     if (error) { alert('Error: ' + error.message); setSaving(false); return }
-    await supabase.from('cortes_marcadas_productos').insert({ marcada_id: m.id, producto_id: productoId, tela_rol: rol || null })
+    await supabase.from('cortes_marcadas_productos').insert({ marcada_id: m.id, producto_id: productoId, tela_rol: rol || null, user_id:user?.id })
     setSaving(false); onSave()
   }
 
@@ -1733,7 +1738,8 @@ export default function Corte({ onMenuClick }) {
     const mid = fichaData?.marcadas?.[0]?.id
     if (!mid) return
     if (fichaData.pedidos?.some(x => x.pedido_id === p.id)) { alert('Ya vinculado'); return }
-    await supabase.from('cortes_pedidos').insert({ corte_id:mid, pedido_id:p.id })
+    const { data:{ user } } = await supabase.auth.getUser()
+    await supabase.from('cortes_pedidos').insert({ corte_id:mid, pedido_id:p.id, user_id:user?.id })
     setPedQ(''); setPedRes([]); reloadFicha()
   }
   async function unlinkPedido(id) { await supabase.from('cortes_pedidos').delete().eq('id', id); reloadFicha() }

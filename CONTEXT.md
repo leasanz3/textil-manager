@@ -1,5 +1,5 @@
 # textil-manager — CONTEXT.md
-> Actualizar al final de cada sesión de Claude Code.
+> Actualizar al final de cada sesión de OpenCode.
 
 ## Stack
 - React CRA · Supabase · Vercel
@@ -11,8 +11,11 @@
 ```
 src/
 ├── pages/        # Un archivo por módulo
-├── components/   # Sidebar
+├── components/   # Sidebar + fichas compartidas
 └── lib/          # supabase.js (cliente)
+supabase/
+├── check_rls_cortes.sql   # diagnóstico (solo SELECT)
+└── fix_user_id_cortes.sql # asegura columna user_id en cortes_* y marcadas_sim*
 ```
 
 ## Estética — boringpunk
@@ -66,13 +69,22 @@ cortes_piezas          — piezas por marcada
 cortes_ajustes         — modificaciones de pieza/talle
 cortes_pedidos         — vínculo corte → pedido
 cortes_marcadas_productos — vínculo marcada → producto
+cortes_piezas_req      — piezas por prenda requeridas en marcada
+cortes_pedido_talles   — talles del pedido por marcada
+marcadas_sim           — marcadas del simulador
+marcadas_sim_productos — vínculo marcada simulada → producto
+marcadas_sim_piezas    — piezas por marcada simulada
+marcadas_sim_ajustes   — ajustes de marcada simulada
+marcadas_sim_piezas_req — piezas por prenda en simulador
+marcadas_sim_pedido    — talles del pedido en simulador
 conocimiento_paginas   — base de conocimiento (pendiente)
 ```
 
 ## RLS
 - Patrón que funciona: dos políticas ALL por tabla (public + authenticated)
 - `user_id` debe enviarse explícitamente en cada insert
-- **BUG ACTIVO**: insert en `cortes_marcadas` no envía `user_id` → RLS rechaza
+- RESUELTO: inserts de `cortes_marcadas` envían `user_id` (commit 960a9ae)
+- RESUELTO: regresión en tablas hijas de `cortes_*` / `marcadas_sim*` corregida; ejecutar `supabase/fix_user_id_cortes.sql` una vez en SQL Editor
 
 ---
 
@@ -97,7 +109,7 @@ recibido → presupuestado → confirmado → compra_tela → corte → taller �
 
 ### Corte
 - Sesiones por producto, telas, marcadas, piezas, ajustes
-- **Bug crítico**: insert `cortes_marcadas` no envía `user_id`
+- `user_id` enviado en todos los inserts (Corte, FichaCorteCompleta, MarcadaSim, Producción)
 - Pendiente: múltiples productos/marcada, hoja A4 imprimible, resultado vs pedido
 
 ### Producción
@@ -122,10 +134,9 @@ recibido → presupuestado → confirmado → compra_tela → corte → taller �
 ---
 
 ## Bugs activos
-1. `cortes_marcadas` insert sin `user_id` → RLS rechaza ⚠️ CRÍTICO
-2. Chips talles en Pedidos sin orden canónico
-3. Selector pedido en Diario muestra #id en vez de cliente+productos
-4. Diario mobile: falta hamburguesa + colapso 3 cols → 1
+1. Chips talles en Pedidos sin orden canónico
+2. Selector pedido en Diario muestra #id en vez de cliente+productos
+3. Diario mobile: falta hamburguesa + colapso 3 cols → 1
 
 ## Pendientes generales
 - Ordenar columnas en Pedidos (click en header)
@@ -158,8 +169,10 @@ recibido → presupuestado → confirmado → compra_tela → corte → taller �
 ---
 
 ## Workflow
-1. Diseñar feature en claude.ai (TM-04)
-2. Ejecutar en Claude Code con este contexto
-3. `git add . && git commit -m "descripción" && git push origin main`
-4. Vercel auto-deploya en textil-manager.vercel.app
-5. Actualizar este archivo si hay cambios de estructura
+1. Diseñar feature en claude.ai (TM-04) o directamente en OpenCode
+2. Ejecutar en OpenCode con este contexto (agente Plan para analizar, Build para escribir)
+3. Cambios de DB: pegar el `.sql` generado en Supabase → SQL Editor
+4. `npm run build` antes de cerrar
+5. `git add . && git commit -m "descripción" && git push origin main` (lo hace el usuario; OpenCode no commitea salvo pedido explícito)
+6. Vercel auto-deploya en textil-manager.vercel.app
+7. Actualizar este archivo al final de cada sesión

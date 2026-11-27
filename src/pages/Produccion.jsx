@@ -1131,9 +1131,11 @@ function Asistente({ pedido, etapaId, contactos, lotes, onClose, onSaved, onAvan
   }
 
   async function vincularCorte(marcada) {
+    const { data:{ user } } = await supabase.auth.getUser()
     const { error } = await supabase.from('cortes_pedidos').insert({
       corte_id: marcada.id,
       pedido_id: pedido.id,
+      user_id: user?.id,
     })
     if (error) { alert('Error al vincular: ' + error.message); return }
     await cargarCortesVinc()

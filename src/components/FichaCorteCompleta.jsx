@@ -82,10 +82,11 @@ export default function FichaCorteCompleta({ corte, onClose, onDeleted }) {
 
   async function savePiezas(map) {
     setSaving(true)
+    const { data:{ user } } = await supabase.auth.getUser()
     const rows = []
     Object.entries(map).forEach(([pieza_nombre, tallesObj]) => {
       Object.entries(tallesObj).forEach(([talle, cantidad]) => {
-        if (cantidad > 0) rows.push({ marcada_id: corte.id, pieza_nombre, talle, cantidad })
+        if (cantidad > 0) rows.push({ marcada_id: corte.id, pieza_nombre, talle, cantidad, user_id:user?.id })
       })
     })
     await supabase.from('cortes_piezas').delete().eq('marcada_id', corte.id)
@@ -132,11 +133,13 @@ export default function FichaCorteCompleta({ corte, onClose, onDeleted }) {
     await savePiezas(updated)
 
     // Log en cortes_ajustes
+    const { data:{ user } } = await supabase.auth.getUser()
     await supabase.from('cortes_ajustes').insert({
       marcada_id: corte.id,
       de_talle:   modalAchicar,
       cantidad:   cant,
       a_talle:    achATalle,
+      user_id:    user?.id,
     })
 
     setSavingAch(false)
@@ -181,7 +184,8 @@ export default function FichaCorteCompleta({ corte, onClose, onDeleted }) {
   }
 
   async function vincularPedido(pedido) {
-    await supabase.from('cortes_pedidos').insert({ corte_id: corte.id, pedido_id: pedido.id, piezas_asignadas: {} })
+    const { data:{ user } } = await supabase.auth.getUser()
+    await supabase.from('cortes_pedidos').insert({ corte_id: corte.id, pedido_id: pedido.id, piezas_asignadas: {}, user_id:user?.id })
     setPedidoQuery('')
     setPedidoResults([])
     setModalPedido(false)
